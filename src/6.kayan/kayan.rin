@@ -1,0 +1,566 @@
+// 6. kayan
+//
+// Everything so far, in one small game. A turret at the centre shoots at wings
+// of drones flying in from the edges. Bullets hurt drones, a badly hurt drone
+// catches fire, and a drone at zero health is destroyed in a blast that hurts
+// and ignites the drones around it. A drone that reaches the turret is a leak.
+//
+// The new idea is when structural changes happen. Spawning, despawning, adding
+// and removing components all change tables, and systems are in the middle of
+// walking tables when they decide to make those changes:
+//
+//   * a despawn swap-removes: the last row moves into the hole, behind the
+//     loop, so that entity is not processed this frame, while a slice cut
+//     before the despawn still reaches the old last row, a stale copy whose
+//     writes are lost;
+//   * a spawn can grow a table, which moves every column of it to new memory,
+//     while the system still holds a slice of the old one;
+//   * an add or a remove moves an entity into another table, which the same
+//     query may walk later, so the entity is visited twice.
+//
+// So systems do not make structural changes. They record them in a command
+// buffer, and the frame applies the buffer once every system has run. Plain
+// writes to components are fine during a query: a hit lowers a drone's health
+// in place. Only changes to which table an entity is in wait for the end of
+// the frame.
+//
+// The buffer lives in a frame arena. Commands and their payloads are pushed
+// into it during the frame and the whole arena is cleared after it is applied,
+// so nothing in it is freed one at a time. A command against an entity that
+// died earlier in the same buffer is skipped, which the handle's generation
+// check makes cheap to detect.
+
+cinclude "math.h"
+import "../../includes/kayan.rin"
+
+sqrtf: proc[external](x: f32) -> f32 = {}
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+component: enum = {
+    position,
+    velocity,
+    health,
+    damage,
+    lifetime,
+    turret,
+    burning,
+}
+
+position: struct = { at: vec2; }
+velocity: struct = { per_second: vec2; }
+health: struct = { points: f32; }
+damage: struct = { amount: f32; }
+lifetime: struct = { seconds: f32; }
+turret: struct = { cooldown: f32; timer: f32; }
+burning: struct = { per_second: f32; }
+
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<velocity>() -> component = { return component.velocity; }
+component_of: proc<health>() -> component = { return component.health; }
+component_of: proc<damage>() -> component = { return component.damage; }
+component_of: proc<lifetime>() -> component = { return component.lifetime; }
+component_of: proc<turret>() -> component = { return component.turret; }
+component_of: proc<burning>() -> component = { return component.burning; }
+
+register_components: proc(w: *kayan_world) -> void = {
+    kayan_register(w, kayan_id_of<position>(), position<>&);
+    kayan_register(w, kayan_id_of<velocity>(), velocity<>&);
+    kayan_register(w, kayan_id_of<health>(), health<>&);
+    kayan_register(w, kayan_id_of<damage>(), damage<>&);
+    kayan_register(w, kayan_id_of<lifetime>(), lifetime<>&);
+    kayan_register(w, kayan_id_of<turret>(), turret<>&);
+    kayan_register(w, kayan_id_of<burning>(), burning<>&);
+}
+
+// ---------------------------------------------------------------------------
+// The command buffer
+// ---------------------------------------------------------------------------
+
+command_kind: enum = {
+    spawn,
+    set_spawned,
+    add,
+    remove,
+    despawn,
+}
+
+// One recorded change. `pending` names an entity spawned by this same buffer,
+// which has no handle until the buffer is applied.
+command: struct = {
+    kind: command_kind;
+    entity: kayan_entity;
+    pending: u32;
+    signature: u64;
+    id: u32;
+    payload: []u8;
+}
+
+commands: struct = {
+    frame: memops_arena;
+    list: vec<command>;
+    spawned: u32;
+}
+
+apply_result: struct = {
+    applied: u32;
+    skipped: u32;
+}
+
+commands_init: proc(c: *commands) -> void = {
+    c[0] = {};
+    memops_arena_initialize(c[0].frame&);
+}
+
+commands_record: proc(c: *commands, cmd: command) -> void = {
+    vec<command>append(c[0].frame&, c[0].list&, cmd);
+}
+
+// A copy of `value` in the frame arena, kept until the buffer is applied, as
+// the bytes the component's column will receive.
+commands_payload: proc<T>(c: *commands, value: T) -> []u8 = {
+    copy: *T = cast(memops_arena_push(c[0].frame&, sizeof(T), alignof(T)), *T);
+    copy[0] = value;
+    bytes: [*]u8 = cast(copy, [*]u8);
+    return bytes[0..sizeof(T)];
+}
+
+commands_spawn: proc(c: *commands, signature: u64) -> u32 = {
+    cmd: command = { .kind = command_kind.spawn, .signature = signature, .pending = c[0].spawned };
+    c[0].spawned += 1;
+    commands_record(c, cmd);
+    return cmd.pending;
+}
+
+// T must be in the pending spawn's signature: the spawn decides the table.
+commands_set_spawned: proc<T>(c: *commands, pending: u32, value: T) -> void = {
+    commands_record(c, { .kind = command_kind.set_spawned, .pending = pending,
+        .id = kayan_id_of<T>(), .payload = commands_payload<T>(c, value) });
+}
+
+commands_add: proc<T>(c: *commands, e: kayan_entity, value: T) -> void = {
+    commands_record(c, { .kind = command_kind.add, .entity = e,
+        .id = kayan_id_of<T>(), .payload = commands_payload<T>(c, value) });
+}
+
+commands_remove: proc<T>(c: *commands, e: kayan_entity) -> void = {
+    commands_record(c, { .kind = command_kind.remove, .entity = e, .id = kayan_id_of<T>() });
+}
+
+commands_despawn: proc(c: *commands, e: kayan_entity) -> void = {
+    commands_record(c, { .kind = command_kind.despawn, .entity = e });
+}
+
+// Copy a payload into e's component. Returns 0 if e has no such component.
+write_component: proc(w: *kayan_world, e: kayan_entity, id: u32, payload: []const u8) -> b32 = {
+    target: []u8 = kayan_get_bytes(w, e, id);
+    if (target.length == 0) {
+        return 0;
+    }
+    memcpy(target[0]&, payload[0]&, target.length);
+    return 1;
+}
+
+// Every command, in the order it was recorded. Then the frame arena is cleared,
+// which frees every command and payload at once.
+commands_apply: proc(c: *commands, w: *kayan_world) -> apply_result = {
+    result: apply_result = {};
+    spawned_raw: [*]kayan_entity = cast(memops_arena_push_zero(c[0].frame&,
+        sizeof(kayan_entity) * cast(c[0].spawned, u64), alignof(kayan_entity)), [*]kayan_entity);
+    spawned: []kayan_entity = spawned_raw[0..cast(c[0].spawned, u64)];
+    list: []command = vec<command>items(c[0].list&);
+    for (i: u64 = 0; i < list.length; i += 1) {
+        cmd: command = list[i];
+        switch (cmd.kind) {
+            case command_kind.spawn: {
+                spawned[cmd.pending] = kayan_spawn(w, cmd.signature);
+                result.applied += 1;
+            }
+            case command_kind.set_spawned: {
+                if (!write_component(w, spawned[cmd.pending], cmd.id, cmd.payload)) {
+                    printfmt("set_spawned: spawn {} has no {} in its signature\n", cmd.pending,
+                        kayan_component_name(w, cmd.id));
+                    exit(1);
+                }
+                result.applied += 1;
+            }
+            case command_kind.add: {
+                signature: u64 = kayan_signature(w, cmd.entity) | kayan_bit(cmd.id);
+                if (kayan_move(w, cmd.entity, signature) == kayan_status.ok) {
+                    _ = write_component(w, cmd.entity, cmd.id, cmd.payload);
+                    result.applied += 1;
+                } else {
+                    result.skipped += 1;
+                }
+            }
+            case command_kind.remove: {
+                signature: u64 = kayan_signature(w, cmd.entity) & ~kayan_bit(cmd.id);
+                if (kayan_move(w, cmd.entity, signature) == kayan_status.ok) {
+                    result.applied += 1;
+                } else {
+                    result.skipped += 1;
+                }
+            }
+            case command_kind.despawn: {
+                if (kayan_despawn(w, cmd.entity) == kayan_status.ok) {
+                    result.applied += 1;
+                } else {
+                    result.skipped += 1;
+                }
+            }
+        }
+    }
+    memops_arena_clear(c[0].frame&);
+    c[0].list = {};
+    c[0].spawned = 0;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// The game
+// ---------------------------------------------------------------------------
+
+stats: struct = {
+    waves: u32;
+    drones: u32;
+    destroyed: u32;
+    leaked: u32;
+    shots: u32;
+    hits: u32;
+    misses: u32;
+}
+
+game: struct = {
+    world: kayan_world;
+    commands: commands;
+    stats: stats;
+    frame: i32;
+    printed_frame: i32;
+}
+
+drone_mask: proc() -> u64 = {
+    return kayan_mask_of<position>() | kayan_mask_of<velocity>() | kayan_mask_of<health>();
+}
+
+bullet_mask: proc() -> u64 = {
+    return kayan_mask_of<position>() | kayan_mask_of<velocity>() | kayan_mask_of<damage>()
+        | kayan_mask_of<lifetime>();
+}
+
+// Each frame's events are printed under one "frame N" line.
+event: proc(g: *game) -> void = {
+    if (g[0].printed_frame != g[0].frame) {
+        printfmt("frame {}\n", g[0].frame);
+        g[0].printed_frame = g[0].frame;
+    }
+    printf("    ");
+}
+
+distance: proc(a: vec2, b: vec2) -> f32 = {
+    dx: f32 = a.x - b.x;
+    dy: f32 = a.y - b.y;
+    return sqrtf(dx * dx + dy * dy);
+}
+
+toward: proc(from: vec2, to: vec2, speed: f32) -> vec2 = {
+    d: f32 = distance(from, to);
+    return { .x = (to.x - from.x) / d * speed, .y = (to.y - from.y) / d * speed };
+}
+
+// Drones come in wings of three, side by side, from each side in turn.
+entry_points: [4]vec2 = {
+    { .x = 20.0, .y = 0.0 }, { .x = 0.0, .y = -20.0 }, { .x = -20.0, .y = 0.0 }, { .x = 0.0, .y = 20.0 },
+};
+wave_every: i32 = 20;
+waves: u32 = 5;
+drone_speed: f32 = 2.0;
+
+spawner_system: proc(g: *game) -> void = {
+    if ((g[0].frame - 1) % wave_every != 0 || g[0].stats.waves == waves) {
+        return;
+    }
+    centre: vec2 = entry_points[g[0].stats.waves % 4];
+    heading: vec2 = toward(centre, { .x = 0.0, .y = 0.0 }, 1.0);
+    c: *commands = g[0].commands&;
+    for (k: i32 = -1; k <= 1; k += 1) {
+        // Side by side: 2 units apart, across the direction of flight.
+        side: f32 = 2.0 * cast(k, f32);
+        at: vec2 = { .x = centre.x - heading.y * side, .y = centre.y + heading.x * side };
+        drone: u32 = commands_spawn(c, drone_mask());
+        commands_set_spawned<position>(c, drone, { .at = at });
+        commands_set_spawned<velocity>(c, drone,
+            { .per_second = toward(at, { .x = 0.0, .y = 0.0 }, drone_speed) });
+        commands_set_spawned<health>(c, drone, { .points = 100.0 });
+        g[0].stats.drones += 1;
+    }
+    g[0].stats.waves += 1;
+    event(g);
+    printf("a wing of three drones enters at (%.1f, %.1f)\n", cast(centre.x, f64), cast(centre.y, f64));
+}
+
+// The nearest drone to `from`, by walking every table a drone can be in.
+nearest_drone: proc(w: *kayan_world, from: vec2, found: *vec2) -> b32 = {
+    q: kayan_query = { .all = drone_mask() };
+    best: f32 = 1000000.0;
+    any: b32 = 0;
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ps: []position = kayan_column<position>(t);
+        for (i: u64 = 0; i < ps.length; i += 1) {
+            d: f32 = distance(from, ps[i].at);
+            if (d < best) {
+                best = d;
+                found[0] = ps[i].at;
+                any = 1;
+            }
+        }
+    }
+    return any;
+}
+
+turret_system: proc(g: *game, dt: f32) -> void = {
+    w: *kayan_world = g[0].world&;
+    q: kayan_query = { .all = kayan_mask_of<position>() | kayan_mask_of<turret>() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ps: []position = kayan_column<position>(t);
+        ts: []turret = kayan_column<turret>(t);
+        for (i: u64 = 0; i < ts.length; i += 1) {
+            // The timer stops at zero, so an idle turret is ready to fire but
+            // does not save up shots.
+            ts[i].timer -= dt;
+            if (ts[i].timer < 0.0) {
+                ts[i].timer = 0.0;
+            }
+            target: vec2 = {};
+            if (ts[i].timer > 0.0 || !nearest_drone(w, ps[i].at, target&)) {
+                continue;
+            }
+            ts[i].timer += ts[i].cooldown;
+            c: *commands = g[0].commands&;
+            bullet: u32 = commands_spawn(c, bullet_mask());
+            commands_set_spawned<position>(c, bullet, ps[i]);
+            commands_set_spawned<velocity>(c, bullet, { .per_second = toward(ps[i].at, target, 12.0) });
+            commands_set_spawned<damage>(c, bullet, { .amount = 30.0 });
+            commands_set_spawned<lifetime>(c, bullet, { .seconds = 2.0 });
+            g[0].stats.shots += 1;
+        }
+    }
+}
+
+movement_system: proc(w: *kayan_world, dt: f32) -> void = {
+    q: kayan_query = { .all = kayan_mask_of<position>() | kayan_mask_of<velocity>() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ps: []position = kayan_column<position>(t);
+        vs: []velocity = kayan_column<velocity>(t);
+        for (i: u64 = 0; i < ps.length; i += 1) {
+            ps[i].at.x += vs[i].per_second.x * dt;
+            ps[i].at.y += vs[i].per_second.y * dt;
+        }
+    }
+}
+
+// Every bullet against every drone. A hit lowers health in place, which is not
+// a structural change; removing the bullet and setting the drone on fire are.
+// A bullet that expired this frame is skipped: lifetime_system has already
+// recorded its despawn, and it is only still here because nothing structural
+// happens until the end of the frame.
+collision_system: proc(g: *game) -> void = {
+    w: *kayan_world = g[0].world&;
+    bullets: kayan_query = { .all = bullet_mask() };
+    drones: kayan_query = { .all = drone_mask() };
+    for (bi: u64 = 0; bi < w[0].tables.length; bi += 1) {
+        bt: *kayan_table = vec<kayan_table>at(w[0].tables&, bi);
+        if (!kayan_matches(bt, bullets)) {
+            continue;
+        }
+        bullet_at: []position = kayan_column<position>(bt);
+        bullet_damage: []damage = kayan_column<damage>(bt);
+        bullet_life: []lifetime = kayan_column<lifetime>(bt);
+        bullet_ids: []kayan_entity = kayan_table_entities(bt);
+        for (b: u64 = 0; b < bullet_at.length; b += 1) {
+            if (bullet_life[b].seconds <= 0.0) {
+                continue;
+            }
+            hit: b32 = 0;
+            for (di: u64 = 0; di < w[0].tables.length && !hit; di += 1) {
+                drone_table: *kayan_table = vec<kayan_table>at(w[0].tables&, di);
+                if (!kayan_matches(drone_table, drones)) {
+                    continue;
+                }
+                drone_at: []position = kayan_column<position>(drone_table);
+                drone_health: []health = kayan_column<health>(drone_table);
+                drone_ids: []kayan_entity = kayan_table_entities(drone_table);
+                for (d: u64 = 0; d < drone_at.length && !hit; d += 1) {
+                    if (distance(bullet_at[b].at, drone_at[d].at) > 1.0 || drone_health[d].points <= 0.0) {
+                        continue;
+                    }
+                    hit = 1;
+                    before: f32 = drone_health[d].points;
+                    drone_health[d].points -= bullet_damage[b].amount;
+                    g[0].stats.hits += 1;
+                    commands_despawn(g[0].commands&, bullet_ids[b]);
+                    event(g);
+                    printf("bullet %u:%u hits drone %u:%u, health %.1f\n", bullet_ids[b].index,
+                        bullet_ids[b].generation, drone_ids[d].index, drone_ids[d].generation,
+                        cast(drone_health[d].points, f64));
+                    if (before >= 50.0 && drone_health[d].points < 50.0
+                        && (drone_table[0].signature & kayan_mask_of<burning>()) == 0) {
+                        commands_add<burning>(g[0].commands&, drone_ids[d], { .per_second = 8.0 });
+                        event(g);
+                        printf("drone %u:%u catches fire\n", drone_ids[d].index, drone_ids[d].generation);
+                    }
+                }
+            }
+        }
+    }
+}
+
+burning_system: proc(w: *kayan_world, dt: f32) -> void = {
+    q: kayan_query = { .all = kayan_mask_of<health>() | kayan_mask_of<burning>() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        hs: []health = kayan_column<health>(t);
+        bs: []burning = kayan_column<burning>(t);
+        for (i: u64 = 0; i < hs.length; i += 1) {
+            hs[i].points -= bs[i].per_second * dt;
+        }
+    }
+}
+
+// A destroyed drone's blast hurts every drone near it and sets it on fire.
+// Lowering health is a plain write, so a blast can finish off a neighbour later
+// in the same loop, and that neighbour's blast reaches back to the drone that
+// started it. That drone's despawn is only recorded, so it is still in its
+// table and gets an add<burning> too. By the time the buffer is applied it is
+// gone, and commands_apply skips the add.
+blast_system: proc(g: *game, from: kayan_entity, at: vec2) -> void = {
+    w: *kayan_world = g[0].world&;
+    q: kayan_query = { .all = drone_mask() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ps: []position = kayan_column<position>(t);
+        hs: []health = kayan_column<health>(t);
+        ids: []kayan_entity = kayan_table_entities(t);
+        for (i: u64 = 0; i < ps.length; i += 1) {
+            if (ids[i].index != from.index && distance(ps[i].at, at) < 4.0) {
+                hs[i].points -= 40.0;
+                commands_add<burning>(g[0].commands&, ids[i], { .per_second = 8.0 });
+                event(g);
+                printf("drone %u:%u is caught in the blast, health %.1f\n", ids[i].index,
+                    ids[i].generation, cast(hs[i].points, f64));
+            }
+        }
+    }
+}
+
+// Drones at zero health are destroyed; drones that reach the turret leak.
+outcome_system: proc(g: *game) -> void = {
+    w: *kayan_world = g[0].world&;
+    q: kayan_query = { .all = drone_mask() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ps: []position = kayan_column<position>(t);
+        hs: []health = kayan_column<health>(t);
+        ids: []kayan_entity = kayan_table_entities(t);
+        for (i: u64 = 0; i < hs.length; i += 1) {
+            if (hs[i].points <= 0.0) {
+                commands_despawn(g[0].commands&, ids[i]);
+                g[0].stats.destroyed += 1;
+                event(g);
+                printf("drone %u:%u is destroyed\n", ids[i].index, ids[i].generation);
+                blast_system(g, ids[i], ps[i].at);
+            } else if (distance(ps[i].at, { .x = 0.0, .y = 0.0 }) < 1.5) {
+                commands_despawn(g[0].commands&, ids[i]);
+                g[0].stats.leaked += 1;
+                event(g);
+                printf("drone %u:%u reaches the turret with %.1f health\n", ids[i].index,
+                    ids[i].generation, cast(hs[i].points, f64));
+            }
+        }
+    }
+}
+
+lifetime_system: proc(g: *game, dt: f32) -> void = {
+    w: *kayan_world = g[0].world&;
+    q: kayan_query = { .all = kayan_mask_of<lifetime>() };
+    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
+        if (!kayan_matches(t, q)) {
+            continue;
+        }
+        ls: []lifetime = kayan_column<lifetime>(t);
+        ids: []kayan_entity = kayan_table_entities(t);
+        for (i: u64 = 0; i < ls.length; i += 1) {
+            ls[i].seconds -= dt;
+            if (ls[i].seconds <= 0.0) {
+                commands_despawn(g[0].commands&, ids[i]);
+                g[0].stats.misses += 1;
+            }
+        }
+    }
+}
+
+main: proc() -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    g: game = {};
+    kayan_world_init(g.world&, arena&);
+    register_components(g.world&);
+    commands_init(g.commands&);
+
+    tower: kayan_entity = kayan_spawn(g.world&, kayan_mask_of<position>() | kayan_mask_of<turret>());
+    kayan_get<turret>(g.world&, tower)[0] = { .cooldown = 0.6, .timer = 0.6 };
+
+    dt: f32 = 0.1;
+    skipped: u32 = 0;
+    frames: i32 = 140;
+    for (frame: i32 = 1; frame <= frames; frame += 1) {
+        g.frame = frame;
+        spawner_system(g&);
+        turret_system(g&, dt);
+        movement_system(g.world&, dt);
+        lifetime_system(g&, dt);
+        collision_system(g&);
+        burning_system(g.world&, dt);
+        outcome_system(g&);
+        result: apply_result = commands_apply(g.commands&, g.world&);
+        skipped += result.skipped;
+    }
+
+    printfmt("after {} frames\n", frames);
+    printfmt("    drones: {} entered, {} destroyed, {} leaked\n",
+        g.stats.drones, g.stats.destroyed, g.stats.leaked);
+    printfmt("    bullets: {} fired, {} hit, {} expired\n", g.stats.shots, g.stats.hits, g.stats.misses);
+    printfmt("    commands skipped because their entity was already gone: {}\n", skipped);
+    printfmt("    {} entities alive in {} tables\n", g.world.live, g.world.tables.length);
+    for (ti: u64 = 0; ti < g.world.tables.length; ti += 1) {
+        t: *kayan_table = vec<kayan_table>at(g.world.tables&, ti);
+        printf("    table %d ", cast(ti, i32));
+        kayan_print_signature(g.world&, t[0].signature);
+        printf(", rows in use: %d\n", cast(t[0].count, i32));
+    }
+    return 0;
+}

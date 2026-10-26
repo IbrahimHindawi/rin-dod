@@ -1,0 +1,57 @@
+soldier (0:1)
+    position
+        at:
+            x: 3.00
+            y: 4.00
+        heading: 90.00
+    health
+        points: 80.00
+        max: 100.00
+    team
+        side: blue
+    weapon
+        damage: 12.50
+        cooldown: 0.25
+        ammo: 30
+    label
+        text: "soldier"
+crate (1:1)
+    position
+        at:
+            x: -1.00
+            y: 0.50
+        heading: 0.00
+    label
+        text: "crate"
+
+the editor writes three fields by name
+    soldier health.points = 55: written
+    soldier weapon.ammo = 1: refused, ammo is a u32, not an f32
+    crate health.points = 1: refused, the crate has no health
+soldier (0:1)
+    position
+        at:
+            x: 3.00
+            y: 4.00
+        heading: 90.00
+    health
+        points: 55.00
+        max: 100.00
+    team
+        side: blue
+    weapon
+        damage: 12.50
+        cooldown: 0.25
+        ammo: 30
+    label
+        text: "soldier"
+
+table 0 {position health team weapon label}, rows in use: 1 of 16
+    position 12 bytes, align 4, column 12 of 192 bytes
+    health   12 bytes, align 4, column 12 of 192 bytes
+    team      4 bytes, align 4, column 4 of 64 bytes
+    weapon   12 bytes, align 4, column 12 of 192 bytes
+    label    16 bytes, align 1, column 16 of 256 bytes
+table 1 {position label}, rows in use: 1 of 16
+    position 12 bytes, align 4, column 12 of 192 bytes
+    label    16 bytes, align 1, column 16 of 256 bytes

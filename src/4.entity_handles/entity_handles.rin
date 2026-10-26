@@ -1,0 +1,152 @@
+// 4. Entity handles
+//
+// Lesson 2 ended on a problem: swap-remove keeps a table packed, but it moves
+// rows, so "spark 7 is row 7" stops being true the moment something before it
+// dies. Anything that remembers an entity by its row (a target, a parent, a UI
+// selection) ends up pointing at whoever moved in.
+//
+// The fix is one level of indirection that does not move:
+//
+//   * A handle is {index, generation}. The index picks a slot in the world's
+//     slot list; the slot says which table and row the entity is in now.
+//   * Every table keeps an `entities` column: the handle that owns each row.
+//     When a swap-remove moves the last row, that column says whose slot to
+//     update. That is the line lesson 2 could not write.
+//   * Despawning bumps the slot's generation and puts the index on a free list.
+//     The next spawn reuses the index with the new generation, so every old
+//     handle to the dead entity fails the generation check instead of quietly
+//     finding the newcomer. Generations start at 1, so a zeroed handle is never
+//     alive and can mean "no entity".
+//
+// The same slot is what lets an entity change archetype. Adding a component
+// moves the entity to the table with one more bit: a row is appended there,
+// the components both tables share are copied, and the old row is
+// swap-removed. Removing a component is the same move the other way. kayan had
+// no way to do either: its entity id was a running count, and nothing recorded
+// where an entity lived.
+//
+// The world itself is in includes/kayan.rin, which lessons 5 and 6 use as it
+// is. This program walks through what it does and prints each step.
+
+import "../../includes/kayan.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+component: enum = {
+    position,
+    velocity,
+    health,
+}
+
+position: struct = { at: vec2; }
+velocity: struct = { per_second: vec2; }
+health: struct = { points: f32; }
+
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<velocity>() -> component = { return component.velocity; }
+component_of: proc<health>() -> component = { return component.health; }
+
+register_components: proc(w: *kayan_world) -> void = {
+    kayan_register(w, kayan_id_of<position>(), position<>&);
+    kayan_register(w, kayan_id_of<velocity>(), velocity<>&);
+    kayan_register(w, kayan_id_of<health>(), health<>&);
+}
+
+print_entity: proc(w: *kayan_world, name: [*]const c8, e: kayan_entity) -> void = {
+    printf("    %s = %u:%u", name, e.index, e.generation);
+    if (!kayan_alive(w, e)) {
+        printf(" is dead\n");
+        return;
+    }
+    slot: *kayan_slot = vec<kayan_slot>at(w[0].slots&, cast(e.index, u64));
+    printf(" in table %u row %u ", slot[0].table, slot[0].row);
+    kayan_print_signature(w, kayan_signature(w, e));
+    p: *position = kayan_get<position>(w, e);
+    if (p != null) {
+        printf(" at (%.1f, %.1f)", cast(p[0].at.x, f64), cast(p[0].at.y, f64));
+    }
+    h: *health = kayan_get<health>(w, e);
+    if (h != null) {
+        printf(" health %.0f", cast(h[0].points, f64));
+    }
+    printf("\n");
+}
+
+spawn_mover: proc(w: *kayan_world, x: f32) -> kayan_entity = {
+    e: kayan_entity = kayan_spawn(w, kayan_mask_of<position>() | kayan_mask_of<velocity>());
+    kayan_get<position>(w, e)[0] = { .at = { .x = x, .y = 0.0 } };
+    kayan_get<velocity>(w, e)[0] = { .per_second = { .x = 0.0, .y = 1.0 } };
+    return e;
+}
+
+main: proc() -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    world: kayan_world = {};
+    kayan_world_init(world&, arena&);
+    register_components(world&);
+
+    printfmt("spawn a, b, c\n");
+    a: kayan_entity = spawn_mover(world&, 1.0);
+    b: kayan_entity = spawn_mover(world&, 2.0);
+    c: kayan_entity = spawn_mover(world&, 3.0);
+    print_entity(world&, "a", a);
+    print_entity(world&, "b", b);
+    print_entity(world&, "c", c);
+
+    printfmt("despawn a: c is swapped into a's row, and its slot follows\n");
+    despawned: kayan_status = kayan_despawn(world&, a);
+    printfmt("    despawn returned {}\n", despawned);
+    print_entity(world&, "a", a);
+    print_entity(world&, "c", c);
+
+    printfmt("spawn d: it reuses a's index with the next generation\n");
+    d: kayan_entity = spawn_mover(world&, 4.0);
+    print_entity(world&, "d", d);
+    print_entity(world&, "a", a);
+    printfmt("    a's position through the old handle is {}\n",
+        kayan_get<position>(world&, a) == null ? "null" : "found (a bug)");
+    printfmt("    despawning a again returns {}\n", kayan_despawn(world&, a));
+    nobody: kayan_entity = {};
+    printfmt("    a zeroed handle {}:{} is {}\n", nobody.index, nobody.generation,
+        kayan_alive(world&, nobody) ? "alive (a bug)" : "dead");
+
+    printfmt("give b health: b moves to a new table and keeps its position\n");
+    _ = kayan_add<health>(world&, b, { .points = 75.0 });
+    print_entity(world&, "b", b);
+    print_entity(world&, "d", d);
+
+    printfmt("take b's velocity: another move\n");
+    _ = kayan_remove<velocity>(world&, b);
+    print_entity(world&, "b", b);
+
+    printfmt("the tables, with the handles in each row\n");
+    kayan_print_tables(world&);
+
+    // Enough spawns to make a table grow past its first 16 rows. Then two
+    // checks: every survivor still reads its own position, and kayan_verify
+    // finds every row's owner and every owner's slot in agreement.
+    printfmt("spawn 40 more\n");
+    many: [40]kayan_entity = {};
+    for (i: u64 = 0; i < 40; i += 1) {
+        many[i] = spawn_mover(world&, cast(i, f32));
+    }
+    for (i: u64 = 0; i < 40; i += 2) {
+        _ = kayan_despawn(world&, many[i]);
+    }
+    wrong: u32 = 0;
+    for (i: u64 = 1; i < 40; i += 2) {
+        p: *position = kayan_get<position>(world&, many[i]);
+        if (p == null || p[0].at.x != cast(i, f32)) {
+            wrong += 1;
+        }
+    }
+    problems: u64 = kayan_verify(world&);
+    printfmt("    despawned every other one; {} of the 20 left read their own position\n", 20 - wrong);
+    printfmt("    kayan_verify: {} problems\n", problems);
+    printfmt("    {} entities alive, {} tables\n", world.live, world.tables.length);
+    return wrong == 0 && problems == 0 ? 0 : 1;
+}

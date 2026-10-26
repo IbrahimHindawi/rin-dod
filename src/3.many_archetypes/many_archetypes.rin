@@ -1,0 +1,268 @@
+// 3. Many archetypes
+//
+// A game has more than one combination of components. Rocks only have a
+// position. Ships move and can be hurt. Bullets move and hurt. Turrets stand
+// still, can be hurt and hurt back. Each combination is a table of its own, and
+// a system has to visit every table that has the columns it needs.
+//
+// kayan wrote a C struct per archetype, gave each a hand-set signature, and at
+// query time looked each column up by name in a string map. Here one table type
+// serves every archetype:
+//
+//   * A component is a member of the `component` enum, so its id is a small
+//     integer, and a set of components fits in a u64 mask, one bit each.
+//   * A table's columns are `[component<>.count][*]u8`, indexed by component id
+//     and null where the table has no such column. Finding a column is an array
+//     index, not a string lookup.
+//   * A column's element size comes from reflection: `component_info[id]` is the
+//     component type's reflect record, `position<>&` and so on.
+//   * A table's signature is computed from the components it is created with,
+//     so the signature cannot disagree with the columns. In kayan it could, and
+//     it did: archetype D held positions and velocities, its signature left them
+//     out, and the movement query skipped it.
+//
+// A query is two masks: a table matches when it has every component in `all`
+// and none in `none`. Typed access comes back through generics: `column<T>`
+// asks `component_of<T>()` which id T has, one line per component type, and
+// returns that column as a []T cut to the rows in use.
+
+import "std/print.rin"
+import "std/memops.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// The components. Each enum member is named after its type, so the program can
+// check at startup that this list and `component_info` agree. There is no
+// `count` member: `component<>.count` is the number of members, from reflection.
+component: enum = {
+    position,
+    velocity,
+    health,
+    damage,
+}
+
+position: struct = { at: vec2; }
+velocity: struct = { per_second: vec2; }
+health: struct = { points: f32; max: f32; }
+damage: struct = { per_hit: f32; }
+
+component_info: [component<>.count]*const reflect = {
+    position<>&,
+    velocity<>&,
+    health<>&,
+    damage<>&,
+};
+
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<velocity>() -> component = { return component.velocity; }
+component_of: proc<health>() -> component = { return component.health; }
+component_of: proc<damage>() -> component = { return component.damage; }
+
+bit: proc(c: component) -> u64 = {
+    return 1'u64 shl cast(c, u64);
+}
+
+// One archetype. Every column has `capacity` elements of its component's size.
+table: struct = {
+    name: [*]const c8;
+    signature: u64;
+    count: u64;
+    capacity: u64;
+    columns: [component<>.count][*]u8;
+}
+
+query: struct = {
+    all: u64;
+    none: u64;
+}
+
+// Stops the program if the enum and component_info were written in different
+// orders: a column would silently get another component's size.
+components_check: proc() -> void = {
+    for (i: u64 = 0; i < component<>.count; i += 1) {
+        if (strcmp(component<>.variant.values[i].name, component_info[i][0].name) != 0) {
+            printfmt("component {} is {} in the enum but {} in component_info\n", i,
+                component<>.variant.values[i].name, component_info[i][0].name);
+            exit(1);
+        }
+    }
+}
+
+table_create: proc(arena: *memops_arena, name: [*]const c8, components: []const component,
+                   capacity: u64) -> table = {
+    t: table = {};
+    t.name = name;
+    t.capacity = capacity;
+    for (i: u64 = 0; i < components.length; i += 1) {
+        c: component = components[i];
+        info: *const reflect = component_info[c];
+        t.signature |= bit(c);
+        t.columns[c] = cast(memops_arena_push_zero(arena, info[0].size * capacity, info[0].align), [*]u8);
+    }
+    return t;
+}
+
+table_has: proc(t: *table, c: component) -> b32 = {
+    return (t[0].signature & bit(c)) != 0;
+}
+
+table_matches: proc(t: *table, q: query) -> b32 = {
+    return (t[0].signature & q.all) == q.all && (t[0].signature & q.none) == 0;
+}
+
+// A new row with every component zeroed. The caller fills it in.
+table_add_row: proc(t: *table) -> u64 = {
+    if (t[0].count == t[0].capacity) {
+        printfmt("table {} is full\n", t[0].name);
+        exit(1);
+    }
+    row: u64 = t[0].count;
+    for (c: u64 = 0; c < component<>.count; c += 1) {
+        if (t[0].columns[c] != null) {
+            size: u64 = component_info[c][0].size;
+            memset(t[0].columns[c][row * size]&, 0, size);
+        }
+    }
+    t[0].count += 1;
+    return row;
+}
+
+// The rows in use of T's column. Asking a table for a column it does not have
+// is a bug in the caller, so it stops the program rather than return nothing.
+column: proc<T>(t: *table) -> []T = {
+    c: component = component_of<T>();
+    if (t[0].columns[c] == null) {
+        printfmt("table {} has no {} column\n", t[0].name, component_info[c][0].name);
+        exit(1);
+    }
+    raw: [*]T = cast(t[0].columns[c], [*]T);
+    return raw[0..t[0].count];
+}
+
+table_set: proc<T>(t: *table, row: u64, value: T) -> void = {
+    values: []T = column<T>(t);
+    values[row] = value;
+}
+
+// Systems take columns, as in lesson 2. The loops that feed them are queries.
+move_system: proc(positions: []position, velocities: []const velocity, dt: f32) -> void = {
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        positions[i].at.x += velocities[i].per_second.x * dt;
+        positions[i].at.y += velocities[i].per_second.y * dt;
+    }
+}
+
+regen_system: proc(healths: []health, per_second: f32, dt: f32) -> void = {
+    for (i: u64 = 0; i < healths.length; i += 1) {
+        healths[i].points += per_second * dt;
+        if (healths[i].points > healths[i].max) {
+            healths[i].points = healths[i].max;
+        }
+    }
+}
+
+print_tables: proc(tables: []table) -> void = {
+    for (ti: u64 = 0; ti < tables.length; ti += 1) {
+        t: *table = tables[ti]&;
+        for (row: u64 = 0; row < t[0].count; row += 1) {
+            printf("    %-7s row %d", t[0].name, cast(row, i32));
+            if (table_has(t, component.position)) {
+                ps: []position = column<position>(t);
+                printf("  at (%5.1f, %5.1f)", cast(ps[row].at.x, f64), cast(ps[row].at.y, f64));
+            }
+            if (table_has(t, component.health)) {
+                hs: []health = column<health>(t);
+                printf("  health %5.1f/%.0f", cast(hs[row].points, f64), cast(hs[row].max, f64));
+            }
+            if (table_has(t, component.damage)) {
+                ds: []damage = column<damage>(t);
+                printf("  damage %.0f", cast(ds[row].per_hit, f64));
+            }
+            printf("\n");
+        }
+    }
+}
+
+spawn_ship: proc(t: *table, x: f32, y: f32) -> void = {
+    row: u64 = table_add_row(t);
+    table_set<position>(t, row, { .at = { .x = x, .y = y } });
+    table_set<velocity>(t, row, { .per_second = { .x = 2.0, .y = 0.0 } });
+    table_set<health>(t, row, { .points = 50.0, .max = 100.0 });
+}
+
+spawn_bullet: proc(t: *table, x: f32, y: f32, dy: f32) -> void = {
+    row: u64 = table_add_row(t);
+    table_set<position>(t, row, { .at = { .x = x, .y = y } });
+    table_set<velocity>(t, row, { .per_second = { .x = 0.0, .y = dy } });
+    table_set<damage>(t, row, { .per_hit = 10.0 });
+}
+
+main: proc() -> i32 = {
+    components_check();
+
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+
+    rock_components: [1]component = { component.position };
+    ship_components: [3]component = { component.position, component.velocity, component.health };
+    bullet_components: [3]component = { component.position, component.velocity, component.damage };
+    turret_components: [3]component = { component.position, component.health, component.damage };
+
+    tables: [4]table = {};
+    tables[0] = table_create(arena&, "rock", rock_components, 16);
+    tables[1] = table_create(arena&, "ship", ship_components, 16);
+    tables[2] = table_create(arena&, "bullet", bullet_components, 16);
+    tables[3] = table_create(arena&, "turret", turret_components, 16);
+
+    for (ti: u64 = 0; ti < 4; ti += 1) {
+        printfmt("{} signature {}:", tables[ti].name, tables[ti].signature);
+        for (c: u64 = 0; c < component<>.count; c += 1) {
+            if ((tables[ti].signature & (1'u64 shl c)) != 0) {
+                printfmt(" {}", component_info[c][0].name);
+            }
+        }
+        printfmt("\n");
+    }
+
+    rock: u64 = table_add_row(tables[0]&);
+    table_set<position>(tables[0]&, rock, { .at = { .x = 5.0, .y = 5.0 } });
+    spawn_ship(tables[1]&, 0.0, 0.0);
+    spawn_ship(tables[1]&, 0.0, 10.0);
+    spawn_bullet(tables[2]&, 1.0, 0.0, 8.0);
+    spawn_bullet(tables[2]&, 2.0, 0.0, 8.0);
+    spawn_bullet(tables[2]&, 3.0, 0.0, -8.0);
+    turret: u64 = table_add_row(tables[3]&);
+    table_set<position>(tables[3]&, turret, { .at = { .x = 20.0, .y = 0.0 } });
+    table_set<health>(tables[3]&, turret, { .points = 40.0, .max = 200.0 });
+    table_set<damage>(tables[3]&, turret, { .per_hit = 25.0 });
+    print_tables(tables);
+
+    moving: query = { .all = bit(component.position) | bit(component.velocity) };
+    // Turrets have health too, but they repair by other means: no regen for
+    // anything that deals damage.
+    healing: query = { .all = bit(component.health), .none = bit(component.damage) };
+
+    dt: f32 = 0.5;
+    for (frame: i32 = 1; frame <= 2; frame += 1) {
+        printfmt("frame {}\n", frame);
+        for (ti: u64 = 0; ti < 4; ti += 1) {
+            t: *table = tables[ti]&;
+            if (table_matches(t, moving)) {
+                printfmt("    move visits {}\n", t[0].name);
+                // move_system takes []const velocity. Widening a call's result
+                // reads it twice, so rin wants it in a local first.
+                velocities: []velocity = column<velocity>(t);
+                move_system(column<position>(t), velocities, dt);
+            }
+            if (table_matches(t, healing)) {
+                printfmt("    regen visits {}\n", t[0].name);
+                regen_system(column<health>(t), 10.0, dt);
+            }
+        }
+        print_tables(tables);
+    }
+    return 0;
+}

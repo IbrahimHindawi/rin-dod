@@ -1,0 +1,19 @@
+// How the lessons are built. Read by `rin build`, not executed.
+//
+// Every lesson is its own program, named after its file. tools/check.py reads
+// this same list, builds each lesson, runs it and compares its output with the
+// .expected file beside it.
+build_name:      [*]const char = "rin-dod";
+build_dir:       [*]const char = "build";
+build_generator: [*]const char = "Ninja";
+build_compiler:  [*]const char = "clang-cl";
+build_type:      [*]const char = "Debug";
+
+build_entries: [6][*]const char = {
+    "src/1.aos_vs_soa/aos_vs_soa.rin",
+    "src/2.archetype_table/archetype_table.rin",
+    "src/3.many_archetypes/many_archetypes.rin",
+    "src/4.entity_handles/entity_handles.rin",
+    "src/5.inspector/inspector.rin",
+    "src/6.kayan/kayan.rin",
+};
