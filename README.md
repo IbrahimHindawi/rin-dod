@@ -21,8 +21,12 @@ opens with what it teaches, and the output it must print beside it.
     includes/
       kayan.rin                 lesson 4's world, used by lessons 5 and 6
     docs/                       background and exercises, one guide a lesson
+    website/
+      index.html                every lesson as one page: guide, code, output
+      template.html             its layout and styles
     tools/
       check.py                  build, run and compare every lesson
+      site.py                   rebuild website/index.html from the repo
     build.rin                   the lesson list, for `rin build`
 
 Lessons 1 to 3 are self-contained. Lesson 4 builds the world in
@@ -47,6 +51,13 @@ files after a deliberate change, and a word filters the lessons:
 The checker also works on Linux. There it relaxes `-Wformat` only: rin's
 `printfmt` and std `print` write `%llu` for `u64`, which is `unsigned long`
 on 64-bit Linux.
+
+## Reading it in a browser
+
+Open `website/index.html`. It has every lesson's guide, its source with line
+numbers, and the output it must print, with an index on the left. It is
+generated from the files in this repository, so after changing a lesson or a
+guide run `python tools/site.py` to bring it up to date.
 
 ## How to read it
 
