@@ -36,7 +36,7 @@ self-contained again.
 
 ## Build and run
 
-Needs the rin compiler with `noalias` (rin `e67175d` or later; `rin.exe` from
+Needs the rin compiler with `noalias` (rin `fa16979` or later; `rin.exe` from
 `rin-windows-x64`, through `RIN_HOME` or `PATH`), CMake, Ninja, clang-cl and
 the Windows SDK.
 

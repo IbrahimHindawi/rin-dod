@@ -372,9 +372,7 @@ movement_system: proc(w: *kayan_world, dt: f32) -> void = {
     for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
         if (kayan_matches(t, q)) {
-            ps: []position = kayan_column<position>(t);
-            vs: []velocity = kayan_column<velocity>(t);
-            integrate(ps, vs, dt);
+            integrate(kayan_column<position>(t), kayan_column<velocity>(t), dt);
         }
     }
 }
@@ -446,9 +444,7 @@ burning_system: proc(w: *kayan_world, dt: f32) -> void = {
     for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
         if (kayan_matches(t, q)) {
-            hs: []health = kayan_column<health>(t);
-            bs: []burning = kayan_column<burning>(t);
-            burn(hs, bs, dt);
+            burn(kayan_column<health>(t), kayan_column<burning>(t), dt);
         }
     }
 }
