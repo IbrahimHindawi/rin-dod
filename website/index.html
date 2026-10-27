@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rin-dod</title>
+<meta name="description" content="Data-oriented design and entity component systems in rin, from cache-aware layouts to a complete archetype ECS and game.">
+<title>rin-dod | Data-oriented design in rin</title>
+<link rel="canonical" href="https://ibrahimhindawi.com/rin-dod/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem('ibrahimhindawi-site-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
@@ -95,6 +100,14 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 .brand { display: flex; flex-direction: column; gap: 0.15rem; padding-bottom: 1rem; border-bottom: 1px solid var(--rule); }
 .brand b { font-family: var(--mono); font-weight: 600; font-size: 1.25rem; letter-spacing: -0.01em; }
 .brand span { color: var(--muted); font-size: var(--step--1); }
+.site-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.8rem; margin-top: 0.55rem; }
+.site-links a, .theme-link {
+  color: var(--muted);
+  font: 500 0.72rem/1.3 var(--mono);
+  text-decoration: none;
+}
+.site-links a:hover, .theme-link:hover { color: var(--accent); }
+.theme-link { appearance: none; border: 0; padding: 0; background: none; cursor: pointer; }
 .group { display: flex; flex-direction: column; gap: 0.15rem; }
 .group h2 {
   margin: 0 0 0.35rem;
@@ -326,7 +339,16 @@ pre.term {
 <body>
 <div class="shell">
   <nav class="index" aria-label="Lessons">
-    <div class="brand"><b>rin-dod</b><span>data-oriented design in rin</span></div>
+    <div class="brand">
+      <b>rin-dod</b>
+      <span>data-oriented design in rin</span>
+      <div class="site-links">
+        <a href="https://ibrahimhindawi.com/">ibrahimhindawi.com</a>
+        <a href="https://ibrahimhindawi.com/articles.html">articles</a>
+        <a href="https://github.com/IbrahimHindawi/rin-dod" target="_blank" rel="noopener">source</a>
+        <button class="theme-link" id="theme-toggle" type="button" aria-label="Switch between light and dark themes">theme</button>
+      </div>
+    </div>
     <div class="groups">
       <div class="group"><h2>Start</h2><a class="navlink" href="#overview" data-view="overview"><span class="num dim">·</span><span class="nt"><span class="ttl">Overview</span><span class="blurb">Build an ECS: the course, and how to build it</span></span></a></div><div class="group"><h2>Part 1 · Entities</h2><a class="navlink" href="#ecs-1-1" data-view="ecs-1-1"><span class="num">1.1</span><span class="nt"><span class="ttl">An entity is a number</span><span class="blurb">ids, components as arrays indexed by them, a system as a loop</span></span></a><a class="navlink" href="#ecs-1-2" data-view="ecs-1-2"><span class="num">1.2</span><span class="nt"><span class="ttl">Despawning, and reusing numbers</span><span class="blurb">a free list, reused numbers, and the stale reference they cause</span></span></a><a class="navlink" href="#ecs-1-3" data-view="ecs-1-3"><span class="num">1.3</span><span class="nt"><span class="ttl">Generations</span><span class="blurb">handles that know when they are stale</span></span></a><a class="navlink" href="#ecs-1-4" data-view="ecs-1-4"><span class="num">1.4</span><span class="nt"><span class="ttl">The entity index</span><span class="blurb">slots, packed rows, swap-remove, kayan_verify</span></span></a></div><div class="group"><h2>Part 2 · Components</h2><a class="navlink" href="#ecs-2-1" data-view="ecs-2-1"><span class="num">2.1</span><span class="nt"><span class="ttl">Components and signatures</span><span class="blurb">component ids, a registry of reflect records, 64-bit signatures</span></span></a><a class="navlink" href="#ecs-2-2" data-view="ecs-2-2"><span class="num">2.2</span><span class="nt"><span class="ttl">Columns</span><span class="blurb">one array of any component, as bytes, viewed as a typed slice</span></span></a><a class="navlink" href="#ecs-2-3" data-view="ecs-2-3"><span class="num">2.3</span><span class="nt"><span class="ttl">A table</span><span class="blurb">the entity index and the columns, joined</span></span></a><a class="navlink" href="#ecs-2-4" data-view="ecs-2-4"><span class="num">2.4</span><span class="nt"><span class="ttl">Many tables: archetypes</span><span class="blurb">a table for every combination, found by signature</span></span></a><a class="navlink" href="#ecs-2-5" data-view="ecs-2-5"><span class="num">2.5</span><span class="nt"><span class="ttl">Typed access</span><span class="blurb">kayan_get&lt;T&gt;, kayan_set&lt;T&gt;; keep handles, borrow pointers</span></span></a><a class="navlink" href="#ecs-2-6" data-view="ecs-2-6"><span class="num">2.6</span><span class="nt"><span class="ttl">Adding and removing components</span><span class="blurb">moving between tables, and the archetype graph</span></span></a><a class="navlink" href="#ecs-2-7" data-view="ecs-2-7"><span class="num">2.7</span><span class="nt"><span class="ttl">Inspecting the world</span><span class="blurb">any entity, field by field, from reflection</span></span></a></div><div class="group"><h2>Part 3 · Systems</h2><a class="navlink" href="#ecs-3-1" data-view="ecs-3-1"><span class="num">3.1</span><span class="nt"><span class="ttl">Queries</span><span class="blurb">the tables a system runs over, matched once and kept</span></span></a><a class="navlink" href="#ecs-3-2" data-view="ecs-3-2"><span class="num">3.2</span><span class="nt"><span class="ttl">Systems</span><span class="blurb">kernels, systems, a schedule, a frame</span></span></a><a class="navlink" href="#ecs-3-3" data-view="ecs-3-3"><span class="num">3.3</span><span class="nt"><span class="ttl">Commands</span><span class="blurb">why a system cannot change structure, and the buffer that can</span></span></a><a class="navlink" href="#ecs-3-4" data-view="ecs-3-4"><span class="num">3.4</span><span class="nt"><span class="ttl">A game</span><span class="blurb">turrets, waves, bullets and fire, on everything above</span></span></a></div><div class="group"><h2>Advanced · layout and SIMD</h2><a class="navlink" href="#advanced" data-view="advanced"><span class="num dim">·</span><span class="nt"><span class="ttl">About these lessons</span><span class="blurb">Memory, aliasing and SIMD, for after the course</span></span></a><a class="navlink" href="#from-kayan" data-view="from-kayan"><span class="num">0</span><span class="nt"><span class="ttl">From kayan</span><span class="blurb">What was kept from the C kayan, and why</span></span></a><a class="navlink" href="#aos-vs-soa" data-view="aos-vs-soa"><span class="num">1</span><span class="nt"><span class="ttl">AoS vs SoA</span><span class="blurb">The same particles in three layouts, and what SIMD needs</span></span></a><a class="navlink" href="#archetype-table" data-view="archetype-table"><span class="num">2</span><span class="nt"><span class="ttl">One archetype table</span><span class="blurb">Columns, rows, spawn, swap-remove, systems over slices</span></span></a><a class="navlink" href="#many-archetypes" data-view="many-archetypes"><span class="num">3</span><span class="nt"><span class="ttl">Many archetypes</span><span class="blurb">One table type for every archetype: ids, signatures, queries</span></span></a><a class="navlink" href="#entity-handles" data-view="entity-handles"><span class="num">4</span><span class="nt"><span class="ttl">Entity handles</span><span class="blurb">Generational handles, slots, moving between archetypes</span></span></a><a class="navlink" href="#inspector" data-view="inspector"><span class="num">5</span><span class="nt"><span class="ttl">The inspector</span><span class="blurb">Printing and editing any entity from reflection records</span></span></a><a class="navlink" href="#kayan" data-view="kayan"><span class="num">6</span><span class="nt"><span class="ttl">kayan</span><span class="blurb">A small game, with structural changes deferred to a command buffer</span></span></a><a class="navlink" href="#access-patterns" data-view="access-patterns"><span class="num">7</span><span class="nt"><span class="ttl">Layout follows access</span><span class="blurb">Four layouts under streams and lookups, and how an ECS decides</span></span></a></div><div class="group"><h2>Source</h2><a class="navlink" href="#library" data-view="library"><span class="num dim">·</span><span class="nt"><span class="ttl">includes/kayan.rin</span><span class="blurb">The world lessons 5 and 6 import</span></span></a><a class="navlink" href="#tools" data-view="tools"><span class="num dim">·</span><span class="nt"><span class="ttl">Build and check</span><span class="blurb">check.py, build.rin, license</span></span></a></div>
     </div>
@@ -2979,6 +3001,15 @@ same result: yes
 
   window.addEventListener("hashchange", function () { show(location.hash.slice(1), true); });
   show(location.hash.slice(1), false);
+
+  var themeButton = document.getElementById("theme-toggle");
+  if (themeButton) themeButton.addEventListener("click", function () {
+    var current = document.documentElement.dataset.theme;
+    var dark = current ? current === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("ibrahimhindawi-site-theme", next); } catch (err) {}
+  });
 })();
 </script>
 </body>

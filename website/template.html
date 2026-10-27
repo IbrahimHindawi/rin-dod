@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rin-dod</title>
+<meta name="description" content="Data-oriented design and entity component systems in rin, from cache-aware layouts to a complete archetype ECS and game.">
+<title>rin-dod | Data-oriented design in rin</title>
+<link rel="canonical" href="https://ibrahimhindawi.com/rin-dod/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem('ibrahimhindawi-site-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
@@ -95,6 +100,14 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 .brand { display: flex; flex-direction: column; gap: 0.15rem; padding-bottom: 1rem; border-bottom: 1px solid var(--rule); }
 .brand b { font-family: var(--mono); font-weight: 600; font-size: 1.25rem; letter-spacing: -0.01em; }
 .brand span { color: var(--muted); font-size: var(--step--1); }
+.site-links { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.8rem; margin-top: 0.55rem; }
+.site-links a, .theme-link {
+  color: var(--muted);
+  font: 500 0.72rem/1.3 var(--mono);
+  text-decoration: none;
+}
+.site-links a:hover, .theme-link:hover { color: var(--accent); }
+.theme-link { appearance: none; border: 0; padding: 0; background: none; cursor: pointer; }
 .group { display: flex; flex-direction: column; gap: 0.15rem; }
 .group h2 {
   margin: 0 0 0.35rem;
@@ -326,7 +339,16 @@ pre.term {
 <body>
 <div class="shell">
   <nav class="index" aria-label="Lessons">
-    <div class="brand"><b>rin-dod</b><span>data-oriented design in rin</span></div>
+    <div class="brand">
+      <b>rin-dod</b>
+      <span>data-oriented design in rin</span>
+      <div class="site-links">
+        <a href="https://ibrahimhindawi.com/">ibrahimhindawi.com</a>
+        <a href="https://ibrahimhindawi.com/articles.html">articles</a>
+        <a href="https://github.com/IbrahimHindawi/rin-dod" target="_blank" rel="noopener">source</a>
+        <button class="theme-link" id="theme-toggle" type="button" aria-label="Switch between light and dark themes">theme</button>
+      </div>
+    </div>
     <div class="groups">
       {{NAV}}
     </div>
@@ -380,6 +402,15 @@ pre.term {
 
   window.addEventListener("hashchange", function () { show(location.hash.slice(1), true); });
   show(location.hash.slice(1), false);
+
+  var themeButton = document.getElementById("theme-toggle");
+  if (themeButton) themeButton.addEventListener("click", function () {
+    var current = document.documentElement.dataset.theme;
+    var dark = current ? current === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("ibrahimhindawi-site-theme", next); } catch (err) {}
+  });
 })();
 </script>
 </body>
