@@ -96,7 +96,7 @@ neighbours shows exactly what a chapter changed:
 | 3.3 | [commands](docs/3.3_commands.md) | why a system cannot change structure, and the buffer that can |
 | 3.4 | [a game](docs/3.4_game.md) | turrets, waves, bullets and fire, on everything above |
 
-The lessons in the main course come at the same ideas from the other side,
-starting from memory layout. Lesson 7, [layout follows
+After the course, the [advanced lessons](../docs/README.md) go underneath it:
+memory layout, aliasing and SIMD. Lesson 7, [layout follows
 access](../docs/7_access_patterns.md), is the bridge: why an ECS stores
 components the way it does.

@@ -10,15 +10,7 @@ build_compiler:  [*]const char = "clang-cl";
 build_type:      [*]const char = "Debug";
 
 build_entries: [22][*]const char = {
-    "src/1.aos_vs_soa/aos_vs_soa.rin",
-    "src/2.archetype_table/archetype_table.rin",
-    "src/3.many_archetypes/many_archetypes.rin",
-    "src/4.entity_handles/entity_handles.rin",
-    "src/5.inspector/inspector.rin",
-    "src/6.kayan/kayan.rin",
-    "src/7.access_patterns/access_patterns.rin",
-
-    // Build an ECS: ecs/README.md
+    // Build an ECS: start here, README.md
     "ecs/src/1.entities/1.1.ids/ids.rin",
     "ecs/src/1.entities/1.2.despawn/despawn.rin",
     "ecs/src/1.entities/1.3.generations/generations.rin",
@@ -34,4 +26,13 @@ build_entries: [22][*]const char = {
     "ecs/src/3.systems/3.2.systems/systems.rin",
     "ecs/src/3.systems/3.3.commands/commands.rin",
     "ecs/src/3.systems/3.4.game/game.rin",
+
+    // Advanced: layout and SIMD, docs/README.md
+    "src/1.aos_vs_soa/aos_vs_soa.rin",
+    "src/2.archetype_table/archetype_table.rin",
+    "src/3.many_archetypes/many_archetypes.rin",
+    "src/4.entity_handles/entity_handles.rin",
+    "src/5.inspector/inspector.rin",
+    "src/6.kayan/kayan.rin",
+    "src/7.access_patterns/access_patterns.rin",
 };

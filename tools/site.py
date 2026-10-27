@@ -77,7 +77,7 @@ LINKS = {
 def link_target(url):
     base = url.split("/")[-1]
     if base in LINKS: return LINKS[base], False
-    if url.endswith("ecs/README.md"): return "#ecs", False
+    if url.endswith("docs/README.md") and not url.endswith("ecs/docs/README.md"): return "#advanced", False
     if base == "README.md": return "#overview", False
     m = re.match(r"(\d)\.(\d)_\w+\.md$", base)
     if m: return f"#ecs-{m.group(1)}-{m.group(2)}", False
@@ -168,51 +168,39 @@ lessons = [
 def read(p): return (REPO / p).read_text(encoding="utf-8")
 def nlines(s): return s.count("\n")
 
-nav, views = [], []
+views = []
 
-# overview
-readme = read("README.md")
-nav.append(('overview', '', 'Overview', 'README and the layout behind lesson 1'))
-diagram = '''
-<figure class="memmap" aria-label="One 68-byte particle against 64-byte cache lines">
-  <figcaption><span class="eyebrow">Lesson 1, to scale</span><span>One <code>particle</code> is 68 bytes. Movement reads the first 24.</span></figcaption>
-  <div class="strip aos">
-    <span class="f use" style="--b:12" title="position, 12 bytes">position</span><span class="f use" style="--b:12" title="velocity, 12 bytes">velocity</span><span class="f" style="--b:16" title="tint, 16 bytes">tint</span><span class="f" style="--b:4" title="age, 4 bytes"></span><span class="f" style="--b:4" title="lifetime, 4 bytes"></span><span class="f" style="--b:4" title="size, 4 bytes"></span><span class="f" style="--b:16" title="name, 16 bytes">name</span>
-  </div>
-  <div class="ruler"><span style="--at:0">0</span><span style="--at:24">24</span><span style="--at:64">64, end of a cache line</span><span style="--at:68">68</span></div>
-  <div class="legend"><span><i class="sw use"></i>read by movement: position 12, velocity 12</span><span><i class="sw"></i>fetched anyway: tint 16, age 4, lifetime 4, size 4, name 16</span></div>
-  <p class="figtext">In the array of structs, every cache line movement pulls in is about two thirds tint, age, life, size and name. In the struct of arrays, movement fetches only the position and velocity columns: <strong>6,291,456</strong> bytes a step instead of <strong>17,825,792</strong>.</p>
-</figure>'''
-views.append(f'''<section class="view" id="v-overview" data-view="overview">
-<header class="vhead"><p class="eyebrow">rin · data-oriented design · seven lessons · build an ECS</p><h1>rin-dod</h1>
-<p class="lede">From one array of structs to a small archetype entity component system, written in rin and checked against the output each program must print.</p></header>
-{diagram}
-<div class="prose">{md(readme, skip_title=True)}</div>
-</section>''')
+def navitem(tok, num, title, blurb):
+    n = f'<span class="num">{num}</span>' if num else '<span class="num dim">·</span>'
+    return f'<a class="navlink" href="#{tok}" data-view="{tok}">{n}<span class="nt"><span class="ttl">{esc(title)}</span><span class="blurb">{esc(blurb)}</span></span></a>'
 
-# from kayan
-nav.append(('from-kayan', '0', 'From kayan', 'What was kept, what changed, and why'))
-views.append(f'''<section class="view" id="v-from-kayan" data-view="from-kayan" hidden>
-<header class="vhead"><p class="eyebrow">Lesson 0 · review</p><h1>From kayan</h1><p class="path">docs/0_from_kayan.md</p></header>
-<div class="prose">{md(read("docs/0_from_kayan.md"), skip_title=True)}</div></section>''')
+def group(heading, items):
+    return f'<div class="group"><h2>{esc(heading)}</h2>' + "".join(navitem(*n) for n in items) + "</div>"
 
-for tok, num, title, base, doc, blurb in lessons:
-    src = read(base + ".rin"); exp = read(base + ".expected"); guide = read(doc)
-    nav.append((tok, num, title, blurb))
-    imports = '<p class="note">Imports the world from <a href="#library"><code>includes/kayan.rin</code></a>.</p>' if "includes/kayan.rin" in src else ""
-    views.append(f'''<section class="view" id="v-{tok}" data-view="{tok}" hidden>
-<header class="vhead"><p class="eyebrow">Lesson {num}</p><h1>{esc(title)}</h1><p class="path">{base}.rin</p></header>
+def program_view(tok, eyebrow, title, base, guide, unit, before_code=""):
+    src = read(base + ".rin"); exp = read(base + ".expected")
+    return f'''<section class="view" id="v-{tok}" data-view="{tok}" hidden>
+<header class="vhead"><p class="eyebrow">{eyebrow}</p><h1>{esc(title)}</h1><p class="path">{base}.rin</p></header>
 <div class="tabs" role="tablist" aria-label="{esc(title)} views">
   <button role="tab" type="button" class="tab" aria-selected="true" data-pane="guide">Guide</button>
   <button role="tab" type="button" class="tab" aria-selected="false" data-pane="code">Code <span class="count">{nlines(src)} lines</span></button>
   <button role="tab" type="button" class="tab" aria-selected="false" data-pane="output">Output <span class="count">{nlines(exp)} lines</span></button>
 </div>
 <div class="pane" data-pane="guide"><div class="prose">{md(guide, skip_title=True)}</div></div>
-<div class="pane" data-pane="code" hidden>{imports}{code_block(src, "rin")}</div>
-<div class="pane" data-pane="output" hidden><p class="note">What <code>{base.split("/")[-1]}</code> prints. <code>tools/check.py</code> fails the lesson if a single byte differs.</p><pre class="term"><code>{esc(exp)}</code></pre></div>
+<div class="pane" data-pane="code" hidden>{before_code}{code_block(src, "rin")}</div>
+<div class="pane" data-pane="output" hidden><p class="note">What <code>{base.split("/")[-1]}</code> prints. <code>tools/check.py</code> fails the {unit} if a single byte differs.</p><pre class="term"><code>{esc(exp)}</code></pre></div>
+</section>'''
+
+# ---- Start: the overview is the course's front page
+nav_start = [('overview', '', 'Overview', 'Build an ECS: the course, and how to build it')]
+views.append(f'''<section class="view" id="v-overview" data-view="overview">
+<header class="vhead"><p class="eyebrow">rin · data-oriented design · build an ECS</p><h1>rin-dod</h1>
+<p class="lede">Build an archetype entity component system from nothing, in fifteen chapters you read, compile and step through: from an entity as a number to a game running on it.</p>
+<p class="lede"><a href="#ecs-1-1">Start with 1.1, an entity is a number</a></p></header>
+<div class="prose">{md(read("README.md"), skip_title=True)}</div>
 </section>''')
 
-# Build an ECS: the course's README, then its chapters, grouped by part
+# ---- Build an ECS: the chapters, grouped by part
 ecs_lessons = []
 for doc in sorted((REPO / "ecs" / "docs").glob("*.md")):
     m = re.match(r"(\d)\.(\d)_(\w+)\.md$", doc.name)
@@ -224,58 +212,65 @@ for doc in sorted((REPO / "ecs" / "docs").glob("*.md")):
 ECS_PARTS = {"1": "Entities", "2": "Components", "3": "Systems"}
 # Each chapter's one-line summary, from the "about" column of the README's table.
 ecs_about = {m.group(1): re.sub(r"`", "", m.group(2)).strip()
-             for m in re.finditer(r"^\| (\d\.\d) \| [^|]+ \| ([^|]+) \|$", read("ecs/README.md"), re.M)}
+             for m in re.finditer(r"^\| (\d\.\d) \| [^|]+ \| ([^|]+) \|$", read("README.md"), re.M)}
 
 nav_ecs = {part: [] for part in ECS_PARTS}
-nav_ecs["1"].append(('ecs', '', 'Build an ECS', 'The course, and how to build it'))
-views.append(f'''<section class="view" id="v-ecs" data-view="ecs" hidden>
-<header class="vhead"><p class="eyebrow">rin · a second course · fifteen chapters</p><h1>Build an ECS</h1><p class="path">ecs/README.md</p></header>
-<div class="prose">{md(read("ecs/README.md"), skip_title=True)}</div></section>''')
-
 for tok, num, title, base, doc, part in ecs_lessons:
-    src = read(base + ".rin"); exp = read(base + ".expected")
     guide = re.sub(r"^`ecs/src/[^`]+`\n\n", "", read(doc), count=1, flags=re.M)  # the header shows the path
     nav_ecs[part].append((tok, num, title, ecs_about.get(num, "")))
-    views.append(f'''<section class="view" id="v-{tok}" data-view="{tok}" hidden>
-<header class="vhead"><p class="eyebrow">Build an ECS · part {part}, {ECS_PARTS[part].lower()} · {num}</p><h1>{esc(title)}</h1><p class="path">{base}.rin</p></header>
-<div class="tabs" role="tablist" aria-label="{esc(title)} views">
-  <button role="tab" type="button" class="tab" aria-selected="true" data-pane="guide">Guide</button>
-  <button role="tab" type="button" class="tab" aria-selected="false" data-pane="code">Code <span class="count">{nlines(src)} lines</span></button>
-  <button role="tab" type="button" class="tab" aria-selected="false" data-pane="output">Output <span class="count">{nlines(exp)} lines</span></button>
-</div>
-<div class="pane" data-pane="guide"><div class="prose">{md(guide, skip_title=True)}</div></div>
-<div class="pane" data-pane="code" hidden>{code_block(src, "rin")}</div>
-<div class="pane" data-pane="output" hidden><p class="note">What <code>{base.split("/")[-1]}</code> prints. <code>tools/check.py</code> fails the chapter if a single byte differs.</p><pre class="term"><code>{esc(exp)}</code></pre></div>
+    views.append(program_view(tok, f"Build an ECS · part {part}, {ECS_PARTS[part].lower()} · {num}", title, base, guide, "chapter"))
+
+# ---- Advanced: layout and SIMD, the seven lessons
+nav_adv = [('advanced', '', 'About these lessons', 'Memory, aliasing and SIMD, for after the course')]
+diagram = '''
+<figure class="memmap" aria-label="One 68-byte particle against 64-byte cache lines">
+  <figcaption><span class="eyebrow">Lesson 1, to scale</span><span>One <code>particle</code> is 68 bytes. Movement reads the first 24.</span></figcaption>
+  <div class="strip aos">
+    <span class="f use" style="--b:12" title="position, 12 bytes">position</span><span class="f use" style="--b:12" title="velocity, 12 bytes">velocity</span><span class="f" style="--b:16" title="tint, 16 bytes">tint</span><span class="f" style="--b:4" title="age, 4 bytes"></span><span class="f" style="--b:4" title="lifetime, 4 bytes"></span><span class="f" style="--b:4" title="size, 4 bytes"></span><span class="f" style="--b:16" title="name, 16 bytes">name</span>
+  </div>
+  <div class="ruler"><span style="--at:0">0</span><span style="--at:24">24</span><span style="--at:64">64, end of a cache line</span><span style="--at:68">68</span></div>
+  <div class="legend"><span><i class="sw use"></i>read by movement: position 12, velocity 12</span><span><i class="sw"></i>fetched anyway: tint 16, age 4, lifetime 4, size 4, name 16</span></div>
+  <p class="figtext">In the array of structs, every cache line movement pulls in is about two thirds tint, age, life, size and name. In the struct of arrays, movement fetches only the position and velocity columns: <strong>6,291,456</strong> bytes a step instead of <strong>17,825,792</strong>.</p>
+</figure>'''
+views.append(f'''<section class="view" id="v-advanced" data-view="advanced" hidden>
+<header class="vhead"><p class="eyebrow">Advanced · seven lessons</p><h1>Layout and SIMD</h1><p class="path">docs/README.md</p></header>
+{diagram}
+<div class="prose">{md(read("docs/README.md"), skip_title=True)}</div>
 </section>''')
 
+nav_adv.append(('from-kayan', '0', 'From kayan', 'What was kept from the C kayan, and why'))
+views.append(f'''<section class="view" id="v-from-kayan" data-view="from-kayan" hidden>
+<header class="vhead"><p class="eyebrow">Advanced · lesson 0 · review</p><h1>From kayan</h1><p class="path">docs/0_from_kayan.md</p></header>
+<div class="prose">{md(read("docs/0_from_kayan.md"), skip_title=True)}</div></section>''')
+
+for tok, num, title, base, doc, blurb in lessons:
+    nav_adv.append((tok, num, title, blurb))
+    imports = '<p class="note">Imports the world from <a href="#library"><code>includes/kayan.rin</code></a>.</p>' if "includes/kayan.rin" in read(base + ".rin") else ""
+    views.append(program_view(tok, f"Advanced · lesson {num}", title, base, read(doc), "lesson", imports))
+
+# ---- Source
+nav_src = []
 lib = read("includes/kayan.rin")
-nav.append(('library', '', 'includes/kayan.rin', 'The world lessons 5 and 6 import'))
+nav_src.append(('library', '', 'includes/kayan.rin', 'The world lessons 5 and 6 import'))
 views.append(f'''<section class="view" id="v-library" data-view="library" hidden>
-<header class="vhead"><p class="eyebrow">Library · built in lesson 4</p><h1>kayan.rin</h1><p class="path">includes/kayan.rin · {nlines(lib)} lines</p></header>
+<header class="vhead"><p class="eyebrow">Advanced · library · built in lesson 4</p><h1>kayan.rin</h1><p class="path">includes/kayan.rin · {nlines(lib)} lines</p></header>
 {code_block(lib, "rin")}</section>''')
 
 tools_html = ""
 for p, lang in (("tools/check.py", "py"), ("build.rin", "rin"), (".gitignore", "txt"), ("LICENSE", "txt")):
     s = read(p)
     tools_html += f'<h2 class="filehead">{p}</h2>' + code_block(s, lang)
-nav.append(('tools', '', 'Build and check', 'check.py, build.rin, license'))
+nav_src.append(('tools', '', 'Build and check', 'check.py, build.rin, license'))
 views.append(f'''<section class="view" id="v-tools" data-view="tools" hidden>
-<header class="vhead"><p class="eyebrow">Tooling</p><h1>Build and check</h1><p class="path">tools/check.py runs every lesson and diffs its output</p></header>
+<header class="vhead"><p class="eyebrow">Tooling</p><h1>Build and check</h1><p class="path">tools/check.py runs every program and diffs its output</p></header>
 {tools_html}</section>''')
 
-def navitem(tok, num, title, blurb):
-    n = f'<span class="num">{num}</span>' if num else '<span class="num dim">·</span>'
-    return f'<a class="navlink" href="#{tok}" data-view="{tok}">{n}<span class="nt"><span class="ttl">{esc(title)}</span><span class="blurb">{esc(blurb)}</span></span></a>'
-
-group1 = "".join(navitem(*n) for n in nav[:2])
-group2 = "".join(navitem(*n) for n in nav[2:9])
-group3 = "".join(navitem(*n) for n in nav[9:])
-
-ecs_groups = "".join(f'<div class="group"><h2>ECS · {name}</h2>' + "".join(navitem(*n) for n in nav_ecs[part]) + "</div>"
-                     for part, name in ECS_PARTS.items())
+nav_html = (group("Start", nav_start)
+            + "".join(group(f"Part {part} · {name}", nav_ecs[part]) for part, name in ECS_PARTS.items())
+            + group("Advanced · layout and SIMD", nav_adv)
+            + group("Source", nav_src))
 
 template = (REPO / "website" / "template.html").read_text(encoding="utf-8")
-page = (template.replace("{{NAV1}}", group1).replace("{{NAV2}}", group2).replace("{{NAV3}}", group3)
-        .replace("{{NAV_ECS}}", ecs_groups).replace("{{VIEWS}}", "\n".join(views)))
+page = template.replace("{{NAV}}", nav_html).replace("{{VIEWS}}", "\n".join(views))
 OUT.write_text(page, encoding="utf-8", newline="\n")
 print(f"wrote {OUT.relative_to(REPO).as_posix()} ({len(page)//1024} KB)")
