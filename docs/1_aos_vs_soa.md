@@ -57,6 +57,11 @@ A layout is right for SIMD when its vector loop is mostly full-width loads,
 math and stores. When it is mostly `movss`, `unpcklps` and `shufps`, the data
 is fighting the registers.
 
+Split is right for this loop, which runs over every particle in order. It is
+wrong for a loop that reaches particles by index, where x, y and z in three
+arrays are three trips to memory instead of one. Lesson 7 measures both kinds
+of loop over four layouts.
+
 ## Timings
 
 `--time` prints how long each layout took. Release builds, best of five runs,

@@ -73,6 +73,7 @@ struct's address, and runs the loop over the two columns.
   lessons 1, 2, 3 and 6, lets it do that without run-time overlap checks.
   Lesson 1 adds a third layout, one `f32` array per coordinate, which is
   the one SIMD runs cleanly over, and its exercises come back to `vec4`.
+  Lesson 7 weighs that layout against lookups, which it is bad at.
 - **cglm and the haikal containers.** rin's generics and std (`vec<T>`,
   `hashmap<K, V>`, slices) cover what they did.
 

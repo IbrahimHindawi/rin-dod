@@ -51,6 +51,12 @@ floats per pass with nothing to rearrange: loads, `mulps`, `subps`, stores.
 `integrate` works on `vec2`s and spends some of each pass separating x from
 y; lesson 1 shows what the fully split layout looks like.
 
+`integrate` and `burn` are streams: every row of every matching table, in
+order. `collision_system` and `blast_system` are closer to lookups: for each
+bullet or each blast, they visit drones that could be anywhere. Lesson 7
+measures what each layout costs for both kinds of loop, and why the
+components here stay small structs.
+
 `lifetime_system` stays one proc. Its loop records a despawn for each expired
 bullet, and a loop that calls something per row is not vectorized whatever
 its parameters say. The other systems branch, search or record in their loops

@@ -72,7 +72,7 @@ def code_block(src, lang):
 LINKS = {
     "0_from_kayan.md": "#from-kayan", "1_aos_vs_soa.md": "#aos-vs-soa", "2_archetype_table.md": "#archetype-table",
     "3_many_archetypes.md": "#many-archetypes", "4_entity_handles.md": "#entity-handles", "5_inspector.md": "#inspector",
-    "6_kayan.md": "#kayan", "LICENSE": "#tools",
+    "6_kayan.md": "#kayan", "7_access_patterns.md": "#access-patterns", "LICENSE": "#tools",
 }
 def link_target(url):
     base = url.split("/")[-1]
@@ -150,6 +150,7 @@ lessons = [
     ("entity-handles", "4", "Entity handles", "src/4.entity_handles/entity_handles", "docs/4_entity_handles.md", "Generational handles, slots, moving between archetypes"),
     ("inspector", "5", "The inspector", "src/5.inspector/inspector", "docs/5_inspector.md", "Printing and editing any entity from reflection records"),
     ("kayan", "6", "kayan", "src/6.kayan/kayan", "docs/6_kayan.md", "A small game, with structural changes deferred to a command buffer"),
+    ("access-patterns", "7", "Layout follows access", "src/7.access_patterns/access_patterns", "docs/7_access_patterns.md", "Four layouts under streams and lookups, and how an ECS decides"),
 ]
 
 def read(p): return (REPO / p).read_text(encoding="utf-8")
@@ -171,7 +172,7 @@ diagram = '''
   <p class="figtext">In the array of structs, every cache line movement pulls in is about two thirds tint, age, life, size and name. In the struct of arrays, movement fetches only the position and velocity columns: <strong>6,291,456</strong> bytes a step instead of <strong>17,825,792</strong>.</p>
 </figure>'''
 views.append(f'''<section class="view" id="v-overview" data-view="overview">
-<header class="vhead"><p class="eyebrow">rin · data-oriented design · six lessons</p><h1>rin-dod</h1>
+<header class="vhead"><p class="eyebrow">rin · data-oriented design · seven lessons</p><h1>rin-dod</h1>
 <p class="lede">From one array of structs to a small archetype entity component system, written in rin and checked against the output each program must print.</p></header>
 {diagram}
 <div class="prose">{md(readme, skip_title=True)}</div>
@@ -219,8 +220,8 @@ def navitem(tok, num, title, blurb):
     return f'<a class="navlink" href="#{tok}" data-view="{tok}">{n}<span class="nt"><span class="ttl">{esc(title)}</span><span class="blurb">{esc(blurb)}</span></span></a>'
 
 group1 = "".join(navitem(*n) for n in nav[:2])
-group2 = "".join(navitem(*n) for n in nav[2:8])
-group3 = "".join(navitem(*n) for n in nav[8:])
+group2 = "".join(navitem(*n) for n in nav[2:9])
+group3 = "".join(navitem(*n) for n in nav[9:])
 
 template = (REPO / "website" / "template.html").read_text(encoding="utf-8")
 page = template.replace("{{NAV1}}", group1).replace("{{NAV2}}", group2).replace("{{NAV3}}", group3).replace("{{VIEWS}}", "\n".join(views))

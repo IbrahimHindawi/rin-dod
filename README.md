@@ -1,8 +1,9 @@
 # rin-dod
 
 Data-oriented programming in [rin](https://github.com/IbrahimHindawi/rin), in
-six lessons: from one array of structs to a small archetype entity component
-system and a game that runs on it. The ECS is a rework of
+seven lessons: from one array of structs to a small archetype entity component
+system and a game that runs on it, and then back to the question under all of
+it: which layout suits which loop. The ECS is a rework of
 [kayan](https://github.com/IbrahimHindawi/kayan): its core idea is kept and
 its rough edges are not. [docs/0_from_kayan.md](docs/0_from_kayan.md) says
 which is which.
@@ -30,7 +31,8 @@ opens with what it teaches, and the output it must print beside it.
     build.rin                   the lesson list, for `rin build`
 
 Lessons 1 to 3 are self-contained. Lesson 4 builds the world in
-`includes/kayan.rin`, and lessons 5 and 6 import it unchanged.
+`includes/kayan.rin`, and lessons 5 and 6 import it unchanged. Lesson 7 is
+self-contained again.
 
 ## Build and run
 
@@ -79,6 +81,7 @@ with exercises.
 | 4 | [entity handles](docs/4_entity_handles.md) | generational handles, slots, moving between archetypes |
 | 5 | [inspector](docs/5_inspector.md) | printing and editing any entity from reflection records |
 | 6 | [kayan](docs/6_kayan.md) | a small game, and deferring structural changes to a command buffer |
+| 7 | [access patterns](docs/7_access_patterns.md) | four layouts under streams and lookups, and how an ECS decides |
 
 ## License
 

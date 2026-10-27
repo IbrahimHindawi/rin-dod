@@ -1,0 +1,380 @@
+// 7. Layout follows access
+//
+// Lesson 1 found the layout SIMD wants: one array per float. This lesson asks
+// what that layout costs everywhere else. The same bodies are stored four ways,
+// and two kinds of loop run over each:
+//
+//   stream   every body, in order, the same math: integration.
+//   lookup   bodies picked by index, two at a time, in no order: contacts,
+//            the way collision and constraints reach them.
+//
+// The four layouts:
+//
+//   aos      []body, everything about a body together
+//   columns  []vec3 per field, as an ECS table stores components
+//   split    []f32 per coordinate, as lesson 1's move_split
+//   blocks   []body_block, eight bodies per block, one [8]f32 per coordinate
+//
+// A stream wants consecutive floats, so SIMD can load four or eight at once.
+// A lookup wants one body's fields close together, so one cache line brings
+// them all. No layout is best at both; the program prints how many cache lines
+// a lookup touches in each, and with `--time` how long each loop takes.
+
+cinclude "time.h"
+import "std/print.rin"
+import "std/memops.rin"
+
+clock: proc[external]() -> long = {}
+CLOCKS_PER_SEC: const long;
+
+body_count: u64 = 1048576;
+contact_count: u64 = 1048576;
+dt: static f32 = 1.0 / 60.0;
+gravity: static f32 = -9.8;
+stiffness: static f32 = 0.01;
+
+vec3: struct = {
+    x: f32;
+    y: f32;
+    z: f32;
+}
+
+// aos: 32 bytes, the two fields both loops use and two they do not.
+body: struct = {
+    position: vec3;
+    velocity: vec3;
+    inverse_mass: f32;
+    radius: f32;
+}
+
+// blocks: eight bodies, each coordinate a run of eight floats. 192 bytes.
+body_block: struct = {
+    px: [8]f32;
+    py: [8]f32;
+    pz: [8]f32;
+    vx: [8]f32;
+    vy: [8]f32;
+    vz: [8]f32;
+}
+
+// Two bodies a contact pushes apart.
+contact: struct = {
+    a: u32;
+    b: u32;
+}
+
+columns: struct = {
+    positions: []vec3;
+    velocities: []vec3;
+}
+
+split: struct = {
+    px: []f32;
+    py: []f32;
+    pz: []f32;
+    vx: []f32;
+    vy: []f32;
+    vz: []f32;
+}
+
+// Cache-line aligned, so the line counts below are the same on every run.
+push_slice: proc<T>(arena: *memops_arena, count: u64) -> []T = {
+    raw: [*]T = cast(memops_arena_push_zero(arena, sizeof(T) * count, 64), [*]T);
+    return raw[0..count];
+}
+
+random_state: u64 = 12345;
+
+random01: proc() -> f32 = {
+    random_state = random_state * 6364136223846793005'u64 + 1442695040888963407'u64;
+    return cast(random_state shr 40, f32) / 16777216.0;
+}
+
+random_index: proc(n: u64) -> u32 = {
+    random_state = random_state * 6364136223846793005'u64 + 1442695040888963407'u64;
+    return cast((random_state shr 33) % n, u32);
+}
+
+// ---------------------------------------------------------------- stream
+// Every body, in order, the same math. noalias on what each kernel writes.
+
+integrate_aos: proc(bodies: noalias []body, dt: f32) -> void = {
+    for (i: u64 = 0; i < bodies.length; i += 1) {
+        b: *body = bodies[i]&;
+        b[0].velocity.y += gravity * dt;
+        b[0].position.x += b[0].velocity.x * dt;
+        b[0].position.y += b[0].velocity.y * dt;
+        b[0].position.z += b[0].velocity.z * dt;
+    }
+}
+
+integrate_columns: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        velocities[i].y += gravity * dt;
+        positions[i].x += velocities[i].x * dt;
+        positions[i].y += velocities[i].y * dt;
+        positions[i].z += velocities[i].z * dt;
+    }
+}
+
+integrate_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32,
+                      vx: []const f32, vy: noalias []f32, vz: []const f32, dt: f32) -> void = {
+    for (i: u64 = 0; i < px.length; i += 1) {
+        vy[i] += gravity * dt;
+        px[i] += vx[i] * dt;
+        py[i] += vy[i] * dt;
+        pz[i] += vz[i] * dt;
+    }
+}
+
+// The inner loop is eight floats per coordinate: one AVX register, or two SSE.
+integrate_blocks: proc(blocks: noalias []body_block, dt: f32) -> void = {
+    for (b: u64 = 0; b < blocks.length; b += 1) {
+        k: *body_block = blocks[b]&;
+        for (l: u64 = 0; l < 8; l += 1) {
+            k[0].vy[l] += gravity * dt;
+            k[0].px[l] += k[0].vx[l] * dt;
+            k[0].py[l] += k[0].vy[l] * dt;
+            k[0].pz[l] += k[0].vz[l] * dt;
+        }
+    }
+}
+
+// ---------------------------------------------------------------- lookup
+// Each contact moves its two bodies a little toward each other. The bodies are
+// anywhere in the arrays, so every contact is two jumps through memory. The
+// arithmetic is the same in every layout, in the same order, so the results
+// match to the bit.
+
+contacts_aos: proc(bodies: noalias []body, cs: []const contact) -> void = {
+    for (c: u64 = 0; c < cs.length; c += 1) {
+        p: *vec3 = bodies[cast(cs[c].a, u64)].position&;
+        q: *vec3 = bodies[cast(cs[c].b, u64)].position&;
+        dx: f32 = q[0].x - p[0].x;
+        dy: f32 = q[0].y - p[0].y;
+        dz: f32 = q[0].z - p[0].z;
+        p[0].x += dx * stiffness;
+        p[0].y += dy * stiffness;
+        p[0].z += dz * stiffness;
+        q[0].x -= dx * stiffness;
+        q[0].y -= dy * stiffness;
+        q[0].z -= dz * stiffness;
+    }
+}
+
+contacts_columns: proc(positions: noalias []vec3, cs: []const contact) -> void = {
+    for (c: u64 = 0; c < cs.length; c += 1) {
+        p: *vec3 = positions[cast(cs[c].a, u64)]&;
+        q: *vec3 = positions[cast(cs[c].b, u64)]&;
+        dx: f32 = q[0].x - p[0].x;
+        dy: f32 = q[0].y - p[0].y;
+        dz: f32 = q[0].z - p[0].z;
+        p[0].x += dx * stiffness;
+        p[0].y += dy * stiffness;
+        p[0].z += dz * stiffness;
+        q[0].x -= dx * stiffness;
+        q[0].y -= dy * stiffness;
+        q[0].z -= dz * stiffness;
+    }
+}
+
+contacts_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32, cs: []const contact) -> void = {
+    for (c: u64 = 0; c < cs.length; c += 1) {
+        a: u64 = cast(cs[c].a, u64);
+        b: u64 = cast(cs[c].b, u64);
+        dx: f32 = px[b] - px[a];
+        dy: f32 = py[b] - py[a];
+        dz: f32 = pz[b] - pz[a];
+        px[a] += dx * stiffness;
+        py[a] += dy * stiffness;
+        pz[a] += dz * stiffness;
+        px[b] -= dx * stiffness;
+        py[b] -= dy * stiffness;
+        pz[b] -= dz * stiffness;
+    }
+}
+
+contacts_blocks: proc(blocks: noalias []body_block, cs: []const contact) -> void = {
+    for (c: u64 = 0; c < cs.length; c += 1) {
+        a: u64 = cast(cs[c].a, u64);
+        b: u64 = cast(cs[c].b, u64);
+        p: *body_block = blocks[a / 8]&;
+        q: *body_block = blocks[b / 8]&;
+        la: u64 = a % 8;
+        lb: u64 = b % 8;
+        dx: f32 = q[0].px[lb] - p[0].px[la];
+        dy: f32 = q[0].py[lb] - p[0].py[la];
+        dz: f32 = q[0].pz[lb] - p[0].pz[la];
+        p[0].px[la] += dx * stiffness;
+        p[0].py[la] += dy * stiffness;
+        p[0].pz[la] += dz * stiffness;
+        q[0].px[lb] -= dx * stiffness;
+        q[0].py[lb] -= dy * stiffness;
+        q[0].pz[lb] -= dz * stiffness;
+    }
+}
+
+// ---------------------------------------------------------------- measuring
+
+// How many 64-byte lines hold one body's x, y and z, given each one's byte
+// offset from a line-aligned start. Each float is 4 bytes at a multiple of 4,
+// so none of them crosses a line on its own.
+lines_for: proc(x: u64, y: u64, z: u64) -> u64 = {
+    lx: u64 = x / 64;
+    ly: u64 = y / 64;
+    lz: u64 = z / 64;
+    n: u64 = 1;
+    if (ly != lx) { n += 1; }
+    if (lz != lx && lz != ly) { n += 1; }
+    return n;
+}
+
+// The average over the first 4096 bodies, which covers every repeating pattern.
+lines_per_lookup: proc(layout: u32) -> f64 = {
+    total: u64 = 0;
+    for (i: u64 = 0; i < 4096; i += 1) {
+        if (layout == 0) {
+            base: u64 = i * sizeof(body);
+            total += lines_for(base, base + 4, base + 8);
+        } else if (layout == 1) {
+            base: u64 = i * sizeof(vec3);
+            total += lines_for(base, base + 4, base + 8);
+        } else if (layout == 2) {
+            // three separate line-aligned arrays: never the same line
+            total += 3;
+        } else {
+            base: u64 = (i / 8) * sizeof(body_block) + (i % 8) * 4;
+            total += lines_for(base, base + 32, base + 64);
+        }
+    }
+    return cast(total, f64) / 4096.0;
+}
+
+checksum_aos: proc(bodies: []const body) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < bodies.length; i += 1) {
+        sum += cast(bodies[i].position.x + bodies[i].position.y + bodies[i].position.z, f64);
+    }
+    return sum;
+}
+
+checksum_columns: proc(positions: []const vec3) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        sum += cast(positions[i].x + positions[i].y + positions[i].z, f64);
+    }
+    return sum;
+}
+
+checksum_split: proc(xs: []const f32, ys: []const f32, zs: []const f32) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < xs.length; i += 1) {
+        sum += cast(xs[i] + ys[i] + zs[i], f64);
+    }
+    return sum;
+}
+
+checksum_blocks: proc(blocks: []const body_block) -> f64 = {
+    sum: f64 = 0.0;
+    for (b: u64 = 0; b < blocks.length; b += 1) {
+        for (l: u64 = 0; l < 8; l += 1) {
+            sum += cast(blocks[b].px[l] + blocks[b].py[l] + blocks[b].pz[l], f64);
+        }
+    }
+    return sum;
+}
+
+seconds: proc() -> f64 = {
+    return cast(clock(), f64) / cast(CLOCKS_PER_SEC, f64);
+}
+
+main: proc(argc: i32, argv: [*][*]c8) -> i32 = {
+    timing: b32 = argc > 1 && strcmp(argv[1], "--time") == 0;
+    steps: u64 = timing ? 20 : 2;
+
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+
+    aos: []body = push_slice<body>(arena&, body_count);
+    col: columns = {};
+    col.positions = push_slice<vec3>(arena&, body_count);
+    col.velocities = push_slice<vec3>(arena&, body_count);
+    spl: split = {};
+    spl.px = push_slice<f32>(arena&, body_count);
+    spl.py = push_slice<f32>(arena&, body_count);
+    spl.pz = push_slice<f32>(arena&, body_count);
+    spl.vx = push_slice<f32>(arena&, body_count);
+    spl.vy = push_slice<f32>(arena&, body_count);
+    spl.vz = push_slice<f32>(arena&, body_count);
+    blocks: []body_block = push_slice<body_block>(arena&, body_count / 8);
+
+    for (i: u64 = 0; i < body_count; i += 1) {
+        p: vec3 = { .x = random01() * 100.0, .y = random01() * 100.0, .z = random01() * 100.0 };
+        v: vec3 = { .x = random01() - 0.5, .y = random01() * 4.0, .z = random01() - 0.5 };
+        aos[i] = { .position = p, .velocity = v, .inverse_mass = 1.0, .radius = 0.5 };
+        col.positions[i] = p;
+        col.velocities[i] = v;
+        spl.px[i] = p.x; spl.py[i] = p.y; spl.pz[i] = p.z;
+        spl.vx[i] = v.x; spl.vy[i] = v.y; spl.vz[i] = v.z;
+        k: *body_block = blocks[i / 8]&;
+        l: u64 = i % 8;
+        k[0].px[l] = p.x; k[0].py[l] = p.y; k[0].pz[l] = p.z;
+        k[0].vx[l] = v.x; k[0].vy[l] = v.y; k[0].vz[l] = v.z;
+    }
+    cs: []contact = push_slice<contact>(arena&, contact_count);
+    for (c: u64 = 0; c < contact_count; c += 1) {
+        cs[c] = { .a = random_index(body_count), .b = random_index(body_count) };
+    }
+
+    // stream, then lookup, for each layout in turn
+    t: [9]f64 = {};
+    t[0] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { integrate_aos(aos, dt); }
+    t[1] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { contacts_aos(aos, cs); }
+    t[2] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { integrate_columns(col.positions, col.velocities, dt); }
+    t[3] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { contacts_columns(col.positions, cs); }
+    t[4] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) {
+        integrate_split(spl.px, spl.py, spl.pz, spl.vx, spl.vy, spl.vz, dt);
+    }
+    t[5] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { contacts_split(spl.px, spl.py, spl.pz, cs); }
+    t[6] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { integrate_blocks(blocks, dt); }
+    t[7] = seconds();
+    for (s: u64 = 0; s < steps; s += 1) { contacts_blocks(blocks, cs); }
+    t[8] = seconds();
+
+    printfmt("{} bodies, {} contacts, {} steps\n", body_count, contact_count, steps);
+    printfmt("bytes per body: aos {}, columns {}, split {}, blocks {}\n",
+        sizeof(body), sizeof(vec3) * 2, sizeof(f32) * 6, sizeof(body_block) / 8);
+    printf("cache lines one lookup touches: aos %.3f, columns %.3f, split %.3f, blocks %.3f\n",
+        lines_per_lookup(0), lines_per_lookup(1), lines_per_lookup(2), lines_per_lookup(3));
+
+    sums: [4]f64 = {
+        checksum_aos(aos),
+        checksum_columns(col.positions),
+        checksum_split(spl.px, spl.py, spl.pz),
+        checksum_blocks(blocks),
+    };
+    printf("checksum aos %.3f\n", sums[0]);
+    printf("checksum columns %.3f\n", sums[1]);
+    printf("checksum split %.3f\n", sums[2]);
+    printf("checksum blocks %.3f\n", sums[3]);
+    same: b32 = sums[0] == sums[1] && sums[1] == sums[2] && sums[2] == sums[3];
+    printfmt("same result: {}\n", same ? "yes" : "no");
+
+    if (timing) {
+        n_stream: f64 = cast(body_count * steps, f64);
+        n_lookup: f64 = cast(contact_count * steps, f64);
+        printf("ns per body     stream   ns per contact   lookup\n");
+        printf("  aos           %6.2f                    %6.2f\n", (t[1] - t[0]) * 1.0e9 / n_stream, (t[2] - t[1]) * 1.0e9 / n_lookup);
+        printf("  columns       %6.2f                    %6.2f\n", (t[3] - t[2]) * 1.0e9 / n_stream, (t[4] - t[3]) * 1.0e9 / n_lookup);
+        printf("  split         %6.2f                    %6.2f\n", (t[5] - t[4]) * 1.0e9 / n_stream, (t[6] - t[5]) * 1.0e9 / n_lookup);
+        printf("  blocks        %6.2f                    %6.2f\n", (t[7] - t[6]) * 1.0e9 / n_stream, (t[8] - t[7]) * 1.0e9 / n_lookup);
+    }
+    return same ? 0 : 1;
+}
