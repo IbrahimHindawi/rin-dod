@@ -1,0 +1,66 @@
+0:1 {position turret}
+    position
+        at:
+            x: 0.00
+            y: 0.00
+    turret
+        cooldown: 0.50
+1:1 {position velocity health}
+    position
+        at:
+            x: 20.00
+            y: 5.00
+    velocity
+        per_second:
+            x: -1.00
+            y: 0.00
+    health
+        points: 100.00
+        max: 100.00
+2:1 {position velocity health burning}
+    position
+        at:
+            x: 30.00
+            y: -5.00
+    velocity
+        per_second:
+            x: -1.00
+            y: 0.00
+    health
+        points: 60.00
+        max: 100.00
+    burning
+        per_second: 10.00
+3:1 {position velocity damage lifetime}
+    position
+        at:
+            x: 0.00
+            y: 0.00
+    velocity
+        per_second:
+            x: 8.00
+            y: 0.00
+    damage
+        amount: 25.00
+    lifetime
+        seconds: 2.00
+1:1 (dead)
+
+table 0 {position turret}: 1 rows, room for 4
+    position   8 bytes a row,    8 of   32 bytes in use
+    turret     8 bytes a row,    8 of   32 bytes in use
+table 1 {position velocity health}: 0 rows, room for 4
+    position   8 bytes a row,    0 of   32 bytes in use
+    velocity   8 bytes a row,    0 of   32 bytes in use
+    health     8 bytes a row,    0 of   32 bytes in use
+table 2 {position velocity health burning}: 1 rows, room for 4
+    position   8 bytes a row,    8 of   32 bytes in use
+    velocity   8 bytes a row,    8 of   32 bytes in use
+    health     8 bytes a row,    8 of   32 bytes in use
+    burning    4 bytes a row,    4 of   16 bytes in use
+table 3 {position velocity damage lifetime}: 1 rows, room for 4
+    position   8 bytes a row,    8 of   32 bytes in use
+    velocity   8 bytes a row,    8 of   32 bytes in use
+    damage     4 bytes a row,    4 of   16 bytes in use
+    lifetime   4 bytes a row,    4 of   16 bytes in use
+kayan_verify: 0 problems

@@ -1,0 +1,35 @@
+5 entities in 3 tables:
+    table 0 {position turret}: 0:1
+    table 1 {position velocity health}: 1:1 2:1 3:1
+    table 2 {position velocity damage lifetime}: 4:1
+
+movers: all {position velocity}, none {}; tables: 2, entities: 4
+    table 1 {position velocity health}: 1:1 2:1 3:1
+    table 2 {position velocity damage lifetime}: 4:1
+targets: all {position health}, none {burning}; tables: 1, entities: 3
+    table 1 {position velocity health}: 1:1 2:1 3:1
+on_fire: all {health burning}, none {}; tables: 0, entities: 0
+
+half a second of movement, over the movers' tables:
+    1:1 at (19.50,  5.00)
+    2:1 at (29.50, -5.00)
+    3:1 at (39.50,  0.00)
+    4:1 at ( 5.00,  0.00)
+
+2:1 catches fire, and the world makes table 3 for it
+the queries have checked 3 tables; updating them checks the new one only
+movers: all {position velocity}, none {}; tables: 3, entities: 4
+    table 1 {position velocity health}: 1:1 3:1
+    table 2 {position velocity damage lifetime}: 4:1
+    table 3 {position velocity health burning}: 2:1
+targets: all {position health}, none {burning}; tables: 1, entities: 2
+    table 1 {position velocity health}: 1:1 3:1
+on_fire: all {health burning}, none {}; tables: 1, entities: 1
+    table 3 {position velocity health burning}: 2:1
+
+the bullet is gone; its table is empty and stays matched:
+movers: all {position velocity}, none {}; tables: 3, entities: 3
+    table 1 {position velocity health}: 1:1 3:1
+    table 2 {position velocity damage lifetime}:
+    table 3 {position velocity health burning}: 2:1
+kayan_verify: 0 problems

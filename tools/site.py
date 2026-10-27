@@ -77,6 +77,10 @@ LINKS = {
 def link_target(url):
     base = url.split("/")[-1]
     if base in LINKS: return LINKS[base], False
+    if url.endswith("ecs/README.md"): return "#ecs", False
+    if base == "README.md": return "#overview", False
+    m = re.match(r"(\d)\.(\d)_\w+\.md$", base)
+    if m: return f"#ecs-{m.group(1)}-{m.group(2)}", False
     return url, url.startswith("http")
 
 def inline(text):
@@ -87,6 +91,7 @@ def inline(text):
             out.append(f"<code>{esc(p[1:-1])}</code>"); continue
         p = esc(p)
         p = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", p)
+        p = re.sub(r"(?<![\w*])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])", r"<em>\1</em>", p)
         def lk(m):
             href, ext = link_target(html.unescape(m.group(2)))
             attrs = ' target="_blank" rel="noopener"' if ext else ""
@@ -107,6 +112,13 @@ def md(text, skip_title=False):
     while i < len(lines):
         line = lines[i]
         if not line.strip(): flush(); i += 1; continue
+        if line.startswith("```"):
+            flush(); lang = line[3:].strip(); block = []; i += 1
+            while i < len(lines) and not lines[i].startswith("```"):
+                block.append(lines[i]); i += 1
+            i += 1
+            src = "\n".join(block)
+            out.append('<pre class="snip"><code>' + (hl_rin(src) if lang == "rin" else esc(src)) + "</code></pre>"); continue
         h = re.match(r"(#{1,4}) (.*)", line)
         if h:
             flush(); lvl = len(h.group(1))
@@ -172,7 +184,7 @@ diagram = '''
   <p class="figtext">In the array of structs, every cache line movement pulls in is about two thirds tint, age, life, size and name. In the struct of arrays, movement fetches only the position and velocity columns: <strong>6,291,456</strong> bytes a step instead of <strong>17,825,792</strong>.</p>
 </figure>'''
 views.append(f'''<section class="view" id="v-overview" data-view="overview">
-<header class="vhead"><p class="eyebrow">rin · data-oriented design · seven lessons</p><h1>rin-dod</h1>
+<header class="vhead"><p class="eyebrow">rin · data-oriented design · seven lessons · build an ECS</p><h1>rin-dod</h1>
 <p class="lede">From one array of structs to a small archetype entity component system, written in rin and checked against the output each program must print.</p></header>
 {diagram}
 <div class="prose">{md(readme, skip_title=True)}</div>
@@ -200,6 +212,42 @@ for tok, num, title, base, doc, blurb in lessons:
 <div class="pane" data-pane="output" hidden><p class="note">What <code>{base.split("/")[-1]}</code> prints. <code>tools/check.py</code> fails the lesson if a single byte differs.</p><pre class="term"><code>{esc(exp)}</code></pre></div>
 </section>''')
 
+# Build an ECS: the course's README, then its chapters, grouped by part
+ecs_lessons = []
+for doc in sorted((REPO / "ecs" / "docs").glob("*.md")):
+    m = re.match(r"(\d)\.(\d)_(\w+)\.md$", doc.name)
+    part, step = m.group(1), m.group(2)
+    title = read(f"ecs/docs/{doc.name}").split("\n", 1)[0].lstrip("# ").split(" ", 1)[1]
+    found = list((REPO / "ecs" / "src").glob(f"{part}.*/{part}.{step}.*/*.rin"))
+    base = found[0].relative_to(REPO).as_posix()[:-4]
+    ecs_lessons.append((f"ecs-{part}-{step}", f"{part}.{step}", title, base, f"ecs/docs/{doc.name}", part))
+ECS_PARTS = {"1": "Entities", "2": "Components", "3": "Systems"}
+# Each chapter's one-line summary, from the "about" column of the README's table.
+ecs_about = {m.group(1): re.sub(r"`", "", m.group(2)).strip()
+             for m in re.finditer(r"^\| (\d\.\d) \| [^|]+ \| ([^|]+) \|$", read("ecs/README.md"), re.M)}
+
+nav_ecs = {part: [] for part in ECS_PARTS}
+nav_ecs["1"].append(('ecs', '', 'Build an ECS', 'The course, and how to build it'))
+views.append(f'''<section class="view" id="v-ecs" data-view="ecs" hidden>
+<header class="vhead"><p class="eyebrow">rin · a second course · fifteen chapters</p><h1>Build an ECS</h1><p class="path">ecs/README.md</p></header>
+<div class="prose">{md(read("ecs/README.md"), skip_title=True)}</div></section>''')
+
+for tok, num, title, base, doc, part in ecs_lessons:
+    src = read(base + ".rin"); exp = read(base + ".expected")
+    guide = re.sub(r"^`ecs/src/[^`]+`\n\n", "", read(doc), count=1, flags=re.M)  # the header shows the path
+    nav_ecs[part].append((tok, num, title, ecs_about.get(num, "")))
+    views.append(f'''<section class="view" id="v-{tok}" data-view="{tok}" hidden>
+<header class="vhead"><p class="eyebrow">Build an ECS · part {part}, {ECS_PARTS[part].lower()} · {num}</p><h1>{esc(title)}</h1><p class="path">{base}.rin</p></header>
+<div class="tabs" role="tablist" aria-label="{esc(title)} views">
+  <button role="tab" type="button" class="tab" aria-selected="true" data-pane="guide">Guide</button>
+  <button role="tab" type="button" class="tab" aria-selected="false" data-pane="code">Code <span class="count">{nlines(src)} lines</span></button>
+  <button role="tab" type="button" class="tab" aria-selected="false" data-pane="output">Output <span class="count">{nlines(exp)} lines</span></button>
+</div>
+<div class="pane" data-pane="guide"><div class="prose">{md(guide, skip_title=True)}</div></div>
+<div class="pane" data-pane="code" hidden>{code_block(src, "rin")}</div>
+<div class="pane" data-pane="output" hidden><p class="note">What <code>{base.split("/")[-1]}</code> prints. <code>tools/check.py</code> fails the chapter if a single byte differs.</p><pre class="term"><code>{esc(exp)}</code></pre></div>
+</section>''')
+
 lib = read("includes/kayan.rin")
 nav.append(('library', '', 'includes/kayan.rin', 'The world lessons 5 and 6 import'))
 views.append(f'''<section class="view" id="v-library" data-view="library" hidden>
@@ -223,7 +271,11 @@ group1 = "".join(navitem(*n) for n in nav[:2])
 group2 = "".join(navitem(*n) for n in nav[2:9])
 group3 = "".join(navitem(*n) for n in nav[9:])
 
+ecs_groups = "".join(f'<div class="group"><h2>ECS · {name}</h2>' + "".join(navitem(*n) for n in nav_ecs[part]) + "</div>"
+                     for part, name in ECS_PARTS.items())
+
 template = (REPO / "website" / "template.html").read_text(encoding="utf-8")
-page = template.replace("{{NAV1}}", group1).replace("{{NAV2}}", group2).replace("{{NAV3}}", group3).replace("{{VIEWS}}", "\n".join(views))
+page = (template.replace("{{NAV1}}", group1).replace("{{NAV2}}", group2).replace("{{NAV3}}", group3)
+        .replace("{{NAV_ECS}}", ecs_groups).replace("{{VIEWS}}", "\n".join(views)))
 OUT.write_text(page, encoding="utf-8", newline="\n")
 print(f"wrote {OUT.relative_to(REPO).as_posix()} ({len(page)//1024} KB)")

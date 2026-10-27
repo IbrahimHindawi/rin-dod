@@ -1,0 +1,209 @@
+// 1.4 The entity index
+//
+// So far every array has room for every number, and systems walk all of them,
+// skipping holes. This chapter packs the data instead. Live entities sit in
+// rows 0 to count-1 with no holes, and a system is a straight loop over the
+// rows: the stream lesson 1 measured.
+//
+// Packing means an entity's data no longer sits at its number, and it moves.
+// Removing a row moves the last row into the hole (swap-remove), so whatever
+// was last changes row. Two things keep track:
+//
+//   * each row records which entity owns it, `entities[row]`;
+//   * each number has a slot recording its generation and its current row.
+//
+// A handle finds its data through its slot. When a row moves, the moved
+// entity's slot is updated. That one line is the invariant everything else in
+// this course relies on, and `kayan_verify` checks it.
+//
+// To keep the chapter about the index, every entity here is the same kind of
+// thing: a particle with a position and a velocity. Part 2 brings back
+// different kinds, each packed in a table of its own.
+
+import "std/print.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+kayan_entity: struct = {
+    index: u32;
+    generation: u32;
+}
+
+kayan_status: enum[must_use] = {
+    ok,
+    dead,
+}
+
+// Where a number's entity is: its generation, and the row its data is in.
+kayan_slot: struct = {
+    generation: u32;
+    row: u32;
+}
+
+// Two halves. The slots, indexed by the entity's number, which never moves. The
+// rows, packed, indexed by row, which moves: `count` of them, each with its
+// owner and its components side by side.
+kayan_world: struct = {
+    slot_count: u32;
+    slots: [8]kayan_slot;
+    free: [8]u32;
+    free_count: u32;
+
+    count: u32;
+    entities: [8]kayan_entity;
+    positions: [8]vec2;
+    velocities: [8]vec2;
+}
+
+kayan_alive: proc(w: *kayan_world, e: kayan_entity) -> b32 = {
+    return e.index < w[0].slot_count && w[0].slots[e.index].generation == e.generation;
+}
+
+// A number, as in 1.3, and the next row at the end of the packed rows.
+kayan_spawn: proc(w: *kayan_world, p: vec2, v: vec2) -> kayan_entity = {
+    e: kayan_entity = {};
+    if (w[0].free_count > 0) {
+        w[0].free_count -= 1;
+        e.index = w[0].free[w[0].free_count];
+    } else {
+        if (w[0].slot_count == 8) {
+            printfmt("the world is full\n");
+            exit(1);
+        }
+        e.index = w[0].slot_count;
+        w[0].slot_count += 1;
+        w[0].slots[e.index].generation = 1;
+    }
+    e.generation = w[0].slots[e.index].generation;
+
+    row: u32 = w[0].count;
+    w[0].count += 1;
+    w[0].entities[row] = e;
+    w[0].positions[row] = p;
+    w[0].velocities[row] = v;
+    w[0].slots[e.index].row = row;
+    return e;
+}
+
+// Swap-remove: the last row moves into the hole, so the rows stay packed. The
+// entity that owned the last row now lives at `row`, and its slot must say so.
+kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    row: u32 = w[0].slots[e.index].row;
+    last: u32 = w[0].count - 1;
+    if (row != last) {
+        moved: kayan_entity = w[0].entities[last];
+        w[0].entities[row] = moved;
+        w[0].positions[row] = w[0].positions[last];
+        w[0].velocities[row] = w[0].velocities[last];
+        w[0].slots[moved.index].row = row;
+    }
+    w[0].count -= 1;
+    w[0].slots[e.index].generation += 1;
+    w[0].free[w[0].free_count] = e.index;
+    w[0].free_count += 1;
+    return kayan_status.ok;
+}
+
+// Handle, then slot, then row: the data is wherever the row is now.
+get_position: proc(w: *kayan_world, e: kayan_entity) -> *vec2 = {
+    if (!kayan_alive(w, e)) {
+        return null;
+    }
+    return w[0].positions[w[0].slots[e.index].row]&;
+}
+
+// No flags and no holes: every row is a live particle. This is a stream over
+// two packed arrays.
+movement_system: proc(w: *kayan_world, dt: f32) -> void = {
+    for (row: u32 = 0; row < w[0].count; row += 1) {
+        w[0].positions[row].x += w[0].velocities[row].x * dt;
+        w[0].positions[row].y += w[0].velocities[row].y * dt;
+    }
+}
+
+// The invariant, checked: every row belongs to a live entity whose slot points
+// back at that row, and there are as many rows as live entities. Returns how
+// many checks failed, printing each one.
+kayan_verify: proc(w: *kayan_world) -> u32 = {
+    problems: u32 = 0;
+    for (row: u32 = 0; row < w[0].count; row += 1) {
+        e: kayan_entity = w[0].entities[row];
+        if (!kayan_alive(w, e)) {
+            printfmt("kayan_verify: row {} holds dead entity {}:{}\n", row, e.index, e.generation);
+            problems += 1;
+        } else if (w[0].slots[e.index].row != row) {
+            printfmt("kayan_verify: {}:{} is in row {}, its slot says row {}\n",
+                e.index, e.generation, row, w[0].slots[e.index].row);
+            problems += 1;
+        }
+    }
+    live: u32 = w[0].slot_count - w[0].free_count;
+    if (live != w[0].count) {
+        printfmt("kayan_verify: {} rows, {} live entities\n", w[0].count, live);
+        problems += 1;
+    }
+    return problems;
+}
+
+print_rows: proc(w: *kayan_world) -> void = {
+    for (row: u32 = 0; row < w[0].count; row += 1) {
+        e: kayan_entity = w[0].entities[row];
+        printf("    row %u  %u:%u  position (%5.2f, %5.2f)\n", row, e.index, e.generation,
+            cast(w[0].positions[row].x, f64), cast(w[0].positions[row].y, f64));
+    }
+    // A slot is in use when the row it points at is owned by its number, in its
+    // current generation. A free slot still holds the row it last had.
+    printf("    slots:");
+    for (i: u32 = 0; i < w[0].slot_count; i += 1) {
+        s: kayan_slot = w[0].slots[i];
+        owner: kayan_entity = w[0].entities[s.row];
+        if (s.row < w[0].count && owner.index == i && owner.generation == s.generation) {
+            printf("  %u -> row %u", i, s.row);
+        } else {
+            printf("  %u free", i);
+        }
+    }
+    printf("\n");
+}
+
+main: proc() -> i32 = {
+    w: kayan_world = {};
+    p: [5]kayan_entity = {};
+    for (i: u32 = 0; i < 5; i += 1) {
+        p[i] = kayan_spawn(w&, { .x = cast(i, f32), .y = 0.0 }, { .x = 0.0, .y = 1.0 });
+    }
+    printfmt("spawned 5 particles\n");
+    print_rows(w&);
+
+    printfmt("despawn {}:{}, in row 1: the last row moves into the hole\n", p[1].index, p[1].generation);
+    _ = kayan_despawn(w&, p[1]);
+    print_rows(w&);
+
+    printfmt("despawn {}:{}, which the last despawn moved: its handle still finds it\n",
+        p[4].index, p[4].generation);
+    _ = kayan_despawn(w&, p[4]);
+    print_rows(w&);
+
+    q: kayan_entity = kayan_spawn(w&, { .x = 9.0, .y = 0.0 }, { .x = 0.0, .y = 1.0 });
+    printfmt("spawn {}:{}: it reuses a number and takes the next row\n", q.index, q.generation);
+    print_rows(w&);
+
+    movement_system(w&, 0.5);
+    movement_system(w&, 0.5);
+    printfmt("two steps of movement, a straight loop over {} rows\n", w.count);
+    print_rows(w&);
+
+    at: *vec2 = get_position(w&, p[2]);
+    printf("%u:%u is at (%.2f, %.2f), wherever its row is\n", p[2].index, p[2].generation,
+        cast(at[0].x, f64), cast(at[0].y, f64));
+    printfmt("{}:{} has a position: {}\n", p[4].index, p[4].generation,
+        get_position(w&, p[4]) != null ? "yes" : "no, it is dead");
+    printfmt("kayan_verify: {} problems\n", kayan_verify(w&));
+    return 0;
+}

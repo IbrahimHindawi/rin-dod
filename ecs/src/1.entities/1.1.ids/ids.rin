@@ -1,0 +1,154 @@
+// 1.1 An entity is a number
+//
+// An entity names one thing in the game: a drone, a bullet, the turret. It has
+// no data of its own and no behaviour. It is a number, and everything about
+// the thing it names is stored somewhere else, in arrays, at that number.
+//
+// This chapter builds the simplest ECS there is: one array per component, as
+// long as the most entities the world can hold, and a flag beside each array
+// saying which entities have that component. A system is a loop over every
+// entity that checks the flags it needs.
+//
+// It works, and it already has the shape every later chapter keeps: entities
+// are ids, components are plain data in arrays, systems are loops. It also
+// wastes memory and time in ways the next chapters remove one at a time.
+
+import "std/print.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// An entity is a number. Wrapping it in a struct costs nothing at run time and
+// keeps it from being mixed up with any other u32: a proc that takes a
+// kayan_entity cannot be handed a count or a row by mistake.
+kayan_entity: struct = {
+    index: u32;
+}
+
+// The world: how many entities exist, and for each component an array of
+// values and an array of flags, both indexed by the entity's number. Every
+// array has room for 8, the most entities this world can hold.
+kayan_world: struct = {
+    count: u32;
+    positions: [8]vec2;
+    has_position: [8]b32;
+    velocities: [8]vec2;
+    has_velocity: [8]b32;
+    healths: [8]f32;
+    has_health: [8]b32;
+}
+
+// A new entity is the next number. It has no components yet.
+kayan_spawn: proc(w: *kayan_world) -> kayan_entity = {
+    if (w[0].count == 8) {
+        printfmt("the world is full\n");
+        exit(1);
+    }
+    e: kayan_entity = { .index = w[0].count };
+    w[0].count += 1;
+    return e;
+}
+
+// Giving an entity a component is writing the value at the entity's number and
+// raising the flag beside it.
+set_position: proc(w: *kayan_world, e: kayan_entity, p: vec2) -> void = {
+    w[0].positions[e.index] = p;
+    w[0].has_position[e.index] = true;
+}
+
+set_velocity: proc(w: *kayan_world, e: kayan_entity, v: vec2) -> void = {
+    w[0].velocities[e.index] = v;
+    w[0].has_velocity[e.index] = true;
+}
+
+set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
+    w[0].healths[e.index] = points;
+    w[0].has_health[e.index] = true;
+}
+
+// A system: everything with a position and a velocity moves. It visits every
+// entity in the world and skips the ones that lack either component. Returns
+// how many it moved.
+movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
+    moved: u32 = 0;
+    for (i: u32 = 0; i < w[0].count; i += 1) {
+        if (w[0].has_position[i] && w[0].has_velocity[i]) {
+            w[0].positions[i].x += w[0].velocities[i].x * dt;
+            w[0].positions[i].y += w[0].velocities[i].y * dt;
+            moved += 1;
+        }
+    }
+    return moved;
+}
+
+print_world: proc(w: *kayan_world) -> void = {
+    for (i: u32 = 0; i < w[0].count; i += 1) {
+        printf("    entity %u", i);
+        if (w[0].has_position[i]) {
+            printf("  position (%5.2f, %5.2f)", cast(w[0].positions[i].x, f64), cast(w[0].positions[i].y, f64));
+        } else {
+            printf("  position -              ");
+        }
+        if (w[0].has_velocity[i]) {
+            printf("  velocity (%5.2f, %5.2f)", cast(w[0].velocities[i].x, f64), cast(w[0].velocities[i].y, f64));
+        } else {
+            printf("  velocity -              ");
+        }
+        if (w[0].has_health[i]) {
+            printf("  health %.0f", cast(w[0].healths[i], f64));
+        } else {
+            printf("  health -");
+        }
+        printf("\n");
+    }
+}
+
+// How many of the 8 slots of one component's array hold a value.
+used: proc(flags: [8]b32) -> u32 = {
+    n: u32 = 0;
+    for (i: u32 = 0; i < 8; i += 1) {
+        if (flags[i]) {
+            n += 1;
+        }
+    }
+    return n;
+}
+
+main: proc() -> i32 = {
+    w: kayan_world = {};
+
+    turret: kayan_entity = kayan_spawn(w&);
+    set_position(w&, turret, { .x = 0.0, .y = 0.0 });
+    set_health(w&, turret, 500.0);
+
+    drone_a: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_a, { .x = 10.0, .y = 0.0 });
+    set_velocity(w&, drone_a, { .x = -1.0, .y = 0.5 });
+    set_health(w&, drone_a, 100.0);
+
+    drone_b: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_b, { .x = 0.0, .y = 10.0 });
+    set_velocity(w&, drone_b, { .x = 0.5, .y = -1.0 });
+    set_health(w&, drone_b, 100.0);
+
+    bullet: kayan_entity = kayan_spawn(w&);
+    set_position(w&, bullet, { .x = 0.0, .y = 0.0 });
+    set_velocity(w&, bullet, { .x = 4.0, .y = 4.0 });
+
+    printfmt("spawned turret {}, drones {} and {}, bullet {}\n",
+        turret.index, drone_a.index, drone_b.index, bullet.index);
+    print_world(w&);
+
+    for (step: u32 = 1; step <= 2; step += 1) {
+        moved: u32 = movement_system(w&, 0.5);
+        printfmt("step {}: the movement system looked at {} entities and moved {}\n", step, w.count, moved);
+    }
+    print_world(w&);
+
+    printfmt("every component array has room for 8; {} entities exist\n", w.count);
+    printfmt("    positions hold {} values, velocities {}, healths {}\n",
+        used(w.has_position), used(w.has_velocity), used(w.has_health));
+    return 0;
+}

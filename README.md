@@ -12,6 +12,11 @@ Every lesson is a standalone program in its own folder, laid out like
 [rin-dx11](https://github.com/IbrahimHindawi/rin-dx11): one source file that
 opens with what it teaches, and the output it must print beside it.
 
+A second course, [Build an ECS](ecs/README.md), takes the other road: fifteen
+chapters that build an archetype ECS from nothing, entities, then
+components, then systems, and end with a game running on it. Each chapter is
+a program that compiles on its own and a guide that builds it step by step.
+
 ## Layout
 
     src/
@@ -22,11 +27,14 @@ opens with what it teaches, and the output it must print beside it.
     includes/
       kayan.rin                 lesson 4's world, used by lessons 5 and 6
     docs/                       background and exercises, one guide a lesson
+    ecs/                        the Build an ECS course: its own README,
+                                fifteen programs in src/, their guides in docs/
     website/
       index.html                every lesson as one page: guide, code, output
       template.html             its layout and styles
     tools/
       check.py                  build, run and compare every lesson
+      check_snippets.py         check every sample in the ECS guides is in its program
       site.py                   rebuild website/index.html from the repo
     build.rin                   the lesson list, for `rin build`
 
@@ -82,6 +90,18 @@ with exercises.
 | 5 | [inspector](docs/5_inspector.md) | printing and editing any entity from reflection records |
 | 6 | [kayan](docs/6_kayan.md) | a small game, and deferring structural changes to a command buffer |
 | 7 | [access patterns](docs/7_access_patterns.md) | four layouts under streams and lookups, and how an ECS decides |
+
+## Build an ECS
+
+[ecs/README.md](ecs/README.md) is the course and its chapter list. In short:
+
+| | part | chapters |
+|---|---|---|
+| 1 | entities | ids, despawning, generations, the entity index |
+| 2 | components | signatures, columns, tables, archetypes, typed access, adding and removing, inspecting |
+| 3 | systems | queries, systems, commands, a game |
+
+`python tools/check.py ecs` builds, runs and checks just those.
 
 ## License
 

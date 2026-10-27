@@ -1,0 +1,18 @@
+spawned the turret: the world made table 0 for it
+spawned 3 drones: the first made a table, the others found it
+spawned 2 bullets
+6 entities in 3 tables:
+    table 0 {position turret}: 0:1
+    table 1 {position velocity health}: 1:1 2:1 3:1
+    table 2 {position velocity damage lifetime}: 4:1 5:1
+despawn drone 1:1: a swap-remove inside its own table
+    table 0 {position turret}: 0:1
+    table 1 {position velocity health}: 3:1 2:1
+    table 2 {position velocity damage lifetime}: 4:1 5:1
+every position, table by table:
+    table 0 row 0  0:1 at ( 0.00,  0.00)
+    table 1 row 0  3:1 at (30.00,  5.00)
+    table 1 row 1  2:1 at (20.00,  5.00)
+    table 2 row 0  4:1 at ( 0.00,  1.00)
+    table 2 row 1  5:1 at ( 1.00,  0.00)
+kayan_verify: 0 problems

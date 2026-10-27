@@ -1,0 +1,162 @@
+// 2.2 Columns
+//
+// 1.4 kept its components in typed arrays, `positions: [8]vec2`. A world that
+// works for any component cannot: it does not know the types. It knows, from
+// the registry, each component's size and alignment, and that is enough. A
+// column is an array of a component kept as bytes: row `r` is the `size` bytes
+// at `r * size`.
+//
+// Everything a table needs to do with its data is a byte operation on columns:
+// grow, copy a row over another (swap-remove), zero a new row. None of it
+// depends on the type. The type comes back at the edge, where game code reads
+// the column as `[]T`, and that typed view checks the size matches.
+//
+// This chapter builds the column and exercises it on its own, with the count
+// and capacity kept beside it by hand. 2.3 puts columns in a table.
+
+import "std/print.rin"
+import "std/memops.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+position: struct = { at: vec2; }
+health: struct = { points: f32; max: f32; }
+
+component: enum = {
+    position,
+    health,
+}
+
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<health>() -> component = { return component.health; }
+
+// ---------------------------------------------------------------------------
+// The column: bytes, and how many of them make one row
+// ---------------------------------------------------------------------------
+
+// A column does not know its count or capacity. A table keeps those once for
+// all its columns, since every column of a table has the same number of rows.
+kayan_column: struct = {
+    data: [*]u8;
+    size: u64;
+    align: u64;
+}
+
+// An empty column for one component. Its size and alignment come from the
+// component's reflect record.
+kayan_column_init: proc(info: *const reflect) -> kayan_column = {
+    c: kayan_column = {};
+    c.size = info[0].size;
+    c.align = info[0].align;
+    return c;
+}
+
+// Row `row`'s first byte.
+kayan_column_row: proc(c: *kayan_column, row: u64) -> *u8 = {
+    return c[0].data[row * c[0].size]&;
+}
+
+// A new block with room for `capacity` rows; the first `count` rows are copied
+// over. The old block stays in the arena: an arena frees everything at once,
+// never one allocation, and this course accepts the waste.
+kayan_column_grow: proc(arena: *memops_arena, c: *kayan_column, count: u64, capacity: u64) -> void = {
+    data: [*]u8 = cast(memops_arena_push_zero(arena, c[0].size * capacity, c[0].align), [*]u8);
+    if (count > 0) {
+        memcpy(data[0]&, c[0].data[0]&, c[0].size * count);
+    }
+    c[0].data = data;
+}
+
+kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
+    memcpy(kayan_column_row(c, to), kayan_column_row(c, from), c[0].size);
+}
+
+kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
+    memset(kayan_column_row(c, row), 0, c[0].size);
+}
+
+// The typed view: the column's first `count` rows as `[]T`. Reading a column
+// as the wrong type would reinterpret its bytes, so the size is checked: the
+// one mistake the byte level cannot catch is caught here, at the edge.
+kayan_column_slice: proc<T>(c: *kayan_column, count: u64) -> []T = {
+    if (c[0].size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c[0].size, sizeof(T));
+        exit(1);
+    }
+    raw: [*]T = cast(c[0].data, [*]T);
+    return raw[0..count];
+}
+
+// ---------------------------------------------------------------------------
+// Using it
+// ---------------------------------------------------------------------------
+
+print_bytes: proc(c: *kayan_column, row: u64) -> void = {
+    bytes: *u8 = kayan_column_row(c, row);
+    raw: [*]u8 = cast(bytes, [*]u8);
+    for (i: u64 = 0; i < c[0].size; i += 1) {
+        printf(" %02x", cast(raw[i], u32));
+    }
+}
+
+print_rows: proc(positions: *kayan_column, healths: *kayan_column, count: u64) -> void = {
+    ps: []position = kayan_column_slice<position>(positions, count);
+    hs: []health = kayan_column_slice<health>(healths, count);
+    for (row: u64 = 0; row < count; row += 1) {
+        printf("    row %u  position (%5.2f, %5.2f)  health %3.0f / %3.0f\n", cast(row, u32),
+            cast(ps[row].at.x, f64), cast(ps[row].at.y, f64),
+            cast(hs[row].points, f64), cast(hs[row].max, f64));
+    }
+}
+
+main: proc() -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+
+    // Two columns, made from nothing but reflect records.
+    positions: kayan_column = kayan_column_init(position<>&);
+    healths: kayan_column = kayan_column_init(health<>&);
+    printfmt("a position column has {}-byte rows, a health column {}-byte rows\n",
+        positions.size, healths.size);
+
+    // Count and capacity, kept by hand here. 2.3 moves them into a table.
+    count: u64 = 0;
+    capacity: u64 = 0;
+
+    for (i: u64 = 0; i < 5; i += 1) {
+        if (count == capacity) {
+            capacity = capacity == 0 ? 2 : capacity * 2;
+            kayan_column_grow(arena&, positions&, count, capacity);
+            kayan_column_grow(arena&, healths&, count, capacity);
+            printfmt("    grew to room for {} rows\n", capacity);
+        }
+        row: u64 = count;
+        count += 1;
+        kayan_column_zero_row(positions&, row);
+        kayan_column_zero_row(healths&, row);
+        // Back to types to write the values.
+        ps: []position = kayan_column_slice<position>(positions&, count);
+        hs: []health = kayan_column_slice<health>(healths&, count);
+        ps[row] = { .at = { .x = cast(i, f32), .y = 1.0 } };
+        hs[row] = { .points = 50.0 + 10.0 * cast(i, f32), .max = 100.0 };
+    }
+    printfmt("five rows, written through the typed view:\n");
+    print_rows(positions&, healths&, count);
+
+    printf("row 1's health as the column stores it, bytes:");
+    print_bytes(healths&, 1);
+    printf("\n    that is 60.0 and 100.0 as little-endian f32s; the column never knew\n");
+
+    // Swap-remove row 1 from both columns: the same byte copy for both, sized by
+    // each column, so a row stays a row across columns.
+    last: u64 = count - 1;
+    kayan_column_copy_row(positions&, 1, last);
+    kayan_column_copy_row(healths&, 1, last);
+    count -= 1;
+    printfmt("swap-removed row 1: row {} moved into it, in both columns\n", last);
+    print_rows(positions&, healths&, count);
+    return 0;
+}

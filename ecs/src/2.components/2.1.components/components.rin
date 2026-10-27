@@ -1,0 +1,173 @@
+// 2.1 Components and signatures
+//
+// Part 1 hard-coded its components: a positions array, a velocities array, a
+// flag for each. Every new component meant editing the world. Part 2 makes the
+// world work for components it has never heard of, and this chapter lays the
+// ground: what a component is, how the world tells components apart without
+// knowing their types, and how a set of components is written down.
+//
+//   * A component is a plain struct.
+//   * Each component type gets an id, a small number, decided at compile time.
+//   * The world keeps a registry: for each id, the component's reflect record,
+//     which says its name, size and alignment. That is all the world needs to
+//     store, copy and move a component it knows nothing else about.
+//   * A set of components is a signature: a u64 with bit `id` set for each
+//     component in the set. Asking whether a set contains another is one AND.
+//
+// No entities in this chapter. 2.3 puts the two halves together.
+
+import "std/print.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// The components. Plain data, nothing else: no procs, no pointers to other
+// entities, no knowledge of the world.
+position: struct = { at: vec2; }
+velocity: struct = { per_second: vec2; }
+health: struct = { points: f32; max: f32; }
+damage: struct = { amount: f32; }
+lifetime: struct = { seconds: f32; }
+burning: struct = { per_second: f32; }
+turret: struct = { cooldown: f32; timer: f32; }
+
+// One id per component type: its position in this enum.
+component: enum = {
+    position,
+    velocity,
+    health,
+    damage,
+    lifetime,
+    burning,
+    turret,
+}
+
+// From a type to its id, at compile time. Each line is a specialization of the
+// generic proc for one type; calling component_of<health>() is resolved by the
+// compiler to `component.health`, with nothing looked up at run time.
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<velocity>() -> component = { return component.velocity; }
+component_of: proc<health>() -> component = { return component.health; }
+component_of: proc<damage>() -> component = { return component.damage; }
+component_of: proc<lifetime>() -> component = { return component.lifetime; }
+component_of: proc<burning>() -> component = { return component.burning; }
+component_of: proc<turret>() -> component = { return component.turret; }
+
+// ---------------------------------------------------------------------------
+// The world's side: ids and bits, never types
+// ---------------------------------------------------------------------------
+
+// The registry. The world stores components as bytes, so per id it needs to
+// know how many bytes, at what alignment, and a name for printing. A reflect
+// record has all three.
+kayan_world: struct = {
+    infos: [64]*const reflect;
+    component_count: u32;
+}
+
+// One bit per component. A signature is a u64, so a world has at most 64.
+kayan_bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+// The typed layer: from a type to the id and bit the world works in.
+kayan_id_of: proc<T>() -> u32 = {
+    return cast(component_of<T>(), u32);
+}
+
+kayan_mask_of: proc<T>() -> u64 = {
+    return kayan_bit(kayan_id_of<T>());
+}
+
+kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect) -> void = {
+    if (id >= 64) {
+        printfmt("kayan: component id {} is past the 64 a signature can hold\n", id);
+        exit(1);
+    }
+    w[0].infos[id] = info;
+    if (id + 1 > w[0].component_count) {
+        w[0].component_count = id + 1;
+    }
+}
+
+
+// A signature as names, `{position velocity}`.
+kayan_print_signature: proc(w: *kayan_world, signature: u64) -> void = {
+    printf("{");
+    first: b32 = true;
+    for (id: u32 = 0; id < w[0].component_count; id += 1) {
+        if ((signature & kayan_bit(id)) != 0) {
+            printf(first ? "%s" : " %s", w[0].infos[id][0].name);
+            first = false;
+        }
+    }
+    printf("}");
+}
+
+// A signature as bits, highest component first, so each column of the output
+// is one component.
+print_bits: proc(w: *kayan_world, signature: u64) -> void = {
+    id: u32 = w[0].component_count;
+    while (id > 0) {
+        id -= 1;
+        printf((signature & kayan_bit(id)) != 0 ? "1" : "0");
+    }
+}
+
+// Does a set contain every component of another? One AND and one compare.
+kayan_contains: proc(signature: u64, wanted: u64) -> b32 = {
+    return (signature & wanted) == wanted;
+}
+
+// `position<>` is the compiler's reflect record for position: its name, size
+// and alignment, written into the program as data. Registering hands the world
+// that record under position's id.
+register_components: proc(w: *kayan_world) -> void = {
+    kayan_register(w, kayan_id_of<position>(), position<>&);
+    kayan_register(w, kayan_id_of<velocity>(), velocity<>&);
+    kayan_register(w, kayan_id_of<health>(), health<>&);
+    kayan_register(w, kayan_id_of<damage>(), damage<>&);
+    kayan_register(w, kayan_id_of<lifetime>(), lifetime<>&);
+    kayan_register(w, kayan_id_of<burning>(), burning<>&);
+    kayan_register(w, kayan_id_of<turret>(), turret<>&);
+}
+
+main: proc() -> i32 = {
+    w: kayan_world = {};
+    register_components(w&);
+
+    printfmt("the registry: {} components\n", w.component_count);
+    printfmt("    id  name       size  align\n");
+    for (id: u32 = 0; id < w.component_count; id += 1) {
+        info: *const reflect = w.infos[id];
+        printf("    %2u  %-9s  %4u  %5u\n", id, info[0].name, cast(info[0].size, u32), cast(info[0].align, u32));
+    }
+
+    // What a thing is, written as the set of its components.
+    drone: u64 = kayan_mask_of<position>() | kayan_mask_of<velocity>() | kayan_mask_of<health>();
+    bullet: u64 = kayan_mask_of<position>() | kayan_mask_of<velocity>() | kayan_mask_of<damage>()
+        | kayan_mask_of<lifetime>();
+    gun: u64 = kayan_mask_of<position>() | kayan_mask_of<turret>();
+    burning_drone: u64 = drone | kayan_mask_of<burning>();
+
+    printfmt("signatures, one bit per component, highest id first:\n");
+    printf("    drone          "); print_bits(w&, drone); printf("  "); kayan_print_signature(w&, drone); printf("\n");
+    printf("    bullet         "); print_bits(w&, bullet); printf("  "); kayan_print_signature(w&, bullet); printf("\n");
+    printf("    turret         "); print_bits(w&, gun); printf("  "); kayan_print_signature(w&, gun); printf("\n");
+    printf("    burning drone  "); print_bits(w&, burning_drone); printf("  "); kayan_print_signature(w&, burning_drone); printf("\n");
+
+    // Which of them would a movement system want? Everything that contains
+    // {position velocity}.
+    moves: u64 = kayan_mask_of<position>() | kayan_mask_of<velocity>();
+    printf("movement wants "); kayan_print_signature(w&, moves); printf(":\n");
+    printfmt("    drone {}, bullet {}, turret {}, burning drone {}\n",
+        kayan_contains(drone, moves) ? "yes" : "no", kayan_contains(bullet, moves) ? "yes" : "no",
+        kayan_contains(gun, moves) ? "yes" : "no", kayan_contains(burning_drone, moves) ? "yes" : "no");
+
+    // Adding and removing a component is setting and clearing its bit.
+    put_out: u64 = burning_drone & ~kayan_mask_of<burning>();
+    printfmt("a burning drone with burning removed is a drone again: {}\n", put_out == drone ? "yes" : "no");
+    return 0;
+}

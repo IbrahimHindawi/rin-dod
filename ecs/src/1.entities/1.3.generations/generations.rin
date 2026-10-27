@@ -1,0 +1,208 @@
+// 1.3 Generations
+//
+// 1.2's bug: a number outlives the entity it named, and when the number is
+// reused the old reference names the new entity. The fix is to count lives.
+// Each number gets a generation, and a reference carries both: entity 1 in its
+// first life is 1:1, and the entity that reuses the number is 1:2. Despawning
+// bumps the generation, so every reference to the dead entity stops matching
+// at once, wherever it is kept.
+//
+// A reference with a generation is called a handle. Checking one is a single
+// comparison, so every access can afford it.
+
+import "std/print.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// A handle: which number, and which life of that number.
+kayan_entity: struct = {
+    index: u32;
+    generation: u32;
+}
+
+// What despawning reports. `dead` means the handle no longer names a live
+// entity, so nothing was changed. must_use makes ignoring it a compile error.
+kayan_status: enum[must_use] = {
+    ok,
+    dead,
+}
+
+// `generations[i]` is the life number `i` is in, or will be in next if `i` is
+// free. The `alive` array from 1.2 is gone: the generations say it.
+kayan_world: struct = {
+    count: u32;
+    generations: [8]u32;
+    free: [8]u32;
+    free_count: u32;
+    positions: [8]vec2;
+    has_position: [8]b32;
+    velocities: [8]vec2;
+    has_velocity: [8]b32;
+    healths: [8]f32;
+    has_health: [8]b32;
+}
+
+// A handle is alive when its generation is the one its number is in now.
+// Despawning bumps the number's generation straight away, so a free number
+// already holds a generation no handle has been given yet, and no handle
+// matches it.
+kayan_alive: proc(w: *kayan_world, e: kayan_entity) -> b32 = {
+    return e.index < w[0].count && w[0].generations[e.index] == e.generation;
+}
+
+// Generations start at 1. So the zeroed handle, 0:0, never names a live
+// entity, and `{}` can stand for "no entity".
+kayan_spawn: proc(w: *kayan_world) -> kayan_entity = {
+    e: kayan_entity = {};
+    if (w[0].free_count > 0) {
+        w[0].free_count -= 1;
+        e.index = w[0].free[w[0].free_count];
+    } else {
+        if (w[0].count == 8) {
+            printfmt("the world is full\n");
+            exit(1);
+        }
+        e.index = w[0].count;
+        w[0].count += 1;
+        w[0].generations[e.index] = 1;
+    }
+    e.generation = w[0].generations[e.index];
+    return e;
+}
+
+// A dead handle reports `dead` and changes nothing, so despawning twice is
+// harmless.
+kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    w[0].has_position[e.index] = false;
+    w[0].has_velocity[e.index] = false;
+    w[0].has_health[e.index] = false;
+    w[0].generations[e.index] += 1;
+    w[0].free[w[0].free_count] = e.index;
+    w[0].free_count += 1;
+    return kayan_status.ok;
+}
+
+set_position: proc(w: *kayan_world, e: kayan_entity, p: vec2) -> void = {
+    w[0].positions[e.index] = p;
+    w[0].has_position[e.index] = true;
+}
+
+set_velocity: proc(w: *kayan_world, e: kayan_entity, v: vec2) -> void = {
+    w[0].velocities[e.index] = v;
+    w[0].has_velocity[e.index] = true;
+}
+
+set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
+    w[0].healths[e.index] = points;
+    w[0].has_health[e.index] = true;
+}
+
+// Reading through a handle checks it first. A dead handle, or an entity
+// without a position, gives null instead of whatever is at the number.
+get_position: proc(w: *kayan_world, e: kayan_entity) -> *vec2 = {
+    if (!kayan_alive(w, e) || !w[0].has_position[e.index]) {
+        return null;
+    }
+    return w[0].positions[e.index]&;
+}
+
+movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
+    moved: u32 = 0;
+    for (i: u32 = 0; i < w[0].count; i += 1) {
+        if (w[0].has_position[i] && w[0].has_velocity[i]) {
+            w[0].positions[i].x += w[0].velocities[i].x * dt;
+            w[0].positions[i].y += w[0].velocities[i].y * dt;
+            moved += 1;
+        }
+    }
+    return moved;
+}
+
+print_world: proc(w: *kayan_world) -> void = {
+    for (i: u32 = 0; i < w[0].count; i += 1) {
+        if (!w[0].has_position[i] && !w[0].has_velocity[i] && !w[0].has_health[i]) {
+            printf("    entity %u  (free, next generation %u)\n", i, w[0].generations[i]);
+            continue;
+        }
+        printf("    entity %u:%u", i, w[0].generations[i]);
+        if (w[0].has_position[i]) {
+            printf("  position (%5.2f, %5.2f)", cast(w[0].positions[i].x, f64), cast(w[0].positions[i].y, f64));
+        } else {
+            printf("  position -              ");
+        }
+        if (w[0].has_velocity[i]) {
+            printf("  velocity (%5.2f, %5.2f)", cast(w[0].velocities[i].x, f64), cast(w[0].velocities[i].y, f64));
+        } else {
+            printf("  velocity -              ");
+        }
+        if (w[0].has_health[i]) {
+            printf("  health %.0f", cast(w[0].healths[i], f64));
+        } else {
+            printf("  health -");
+        }
+        printf("\n");
+    }
+}
+
+// The turret's aim: the target's position, or a new target if it is gone.
+aim: proc(w: *kayan_world, target: *kayan_entity, fallback: kayan_entity) -> void = {
+    p: *vec2 = get_position(w, target[0]);
+    if (p == null) {
+        printfmt("the turret's target {}:{} is dead; it picks {}:{} instead\n",
+            target[0].index, target[0].generation, fallback.index, fallback.generation);
+        target[0] = fallback;
+        p = get_position(w, target[0]);
+    }
+    printf("the turret aims at %u:%u, at (%.2f, %.2f)\n", target[0].index, target[0].generation,
+        cast(p[0].x, f64), cast(p[0].y, f64));
+}
+
+main: proc() -> i32 = {
+    w: kayan_world = {};
+
+    turret: kayan_entity = kayan_spawn(w&);
+    set_position(w&, turret, { .x = 0.0, .y = 0.0 });
+    set_health(w&, turret, 500.0);
+
+    drone_a: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_a, { .x = 10.0, .y = 0.0 });
+    set_velocity(w&, drone_a, { .x = -1.0, .y = 0.5 });
+    set_health(w&, drone_a, 100.0);
+
+    drone_b: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_b, { .x = 0.0, .y = 10.0 });
+    set_velocity(w&, drone_b, { .x = 0.5, .y = -1.0 });
+    set_health(w&, drone_b, 100.0);
+
+    target: kayan_entity = drone_a;
+    print_world(w&);
+    aim(w&, target&, drone_b);
+
+    printfmt("drone {}:{} is destroyed and despawned\n", drone_a.index, drone_a.generation);
+    _ = kayan_despawn(w&, drone_a);
+
+    bullet: kayan_entity = kayan_spawn(w&);
+    set_position(w&, bullet, { .x = 0.0, .y = 0.0 });
+    set_velocity(w&, bullet, { .x = 4.0, .y = 4.0 });
+    printfmt("the turret fires: the bullet is {}:{}, the same number in its next life\n",
+        bullet.index, bullet.generation);
+    _ = movement_system(w&, 0.5);
+    print_world(w&);
+
+    // The same moment as the end of 1.2, and this time the handle knows.
+    aim(w&, target&, drone_b);
+
+    status: kayan_status = kayan_despawn(w&, drone_a);
+    printfmt("despawning {}:{} again: {}\n", drone_a.index, drone_a.generation, status);
+
+    none: kayan_entity = {};
+    printfmt("the zeroed handle {}:{} is alive: {}\n", none.index, none.generation,
+        kayan_alive(w&, none) ? "yes" : "no");
+    return 0;
+}

@@ -1,0 +1,17 @@
+the registry: 7 components
+    id  name       size  align
+     0  position      8      4
+     1  velocity      8      4
+     2  health        8      4
+     3  damage        4      4
+     4  lifetime      4      4
+     5  burning       4      4
+     6  turret        8      4
+signatures, one bit per component, highest id first:
+    drone          0000111  {position velocity health}
+    bullet         0011011  {position velocity damage lifetime}
+    turret         1000001  {position turret}
+    burning drone  0100111  {position velocity health burning}
+movement wants {position velocity}:
+    drone yes, bullet yes, turret no, burning drone yes
+a burning drone with burning removed is a drone again: yes
