@@ -357,18 +357,24 @@ turret_system: proc(g: *game, dt: f32) -> void = {
     }
 }
 
+// A system is a query and a kernel. The query finds the tables; the kernel runs
+// over one table's columns. noalias is a parameter qualifier, so the loop has
+// to be in a proc of its own to get it.
+integrate: proc(ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
+    for (i: u64 = 0; i < ps.length; i += 1) {
+        ps[i].at.x += vs[i].per_second.x * dt;
+        ps[i].at.y += vs[i].per_second.y * dt;
+    }
+}
+
 movement_system: proc(w: *kayan_world, dt: f32) -> void = {
     q: kayan_query = { .all = kayan_mask_of<position>() | kayan_mask_of<velocity>() };
     for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
-        if (!kayan_matches(t, q)) {
-            continue;
-        }
-        ps: []position = kayan_column<position>(t);
-        vs: []velocity = kayan_column<velocity>(t);
-        for (i: u64 = 0; i < ps.length; i += 1) {
-            ps[i].at.x += vs[i].per_second.x * dt;
-            ps[i].at.y += vs[i].per_second.y * dt;
+        if (kayan_matches(t, q)) {
+            ps: []position = kayan_column<position>(t);
+            vs: []velocity = kayan_column<velocity>(t);
+            integrate(ps, vs, dt);
         }
     }
 }
@@ -429,17 +435,20 @@ collision_system: proc(g: *game) -> void = {
     }
 }
 
+burn: proc(hs: noalias []health, bs: []const burning, dt: f32) -> void = {
+    for (i: u64 = 0; i < hs.length; i += 1) {
+        hs[i].points -= bs[i].per_second * dt;
+    }
+}
+
 burning_system: proc(w: *kayan_world, dt: f32) -> void = {
     q: kayan_query = { .all = kayan_mask_of<health>() | kayan_mask_of<burning>() };
     for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w[0].tables&, ti);
-        if (!kayan_matches(t, q)) {
-            continue;
-        }
-        hs: []health = kayan_column<health>(t);
-        bs: []burning = kayan_column<burning>(t);
-        for (i: u64 = 0; i < hs.length; i += 1) {
-            hs[i].points -= bs[i].per_second * dt;
+        if (kayan_matches(t, q)) {
+            hs: []health = kayan_column<health>(t);
+            bs: []burning = kayan_column<burning>(t);
+            burn(hs, bs, dt);
         }
     }
 }

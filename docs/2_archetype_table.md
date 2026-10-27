@@ -34,11 +34,18 @@ a loop.
 
 ## Systems take slices
 
-`move_system(positions: []vec2, velocities: []const vec2, dt)` gets the rows
-in use, `sparks.positions[0..sparks.count]`, and knows nothing about tables.
-`[]const` says it only reads velocities. Each `positions[i]` is bounds checked
-in Debug, against the count rather than the capacity, so a system that runs
-past the live rows stops with a message instead of reading stale data.
+`move_system(positions: noalias []vec2, velocities: []const vec2, dt)` gets
+the rows in use, `sparks.positions[0..sparks.count]`, and knows nothing about
+tables. `[]const` says it only reads velocities. Each `positions[i]` is bounds
+checked in Debug, against the count rather than the capacity, so a system that
+runs past the live rows stops with a message instead of reading stale data.
+
+`noalias` says that for the call, nothing else reaches the memory `positions`
+covers. Only the column the system writes needs it: a promise on the written
+column already rules out a write landing in the column being read. Without
+it, clang `-O2` and gcc `-O3` both vectorized this loop behind a run-time
+check that the two columns are apart. With it, neither checks. A Debug build
+checks the promise instead, once per call.
 
 ## Status codes
 

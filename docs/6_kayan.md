@@ -27,6 +27,28 @@ structural happens until the end of the frame. Without the skip, a bullet that
 hit on its last frame would be despawned twice and counted as both a hit and
 a miss.
 
+## Systems and kernels
+
+`movement_system` and `burning_system` are each a query and a kernel:
+
+    integrate: proc(ps: noalias []position, vs: []const velocity, dt: f32) -> void
+    burn: proc(hs: noalias []health, bs: []const burning, dt: f32) -> void
+
+The system walks the tables and calls the kernel once for each table that
+matches. The kernel sees two columns, so the compiler sees a straight loop
+over two arrays. `noalias` qualifies parameters, so the loop needs a proc of
+its own to carry it; that is the only reason these two are split out. The
+output does not change.
+
+Before the split, gcc `-O3` vectorized both loops behind a run-time check that
+the columns were apart. After it, without the check. clang had no check
+either way, for the reason lesson 3 gives: the columns are different types.
+
+`lifetime_system` stays one proc. Its loop records a despawn for each expired
+bullet, and a loop that calls something per row is not vectorized whatever
+its parameters say. The other systems branch, search or record in their loops
+too.
+
 ## Why not change tables during a query
 
 Each of these would be a real bug with the world from lesson 4:
@@ -87,6 +109,8 @@ counts three.
    When it reaches zero, despawn it through the buffer and end the game.
 4. Print the buffer before applying it, as a log of every structural change
    the frame made.
-5. Run with `--sanitize` after each change. A stale slice into a grown table
+5. Inline `integrate` back into `movement_system`, build with gcc `-O3
+   -fopt-info-vec`, and find the loop it now versions for aliasing.
+6. Run with `--sanitize` after each change. A stale slice into a grown table
    is exactly what AddressSanitizer does not catch, because the old memory
    is still valid arena memory. Think about what would.

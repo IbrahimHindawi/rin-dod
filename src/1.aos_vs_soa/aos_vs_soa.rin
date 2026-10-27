@@ -111,7 +111,9 @@ move_aos: proc(ps: []particle, dt: f32) -> void = {
     }
 }
 
-move_soa: proc(positions: []vec3, velocities: []vec3, dt: f32) -> void = {
+// noalias: positions and velocities never overlap, so the compiler can work on
+// several particles at once without first checking that they don't.
+move_soa: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         velocities[i].y += gravity * dt;
         positions[i].x += velocities[i].x * dt;

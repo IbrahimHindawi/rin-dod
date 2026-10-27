@@ -90,7 +90,9 @@ spark_despawn: proc(t: *spark_table, row: u64) -> u64 = {
 }
 
 // Systems. Each takes the columns it reads and writes, cut to the rows in use.
-move_system: proc(positions: []vec2, velocities: []const vec2, dt: f32) -> void = {
+// noalias on the column a system writes promises nothing else reaches it, so
+// the loop can be vectorized without runtime overlap checks.
+move_system: proc(positions: noalias []vec2, velocities: []const vec2, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         positions[i].x += velocities[i].x * dt;
         positions[i].y += velocities[i].y * dt;

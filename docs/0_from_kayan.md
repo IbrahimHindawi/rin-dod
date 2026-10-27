@@ -68,8 +68,10 @@ struct's address, and runs the loop over the two columns.
 ## Not carried over
 
 - **`vec4s` for positions.** kayan pads 3D vectors to 16 bytes, which suits
-  SIMD loads. The lessons use `vec2` and `vec3` and keep loops scalar. Lesson
-  1's exercises come back to this.
+  SIMD loads. The lessons use `vec2` and `vec3` and plain loops, and leave
+  vectorizing to the C compiler. `noalias` on the kernels' parameters, in
+  lessons 1, 2, 3 and 6, lets it do that without run-time overlap checks.
+  Lesson 1's exercises come back to `vec4`.
 - **cglm and the haikal containers.** rin's generics and std (`vec<T>`,
   `hashmap<K, V>`, slices) cover what they did.
 

@@ -148,7 +148,7 @@ table_set: proc<T>(t: *table, row: u64, value: T) -> void = {
 }
 
 // Systems take columns, as in lesson 2. The loops that feed them are queries.
-move_system: proc(positions: []position, velocities: []const velocity, dt: f32) -> void = {
+move_system: proc(positions: noalias []position, velocities: []const velocity, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         positions[i].at.x += velocities[i].per_second.x * dt;
         positions[i].at.y += velocities[i].per_second.y * dt;

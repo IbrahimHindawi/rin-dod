@@ -43,6 +43,17 @@ before anything runs:
 
     component 2 is health in the enum but damage in component_info
 
+## Different types, fewer checks
+
+`move_system` takes `noalias []position`, as lesson 2's takes
+`noalias []vec2`, and for the same reason. One difference showed before
+either had `noalias`: clang vectorized this one without a run-time overlap
+check, and lesson 2's only with one. Here the two columns are different
+struct types, `position` and `velocity`, and clang reads C's type rules as
+saying they cannot share memory. In lesson 2 both are `vec2`. gcc checked in
+both. `noalias` makes the answer the same on both compilers, whatever the
+column types are.
+
 ## Queries
 
     moving: query = { .all = bit(component.position) | bit(component.velocity) };

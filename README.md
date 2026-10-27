@@ -34,8 +34,9 @@ Lessons 1 to 3 are self-contained. Lesson 4 builds the world in
 
 ## Build and run
 
-Needs the rin compiler (`rin.exe` from `rin-windows-x64`, through `RIN_HOME`
-or `PATH`), CMake, Ninja, clang-cl and the Windows SDK.
+Needs the rin compiler with `noalias` (rin `e67175d` or later; `rin.exe` from
+`rin-windows-x64`, through `RIN_HOME` or `PATH`), CMake, Ninja, clang-cl and
+the Windows SDK.
 
     rin build
     build\cmake\aos_vs_soa.exe

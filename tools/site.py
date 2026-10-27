@@ -17,7 +17,7 @@ OUT = REPO / "website" / "index.html"
 def esc(s): return html.escape(s, quote=False)
 
 # ---------------------------------------------------------------- highlight
-RIN_KW = set("proc struct enum union alias import cinclude return if else for while do switch case default break continue cast sizeof alignof null const static label goto shl shr".split())
+RIN_KW = set("proc struct enum union alias import cinclude return if else for while do switch case default break continue cast sizeof alignof null const static volatile noalias label goto shl shr".split())
 RIN_TY = set("i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 usize b8 b16 b32 b64 c8 char void long intptr uintptr ptrdiff".split())
 RIN_TOK = re.compile(r"""
  (?P<com>//[^\n]*|/\*.*?\*/)
