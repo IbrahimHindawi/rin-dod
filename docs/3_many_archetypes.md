@@ -46,13 +46,19 @@ before anything runs:
 ## Different types, fewer checks
 
 `move_system` takes `noalias []position`, as lesson 2's takes
-`noalias []vec2`, and for the same reason. One difference showed before
-either had `noalias`: clang vectorized this one without a run-time overlap
-check, and lesson 2's only with one. Here the two columns are different
-struct types, `position` and `velocity`, and clang reads C's type rules as
-saying they cannot share memory. In lesson 2 both are `vec2`. gcc checked in
-both. `noalias` makes the answer the same on both compilers, whatever the
-column types are.
+`noalias []vec2`, and for the same reason. `regen_system` takes
+`noalias []health`, its only slice, for the reason lesson 2 gives for
+`age_system`.
+
+One difference showed before either had `noalias`: clang on Linux vectorized
+this `move_system` without a run-time overlap check, and lesson 2's only with
+one. Here the two columns are different struct types, `position` and
+`velocity`, and clang reads C's type rules as saying they cannot share memory;
+built with `-fno-strict-aliasing`, it checks here too. In lesson 2 both are
+`vec2`. gcc checked in both. clang-cl, rin's default compiler, does not use
+those rules at all, to match MSVC, so on Windows both lessons were checked.
+`noalias` makes the answer the same everywhere, whatever the column types
+are.
 
 ## Queries
 

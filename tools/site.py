@@ -144,7 +144,7 @@ def md(text, skip_title=False):
 
 # ---------------------------------------------------------------- content
 lessons = [
-    ("aos-vs-soa", "1", "AoS vs SoA", "src/1.aos_vs_soa/aos_vs_soa", "docs/1_aos_vs_soa.md", "The same particles in two layouts, and what a loop fetches"),
+    ("aos-vs-soa", "1", "AoS vs SoA", "src/1.aos_vs_soa/aos_vs_soa", "docs/1_aos_vs_soa.md", "The same particles in three layouts, and what SIMD needs"),
     ("archetype-table", "2", "One archetype table", "src/2.archetype_table/archetype_table", "docs/2_archetype_table.md", "Columns, rows, spawn, swap-remove, systems over slices"),
     ("many-archetypes", "3", "Many archetypes", "src/3.many_archetypes/many_archetypes", "docs/3_many_archetypes.md", "One table type for every archetype: ids, signatures, queries"),
     ("entity-handles", "4", "Entity handles", "src/4.entity_handles/entity_handles", "docs/4_entity_handles.md", "Generational handles, slots, moving between archetypes"),

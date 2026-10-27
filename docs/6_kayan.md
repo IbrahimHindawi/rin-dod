@@ -41,8 +41,15 @@ its own to carry it; that is the only reason these two are split out. The
 output does not change.
 
 Before the split, gcc `-O3` vectorized both loops behind a run-time check that
-the columns were apart. After it, without the check. clang had no check
-either way, for the reason lesson 3 gives: the columns are different types.
+the columns were apart. After it, without the check. clang on Linux had no
+check either way, for the reason lesson 3 gives: the columns are different
+types. clang-cl, which does not use C's type rules, needs `noalias` here too.
+
+`burn` is the cleanest loop in the game. `health` and `burning` are each one
+`f32`, so their columns are plain runs of floats, and the kernel is eight
+floats per pass with nothing to rearrange: loads, `mulps`, `subps`, stores.
+`integrate` works on `vec2`s and spends some of each pass separating x from
+y; lesson 1 shows what the fully split layout looks like.
 
 `lifetime_system` stays one proc. Its loop records a despawn for each expired
 bullet, and a loop that calls something per row is not vectorized whatever

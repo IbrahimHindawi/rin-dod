@@ -73,7 +73,7 @@ with exercises.
 | | lesson | about |
 |---|---|---|
 | 0 | [from kayan](docs/0_from_kayan.md) | what was kept, what changed, and why |
-| 1 | [aos vs soa](docs/1_aos_vs_soa.md) | the same particles in two layouts, and what a loop fetches |
+| 1 | [aos vs soa](docs/1_aos_vs_soa.md) | the same particles in three layouts, what a loop fetches, and what SIMD needs |
 | 2 | [archetype table](docs/2_archetype_table.md) | one table: columns, rows, spawn, swap-remove, systems over slices |
 | 3 | [many archetypes](docs/3_many_archetypes.md) | one table type for every archetype: ids, signatures, queries |
 | 4 | [entity handles](docs/4_entity_handles.md) | generational handles, slots, moving between archetypes |

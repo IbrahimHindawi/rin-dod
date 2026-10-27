@@ -155,7 +155,7 @@ move_system: proc(positions: noalias []position, velocities: []const velocity, d
     }
 }
 
-regen_system: proc(healths: []health, per_second: f32, dt: f32) -> void = {
+regen_system: proc(healths: noalias []health, per_second: f32, dt: f32) -> void = {
     for (i: u64 = 0; i < healths.length; i += 1) {
         healths[i].points += per_second * dt;
         if (healths[i].points > healths[i].max) {

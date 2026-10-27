@@ -47,6 +47,28 @@ it, clang `-O2` and gcc `-O3` both vectorized this loop behind a run-time
 check that the two columns are apart. With it, neither checks. A Debug build
 checks the promise instead, once per call.
 
+`age_system(lives: noalias []f32, dt)` has one slice, and still takes it.
+Windows passes a slice by reference, as a pointer to a copy, and clang-cl does
+not use C's type rules to decide what can overlap. So without the promise,
+a float written through `lives` might be the slice's own pointer or length.
+clang-cl then reads both again after every element and does one float at a
+time. With it, the loop is eight floats per pass:
+
+    movups (%rcx,%r8,4), %xmm2         four lives
+    movups 0x10(%rcx,%r8,4), %xmm3     four more
+    subps  %xmm0, %xmm2                minus dt
+    subps  %xmm0, %xmm3
+    movups %xmm2, (%rcx,%r8,4)
+    movups %xmm3, 0x10(%rcx,%r8,4)
+
+The rule that holds on every compiler: `noalias` on every slice a loop writes,
+even when it is the only one.
+
+`lives` is the one column here that is a plain run of floats. `positions` and
+`velocities` are `vec2`, x and y side by side, so `move_system`'s vector loop
+spends some of its instructions pulling the x's and the y's apart. Lesson 1
+measures what that costs.
+
 ## Status codes
 
 `spark_spawn` returns `spawn_status`, an `enum[must_use]`: calling it and

@@ -99,7 +99,10 @@ move_system: proc(positions: noalias []vec2, velocities: []const vec2, dt: f32) 
     }
 }
 
-age_system: proc(lives: []f32, dt: f32) -> void = {
+// One slice, and still noalias: on Windows the slice arrives by reference, and
+// without the promise a float written through lives might be its own pointer
+// or length, so clang-cl reads both again after every element.
+age_system: proc(lives: noalias []f32, dt: f32) -> void = {
     for (i: u64 = 0; i < lives.length; i += 1) {
         lives[i] -= dt;
     }
