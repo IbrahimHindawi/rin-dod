@@ -16,10 +16,6 @@ The lessons are the list in build.rin, so there is one list to keep.
 
 rin is found through RIN, then RIN_HOME, then PATH; its std is the folder beside
 it, as `rin build` assumes. The C compiler is CC, or clang.
-
-On targets other than Windows `u64` is `unsigned long`, while printfmt and
-std's print use `%llu`, so -Wformat is relaxed there. That is a rin issue, not
-a lesson one, and on Windows the flag is not needed.
 """
 
 from __future__ import annotations
@@ -79,8 +75,6 @@ def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool) -> tupl
         return False, "rin compile:\n" + translate.stdout
 
     flags = ["-std=c11", "-g", "-Wall", "-Wextra", "-Werror"]
-    if os.name != "nt":
-        flags.append("-Wno-format")
     if sanitize:
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
     includes = ["-I", str(rin.parent), "-I", str(rin.parent / "std")]
