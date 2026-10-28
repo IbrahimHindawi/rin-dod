@@ -47,20 +47,44 @@ def find_rin() -> Path:
     sys.exit("check: rin not found; set RIN or RIN_HOME, or put rin on PATH")
 
 
-def lessons_from_build_rin() -> list[Path]:
+def list_from_build_rin(name: str) -> list[str] | None:
     text = (ROOT / "build.rin").read_text(encoding="utf-8")
-    block = re.search(r"build_entries:[^{]*\{(.*?)\}", text, re.S)
+    block = re.search(rf"^{name}:[^{{]*\{{(.*?)\}}", text, re.S | re.M)
     if not block:
+        return None
+    return re.findall(r'"([^"]+)"', block.group(1))
+
+
+def lessons_from_build_rin() -> list[Path]:
+    entries = list_from_build_rin("build_entries")
+    if entries is None:
         sys.exit("check: no build_entries in build.rin")
-    return [ROOT / entry for entry in re.findall(r'"([^"]+)"', block.group(1))]
+    return [ROOT / entry for entry in entries]
 
 
-def run(cmd: list[str], cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE,
+def run(cmd: list[str], cwd: Path = ROOT,
+        env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, timeout=300)
 
 
-def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool) -> tuple[bool, str]:
+# On Windows a sanitized program loads clang_rt.asan_dynamic-x86_64.dll when it
+# starts, and exits with 0xC0000135 before main if the DLL is not on PATH. It
+# lives in the C compiler's own resource directory, so ask the compiler.
+def sanitizer_env(cc: str) -> dict[str, str] | None:
+    if os.name != "nt":
+        return None
+    resource = run([cc, "-print-resource-dir"]).stdout.strip()
+    runtime = Path(resource) / "lib" / "windows"
+    if not runtime.is_dir():
+        return None
+    env = dict(os.environ)
+    env["PATH"] = str(runtime) + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool,
+          env: dict[str, str] | None) -> tuple[bool, str]:
     stem = lesson.stem
     work = OUT / stem
     work.mkdir(parents=True, exist_ok=True)
@@ -75,6 +99,7 @@ def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool) -> tupl
         return False, "rin compile:\n" + translate.stdout
 
     flags = ["-std=c11", "-g", "-Wall", "-Wextra", "-Werror"]
+    flags += [f"-D{define}" for define in list_from_build_rin("build_defines") or []]
     if sanitize:
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
     includes = ["-I", str(rin.parent), "-I", str(rin.parent / "std")]
@@ -83,7 +108,7 @@ def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool) -> tupl
     if build.returncode != 0 or build.stdout.strip():
         return False, f"{cc}:\n" + build.stdout
 
-    ran = run([str(exe)])
+    ran = run([str(exe)], env=env)
     if ran.returncode != 0:
         return False, f"exit {ran.returncode}:\n{ran.stdout}"
 
@@ -116,9 +141,11 @@ def main() -> int:
     lessons = [l for l in lessons_from_build_rin()
                if not filters or any(f in str(l) for f in filters)]
 
+    env = sanitizer_env(cc) if sanitize else None
+
     failed = 0
     for lesson in lessons:
-        ok, detail = check(rin, cc, lesson, bless, sanitize)
+        ok, detail = check(rin, cc, lesson, bless, sanitize, env)
         name = lesson.relative_to(ROOT).as_posix()
         print(f"{'ok  ' if ok else 'FAIL'} {name}" + (f"  ({detail})" if ok and detail else ""))
         if not ok:
