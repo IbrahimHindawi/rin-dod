@@ -13,3 +13,12 @@
 //   handles_alive: proc(h: *handles, e: dojo_handle) -> b32
 //   handles_live: proc(h: *handles) -> u64                     handles alive now
 //   handles_slots: proc(h: *handles) -> u64                    indices handed out, alive or free
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

@@ -34,8 +34,8 @@ or after it.
       README.md              the block, its invariant, the levels, the variations
       play_slot_map.rin      the playground
       harness.rin            fixed: a scenario, then a fuzz run against a model
-      levels/1.rin ... 3.rin where a kata starts
-      solution/kata.rin      the reference, out of the way
+      level1.rin ... 3.rin   where a kata starts
+      solution.rin           the reference; don't peek
       kata.rin               yours: made by `start`, ignored by git
 
 The harness doesn't know how your kata works, only what it must do. First it
@@ -88,19 +88,28 @@ of raw bytes is exactly what they're for.
 
 ## How it's built
 
-A harness is an ordinary program that imports your kata beside it:
+Every kata file is a whole program. Yours, the solution and each level import
+what they use, then the harness, which has `main`:
 
+    import "std/memops.rin"
+    import "std/vec.rin"
+    import "std/option.rin"
     import "../dojo.rin"
-    import "kata.rin"
+    import "harness.rin"
 
-`dojo/dojo.rin` holds what every harness shares: `dojo_handle` and
-`dojo_status`, the run's settings, the random number generator, and the
-reporting. The runner builds the way `tools/check.py` does, `rin compile` and
-then the C compiler, with the warnings for unused parameters and locals off,
-since a kata in progress is full of them.
+So any of them builds on its own, `rin compile dojo/3.slot_map/solution.rin`
+for instance, and `rin check` or your editor finds every name it uses. Only
+the harness doesn't build alone: it calls the procs the kata defines. A file
+imported twice is read once, so the kata and the harness both importing
+`dojo.rin` is fine. `dojo/dojo.rin` holds what every harness shares:
+`dojo_handle` and `dojo_status`, the run's settings, the random number
+generator, and the reporting. The runner builds `kata.rin` the way
+`tools/check.py` does, `rin compile` and then the C compiler, with the
+warnings for unused parameters and locals off, since a kata in progress is
+full of them.
 
-`python tools/check.py dojo` keeps the dojo honest: every reference solution
-must pass its harness and print its `harness.expected`, level 1 must fail
+`python tools/check.py dojo` keeps the dojo honest: every solution must build
+on its own, pass its harness and print its `harness.expected`, level 1 must fail
 (its gap must be a gap), level 2 must compile, and the playgrounds must print
 their `.expected`. The harnesses were also checked against broken solutions,
 the mistakes each block is about, and catch each one.

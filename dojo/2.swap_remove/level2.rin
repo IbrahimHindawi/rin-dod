@@ -5,6 +5,13 @@
 //
 // Start it with: python tools/dojo.py start swap_remove 2
 
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
 sparse_set: struct = {
     arena: *memops_arena;
     // Packed: values[row] belongs to ids[row]. No holes, in no order.

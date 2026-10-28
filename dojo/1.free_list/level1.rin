@@ -2,6 +2,13 @@
 //
 // Start it with: python tools/dojo.py start free_list 1
 
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
 handles: struct = {
     arena: *memops_arena;
     // The life each index is in now, or will be in next if it is free.

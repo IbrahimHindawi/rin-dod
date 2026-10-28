@@ -1,7 +1,13 @@
-// Level 1: one proc. Everything here works except slot_map_remove. Write its
-// body.
-//
-// Start it with: python tools/dojo.py start slot_map 1
+// The reference: a slot map. Dojo 1's handles, pointing into dojo 2's packed
+// rows.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
 
 // One slot per index: the life it is in now (or next, if it is free), and the
 // row its value is in while it is alive.
@@ -61,9 +67,22 @@ slot_map_get: proc(m: *slot_map, h: dojo_handle) -> *u64 = {
 
 // Free the index (dojo 1), then swap-remove the row (dojo 2).
 slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64> = {
-    // Level 1: free h's index and take its value out, keeping the rows
-    // packed. A dead handle gives none and changes nothing.
-    return option<u64>none();
+    if (!slot_map_contains(m, h)) {
+        return option<u64>none();
+    }
+    slot: *slot_map_slot = vec<slot_map_slot>at(m*.slots&, cast(h.index, u64));
+    row: u64 = cast(slot*.row, u64);
+    slot*.generation += 1;
+    _ = vec<u32>append(m*.arena, m*.free&, h.index);
+    value: u64 = vec<u64>at(m*.values&, row)*;
+    last_value: u64 = vec<u64>pop(m*.values&);
+    last_handle: dojo_handle = vec<dojo_handle>pop(m*.handles&);
+    if (row < m*.values.length) {
+        vec<u64>at(m*.values&, row)* = last_value;
+        vec<dojo_handle>at(m*.handles&, row)* = last_handle;
+        vec<slot_map_slot>at(m*.slots&, cast(last_handle.index, u64))*.row = cast(row, u32);
+    }
+    return option<u64>some(value);
 }
 
 slot_map_len: proc(m: *slot_map) -> u64 = {

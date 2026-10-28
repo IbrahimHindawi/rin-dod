@@ -3,10 +3,10 @@
 // how a failure is reported. It also holds the two types the katas take as
 // given: a handle, and a status.
 //
-// A harness imports it beside the kata:
+// The harnesses import it, and so does every kata file that uses a handle or
+// a status:
 //
 //   import "../dojo.rin"
-//   import "kata.rin"
 
 import "std/print.rin"
 import "std/memops.rin"

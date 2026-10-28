@@ -14,9 +14,9 @@ A lesson passes only if all four steps are clean:
 
 The lessons are the list in build.rin, so there is one list to keep. The
 dojo's playgrounds are in it too. Each dojo block is also checked on its own
-(`python tools/check.py dojo` for only them): its harness is built with its
-reference solution and must print its harness.expected; level 1 must build and
-fail, since it has a gap; level 2 must build.
+(`python tools/check.py dojo` for only them): its solution.rin, a whole program
+that imports the harness, must build and print its harness.expected;
+level1.rin must build and fail, since it has a gap; level2.rin must build.
 
 rin is found through RIN, then RIN_HOME, then PATH; its std is the folder beside
 it, as `rin build` assumes. The C compiler is CC, or clang.
@@ -146,20 +146,16 @@ def dojo_blocks() -> list[Path]:
     return sorted(p for p in DOJO.iterdir() if p.is_dir() and re.match(r"\d+\.", p.name))
 
 
-# A harness is built next to a kata.rin. Here the kata is the solution or a
-# level, copied into a build folder with the harness, and dojo.rin one folder
-# up, where the harness imports it from.
+# A kata file is a whole program: it imports what it uses and the harness,
+# which has main, so each of the solution and the levels builds where it is.
 def dojo_build(rin: Path, cc: str, block: Path, kata: Path, where: str, sanitize: bool,
                quiet: bool) -> tuple[Path | None, str]:
-    folder = OUT / "dojo" / block.name / where
+    folder = OUT / "dojo" / block.name
     folder.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(block / "harness.rin", folder / "harness.rin")
-    shutil.copyfile(kata, folder / "kata.rin")
-    shutil.copyfile(DOJO / "dojo.rin", folder.parent / "dojo.rin")
-    c_path = folder / "harness.c"
-    exe = folder / ("harness.exe" if os.name == "nt" else "harness")
-    translate = run([str(rin), "compile", str(folder / "harness.rin"), "-o", str(c_path),
-                     "--header", str(folder / "harness.h")])
+    c_path = folder / f"{where}.c"
+    exe = folder / (f"{where}.exe" if os.name == "nt" else where)
+    translate = run([str(rin), "compile", str(kata), "-o", str(c_path),
+                     "--header", str(folder / f"{where}.h")])
     noise = [line for line in translate.stdout.splitlines()
              if line.strip() and not line.startswith("rin: generated")]
     if translate.returncode != 0 or noise:
@@ -178,9 +174,9 @@ def dojo_build(rin: Path, cc: str, block: Path, kata: Path, where: str, sanitize
 
 def check_dojo(rin: Path, cc: str, block: Path, bless: bool, sanitize: bool,
                env: dict[str, str] | None) -> tuple[bool, str]:
-    exe, err = dojo_build(rin, cc, block, block / "solution" / "kata.rin", "solution", sanitize, False)
+    exe, err = dojo_build(rin, cc, block, block / "solution.rin", "solution", sanitize, False)
     if not exe:
-        return False, "the harness with the solution, " + err
+        return False, "solution.rin, " + err
     ran = run([str(exe)], env=env)
     if ran.returncode != 0:
         return False, f"the solution fails its harness, exit {ran.returncode}:\n{ran.stdout}"
@@ -195,9 +191,9 @@ def check_dojo(rin: Path, cc: str, block: Path, bless: bool, sanitize: bool,
     elif actual != expected_path.read_text(encoding="utf-8").replace("\r\n", "\n"):
         return False, "the harness's output with the solution is not harness.expected"
     for level in (1, 2):
-        exe, err = dojo_build(rin, cc, block, block / "levels" / f"{level}.rin", f"level{level}", sanitize, True)
+        exe, err = dojo_build(rin, cc, block, block / f"level{level}.rin", f"level{level}", sanitize, True)
         if not exe:
-            return False, f"the harness with level {level}, " + err
+            return False, f"level{level}.rin, " + err
         if level == 1 and run([str(exe)], env=env).returncode == 0:
             return False, "level 1 passes the harness as given; its gap is not a gap"
     return True, detail

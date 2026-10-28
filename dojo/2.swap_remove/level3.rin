@@ -15,3 +15,12 @@
 //   sparse_set_len: proc(s: *sparse_set) -> u64
 //   sparse_set_values: proc(s: *sparse_set) -> []u64         packed, in row order
 //   sparse_set_ids: proc(s: *sparse_set) -> []u32            ids[row] owns values[row]
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

@@ -1,5 +1,8 @@
-// The harness for dojo 4, a type-erased column. It is fixed: your work is
-// kata.rin, beside it. Run both with
+// The harness for dojo 4, a type-erased column. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build and
+// run yours with
 //
 //   python tools/dojo.py column
 //   python tools/dojo.py column --sanitize   the same with AddressSanitizer and
@@ -18,7 +21,6 @@
 // can't go on to the next step. Try those by hand: they are in the README.
 
 import "../dojo.rin"
-import "kata.rin"
 
 // The row types the fuzz run uses.
 rgb: struct = {

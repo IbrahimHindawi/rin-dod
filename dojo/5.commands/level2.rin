@@ -5,6 +5,13 @@
 //
 // Start it with: python tools/dojo.py start commands 2
 
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
 // A spawn that has been recorded and not applied: its place among this
 // buffer's spawns, 0 for the first.
 pending: struct = {

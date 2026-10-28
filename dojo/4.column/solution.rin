@@ -1,6 +1,13 @@
 // The reference: one component's rows, kept as bytes, viewed as any type with
 // the same size and alignment.
 
+import "std/cstd.rin"
+import "std/print.rin"
+import "std/memops.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
 column: struct = {
     arena: *memops_arena;
     // `count` rows of `size` bytes each, packed from the start, in a block

@@ -15,3 +15,13 @@
 //   slot_map_len: proc(m: *slot_map) -> u64
 //   slot_map_values: proc(m: *slot_map) -> []u64                        packed, in row order
 //   slot_map_handles: proc(m: *slot_map) -> []dojo_handle               handles[row] owns values[row]
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

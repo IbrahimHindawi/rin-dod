@@ -5,6 +5,14 @@
 //
 // Start it with: python tools/dojo.py start slot_map 2
 
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
 // One slot per index: the life it is in now (or next, if it is free), and the
 // row its value is in while it is alive.
 slot_map_slot: struct = {

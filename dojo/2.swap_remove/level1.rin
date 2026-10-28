@@ -1,5 +1,14 @@
-// The reference: a sparse set. Values packed in rows, a row per id, and the
-// back-reference that keeps the two in step when swap-remove moves a row.
+// Level 1: one proc. Everything here works except sparse_set_remove. Write its
+// body.
+//
+// Start it with: python tools/dojo.py start swap_remove 1
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
 
 sparse_set: struct = {
     arena: *memops_arena;
@@ -49,21 +58,9 @@ sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> option<u64> = {
 // Swap-remove: the last row moves into the hole, and the id that owned the
 // last row is told where its value went.
 sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64> = {
-    if (sparse_set_get(s, id) == null) {
-        return option<u64>none();
-    }
-    entry: *u32 = vec<u32>at(s*.rows&, cast(id, u64));
-    row: u64 = cast(entry* - 1, u64);
-    entry* = 0;
-    value: u64 = vec<u64>at(s*.values&, row)*;
-    last_value: u64 = vec<u64>pop(s*.values&);
-    last_id: u32 = vec<u32>pop(s*.ids&);
-    if (row < s*.values.length) {
-        vec<u64>at(s*.values&, row)* = last_value;
-        vec<u32>at(s*.ids&, row)* = last_id;
-        vec<u32>at(s*.rows&, cast(last_id, u64))* = cast(row, u32) + 1;
-    }
-    return option<u64>some(value);
+    // Level 1: take id's value out, keeping the rows packed and every id's
+    // row right. An id with no value gives none and changes nothing.
+    return option<u64>none();
 }
 
 sparse_set_len: proc(s: *sparse_set) -> u64 = {

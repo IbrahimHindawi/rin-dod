@@ -27,3 +27,12 @@
 //                                                      every command in order; a dead
 //                                                      target is skipped; the buffer
 //                                                      ends up empty
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

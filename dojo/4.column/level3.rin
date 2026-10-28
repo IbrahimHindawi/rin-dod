@@ -19,3 +19,12 @@
 //                                                           column's size and alignment
 //
 // Rows of zero bytes, tags, are in the scenario too.
+
+import "std/cstd.rin"
+import "std/print.rin"
+import "std/memops.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

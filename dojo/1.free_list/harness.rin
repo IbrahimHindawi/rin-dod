@@ -1,5 +1,8 @@
-// The harness for dojo 1, the free list and generations. It is fixed: your
-// work is kata.rin, beside it. Run both with
+// The harness for dojo 1, the free list and generations. It is fixed. Your
+// work is kata.rin, beside it: kata.rin imports this file, which has main, so
+// the two are one program. The reference, solution.rin, and each level file do
+// the same, so each of them builds on its own, and this file never does. Build
+// and run yours with
 //
 //   python tools/dojo.py free_list
 //
@@ -11,7 +14,6 @@
 // design passes, including the level 4 variations.
 
 import "../dojo.rin"
-import "kata.rin"
 
 scenario: proc(arena: *memops_arena) -> void = {
     printfmt("scenario\n");

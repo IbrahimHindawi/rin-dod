@@ -20,7 +20,9 @@ say), the runner runs it again with --trace to show the operation that was
 running.
 
 Your kata.rin files are yours: git ignores them, and `start` will not
-overwrite one you have changed unless you add --force. rin and the C compiler
+overwrite one you have changed unless you add --force. A kata is a whole
+program: it imports what it uses and the harness, which has main, so the
+runner builds kata.rin, and the harness comes with it. rin and the C compiler
 are found as tools/check.py finds them.
 """
 
@@ -159,12 +161,12 @@ def status() -> int:
 
 def start(word: str, level: str, force: bool) -> int:
     b = find(word)
-    source = b / "levels" / f"{level}.rin"
+    source = b / f"level{level}.rin"
     if not source.exists():
         sys.exit(f"dojo: {name_of(b)} has no level {level}; the levels are "
-                 + ", ".join(p.stem for p in sorted((b / "levels").glob("*.rin"))))
+                 + ", ".join(p.stem[len("level"):] for p in sorted(b.glob("level*.rin"))))
     kata = b / "kata.rin"
-    untouched = [p.read_text(encoding="utf-8") for p in (b / "levels").glob("*.rin")]
+    untouched = [p.read_text(encoding="utf-8") for p in b.glob("level*.rin")]
     if kata.exists() and kata.read_text(encoding="utf-8") not in untouched and not force:
         sys.exit(f"dojo: {kata.relative_to(ROOT)} has your work in it; add --force to replace it")
     shutil.copyfile(source, kata)
@@ -195,7 +197,7 @@ def check(word: str, args: list[str]) -> int:
                  f"python tools/dojo.py start {name_of(b)} 1")
     passthrough = [a for a in args if a != "--sanitize"]
     exe = OUT / name_of(b) / ("harness.exe" if os.name == "nt" else "harness")
-    build(b / "harness.rin", exe, "--sanitize" in args)
+    build(b / "kata.rin", exe, "--sanitize" in args)
     code, out = stream([str(exe), *passthrough])
     if code != 0 and not any(line.startswith("FAIL") for line in out.splitlines()):
         traced = subprocess.run([str(exe), *passthrough, "--trace", "1"], cwd=ROOT, text=True,

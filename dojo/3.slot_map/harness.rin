@@ -1,5 +1,8 @@
-// The harness for dojo 3, the slot map. It is fixed: your work is kata.rin,
-// beside it. Run both with
+// The harness for dojo 3, the slot map. It is fixed. Your work is kata.rin,
+// beside it: kata.rin imports this file, which has main, so the two are one
+// program. The reference, solution.rin, and each level file do the same, so
+// each of them builds on its own, and this file never does. Build and run
+// yours with
 //
 //   python tools/dojo.py slot_map
 //
@@ -12,7 +15,6 @@
 // each row's handle holding that row's value).
 
 import "../dojo.rin"
-import "kata.rin"
 
 fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
     if (o.has_value) {
