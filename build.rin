@@ -43,4 +43,6 @@ build_entries: [_]^const char = {
     "dojo/1.free_list/play_free_list.rin",
     "dojo/2.swap_remove/play_swap_remove.rin",
     "dojo/3.slot_map/play_slot_map.rin",
+    "dojo/4.column/play_column.rin",
+    "dojo/5.commands/play_commands.rin",
 };

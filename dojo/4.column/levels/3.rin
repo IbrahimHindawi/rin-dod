@@ -1,0 +1,21 @@
+// Level 3: a blank page. Write the column from memory.
+//
+// Start it with: python tools/dojo.py start column 3
+//
+// The harness needs exactly this, and checks what each does. memops_arena,
+// memcpy and memset are given.
+//
+//   column: struct
+//   column_init: proc(c: *column, arena: *memops_arena, size: u64, align: u64) -> void
+//                                          stops unless align is a power of two, 1 to 16
+//   column_len: proc(c: *column) -> u64
+//   column_capacity: proc(c: *column) -> u64                rows that fit before it grows
+//   column_push_zeroed: proc(c: *column) -> u64             a zeroed row at the end, its
+//                                                           number; a full column grows
+//                                                           by at least half
+//   column_swap_remove: proc(c: *column, row: u64) -> void
+//   column_row: proc(c: *column, row: u64) -> []u8          stops past the rows in use
+//   column_slice: proc<T>(c: *column) -> []T                stops unless T has the
+//                                                           column's size and alignment
+//
+// Rows of zero bytes, tags, are in the scenario too.

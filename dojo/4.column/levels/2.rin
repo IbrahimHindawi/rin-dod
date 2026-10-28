@@ -1,0 +1,56 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start column 2
+
+column: struct = {
+    arena: *memops_arena;
+    // `count` rows of `size` bytes each, packed from the start, in a block
+    // from the arena aligned to `align`, with room for `capacity` rows.
+    data: ^u8;
+    size: u64;
+    align: u64;
+    count: u64;
+    capacity: u64;
+}
+
+// An empty column of rows `size` bytes long, aligned to `align`. Stops the
+// program unless align is a power of two from 1 to 16.
+column_init: proc(c: *column, arena: *memops_arena, size: u64, align: u64) -> void = {
+    c* = {};
+    c*.arena = arena;
+}
+
+column_len: proc(c: *column) -> u64 = {
+    return 0;
+}
+
+// How many rows fit before the column has to grow.
+column_capacity: proc(c: *column) -> u64 = {
+    return 0;
+}
+
+// A new zeroed row at the end; returns its row number. A full column grows
+// first, by at least half.
+column_push_zeroed: proc(c: *column) -> u64 = {
+    return 0;
+}
+
+// The last row's bytes move into `row`, and the column is one row shorter.
+column_swap_remove: proc(c: *column, row: u64) -> void = {
+}
+
+// One row's bytes. Stops the program past the rows in use.
+column_row: proc(c: *column, row: u64) -> []u8 = {
+    none: []u8 = {};
+    return none;
+}
+
+// The rows in use as T's. Stops the program unless T has the column's size
+// and alignment.
+column_slice: proc<T>(c: *column) -> []T = {
+    none: []T = {};
+    return none;
+}

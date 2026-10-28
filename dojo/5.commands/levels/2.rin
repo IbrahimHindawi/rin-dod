@@ -1,0 +1,86 @@
+// Level 2: every proc. The types and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start commands 2
+
+// A spawn that has been recorded and not applied: its place among this
+// buffer's spawns, 0 for the first.
+pending: struct = {
+    index: u32;
+}
+
+// Who a command is for: something alive now, or something this buffer spawns.
+target: struct = {
+    is_pending: b32;
+    handle: dojo_handle;
+    spawn: pending;
+}
+
+// A target that is a handle.
+target_entity: proc(h: dojo_handle) -> target = {
+    t: target = {};
+    return t;
+}
+
+// A target that is a spawn of this buffer.
+target_pending: proc(p: pending) -> target = {
+    t: target = {};
+    return t;
+}
+
+command_kind: enum = {
+    spawn,
+    set,
+    despawn,
+}
+
+command: struct = {
+    kind: command_kind;
+    target: target;
+    value: u32;
+}
+
+commands: struct = {
+    arena: *memops_arena;
+    list: vec<command>;
+    spawns: u32;
+    // While the buffer is applied: the handle each spawn made, in order.
+    spawned: vec<dojo_handle>;
+}
+
+commands_init: proc(c: *commands, arena: *memops_arena) -> void = {
+    c* = {};
+    c*.arena = arena;
+}
+
+// Record a spawn; it happens in commands_apply. Returns its pending number.
+commands_spawn: proc(c: *commands, value: u32) -> pending = {
+    p: pending = {};
+    return p;
+}
+
+commands_set: proc(c: *commands, t: target, value: u32) -> void = {
+}
+
+commands_despawn: proc(c: *commands, t: target) -> void = {
+}
+
+// Commands recorded and not yet applied.
+commands_len: proc(c: *commands) -> u64 = {
+    return 0;
+}
+
+// The handle a target names: its own, or the one its spawn made.
+commands_resolve: proc(c: *commands, t: target) -> dojo_handle = {
+    h: dojo_handle = {};
+    return h;
+}
+
+// Every command, in the order recorded. A spawn always happens; a set or
+// despawn of a dead target is skipped. Afterwards the buffer is empty.
+commands_apply: proc(c: *commands, w: *world) -> applied = {
+    done: applied = {};
+    return done;
+}

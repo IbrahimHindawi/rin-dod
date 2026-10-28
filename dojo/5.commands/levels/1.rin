@@ -1,0 +1,97 @@
+// Level 1: one proc. Everything here works except commands_apply. Write its
+// body: run every command in the order it was recorded, count what happened,
+// and leave the buffer empty for the next frame.
+//
+// Start it with: python tools/dojo.py start commands 1
+
+// A spawn that has been recorded and not applied. It has no handle yet, so it
+// is named by its place among this buffer's spawns: 0 for the first.
+pending: struct = {
+    index: u32;
+}
+
+// Who a command is for: something alive now, or something this buffer spawns.
+target: struct = {
+    is_pending: b32;
+    handle: dojo_handle;
+    spawn: pending;
+}
+
+target_entity: proc(h: dojo_handle) -> target = {
+    t: target = {};
+    t.handle = h;
+    return t;
+}
+
+target_pending: proc(p: pending) -> target = {
+    t: target = {};
+    t.is_pending = 1;
+    t.spawn = p;
+    return t;
+}
+
+command_kind: enum = {
+    spawn,
+    set,
+    despawn,
+}
+
+command: struct = {
+    kind: command_kind;
+    target: target;
+    value: u32;
+}
+
+// The frame's commands. Cleared after apply, keeping their room, so once the
+// game has run a few frames, recording allocates nothing.
+commands: struct = {
+    arena: *memops_arena;
+    list: vec<command>;
+    spawns: u32;
+    // While the buffer is applied: the handle each spawn made, in order.
+    spawned: vec<dojo_handle>;
+}
+
+commands_init: proc(c: *commands, arena: *memops_arena) -> void = {
+    c* = {};
+    c*.arena = arena;
+}
+
+// Record a spawn; it happens in commands_apply. Returns its pending number.
+commands_spawn: proc(c: *commands, value: u32) -> pending = {
+    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.spawn, .value = value });
+    c*.spawns += 1;
+    return { .index = c*.spawns - 1 };
+}
+
+commands_set: proc(c: *commands, t: target, value: u32) -> void = {
+    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.set, .target = t, .value = value });
+}
+
+commands_despawn: proc(c: *commands, t: target) -> void = {
+    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.despawn, .target = t });
+}
+
+// Commands recorded and not yet applied.
+commands_len: proc(c: *commands) -> u64 = {
+    return c*.list.length;
+}
+
+// The handle a target names: its own, or the one its spawn made, which was
+// applied before any command that names it.
+commands_resolve: proc(c: *commands, t: target) -> dojo_handle = {
+    if (t.is_pending) {
+        return vec<dojo_handle>at(c*.spawned&, cast(t.spawn.index, u64))*;
+    }
+    return t.handle;
+}
+
+// Every command, in the order it was recorded. A spawn always happens; a set
+// or despawn whose target is dead by then, perhaps despawned earlier in this
+// same buffer, changes nothing and is counted as skipped.
+commands_apply: proc(c: *commands, w: *world) -> applied = {
+    // Level 1: run every command in the order it was recorded, count what
+    // happened, and leave the buffer empty for the next frame.
+    done: applied = {};
+    return done;
+}
