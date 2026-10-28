@@ -11,7 +11,7 @@
 //
 //   * A component is a member of the `component` enum, so its id is a small
 //     integer, and a set of components fits in a u64 mask, one bit each.
-//   * A table's columns are `[component<>.count][*]u8`, indexed by component id
+//   * A table's columns are `[component<>.count]^u8`, indexed by component id
 //     and null where the table has no such column. Finding a column is an array
 //     index, not a string lookup.
 //   * A column's element size comes from reflection: `component_info[id]` is the
@@ -67,11 +67,11 @@ bit: proc(c: component) -> u64 = {
 
 // One archetype. Every column has `capacity` elements of its component's size.
 table: struct = {
-    name: [*]const c8;
+    name: ^const c8;
     signature: u64;
     count: u64;
     capacity: u64;
-    columns: [component<>.count][*]u8;
+    columns: [component<>.count]^u8;
 }
 
 query: struct = {
@@ -83,15 +83,15 @@ query: struct = {
 // orders: a column would silently get another component's size.
 components_check: proc() -> void = {
     for (i: u64 = 0; i < component<>.count; i += 1) {
-        if (strcmp(component<>.variant.values[i].name, component_info[i][0].name) != 0) {
+        if (strcmp(component<>.variant.values[i].name, component_info[i]*.name) != 0) {
             printfmt("component {} is {} in the enum but {} in component_info\n", i,
-                component<>.variant.values[i].name, component_info[i][0].name);
+                component<>.variant.values[i].name, component_info[i]*.name);
             exit(1);
         }
     }
 }
 
-table_create: proc(arena: *memops_arena, name: [*]const c8, components: []const component,
+table_create: proc(arena: *memops_arena, name: ^const c8, components: []const component,
                    capacity: u64) -> table = {
     t: table = {};
     t.name = name;
@@ -100,33 +100,33 @@ table_create: proc(arena: *memops_arena, name: [*]const c8, components: []const 
         c: component = components[i];
         info: *const reflect = component_info[c];
         t.signature |= bit(c);
-        t.columns[c] = cast(memops_arena_push_zero(arena, info[0].size * capacity, info[0].align), [*]u8);
+        t.columns[c] = cast(memops_arena_push_zero(arena, info*.size * capacity, info*.align), ^u8);
     }
     return t;
 }
 
 table_has: proc(t: *table, c: component) -> b32 = {
-    return (t[0].signature & bit(c)) != 0;
+    return (t*.signature & bit(c)) != 0;
 }
 
 table_matches: proc(t: *table, q: query) -> b32 = {
-    return (t[0].signature & q.all) == q.all && (t[0].signature & q.none) == 0;
+    return (t*.signature & q.all) == q.all && (t*.signature & q.none) == 0;
 }
 
 // A new row with every component zeroed. The caller fills it in.
 table_add_row: proc(t: *table) -> u64 = {
-    if (t[0].count == t[0].capacity) {
-        printfmt("table {} is full\n", t[0].name);
+    if (t*.count == t*.capacity) {
+        printfmt("table {} is full\n", t*.name);
         exit(1);
     }
-    row: u64 = t[0].count;
+    row: u64 = t*.count;
     for (c: u64 = 0; c < component<>.count; c += 1) {
-        if (t[0].columns[c] != null) {
-            size: u64 = component_info[c][0].size;
-            memset(t[0].columns[c][row * size]&, 0, size);
+        if (t*.columns[c] != null) {
+            size: u64 = component_info[c]*.size;
+            memset(t*.columns[c][row * size]&, 0, size);
         }
     }
-    t[0].count += 1;
+    t*.count += 1;
     return row;
 }
 
@@ -134,12 +134,12 @@ table_add_row: proc(t: *table) -> u64 = {
 // is a bug in the caller, so it stops the program rather than return nothing.
 column: proc<T>(t: *table) -> []T = {
     c: component = component_of<T>();
-    if (t[0].columns[c] == null) {
-        printfmt("table {} has no {} column\n", t[0].name, component_info[c][0].name);
+    if (t*.columns[c] == null) {
+        printfmt("table {} has no {} column\n", t*.name, component_info[c]*.name);
         exit(1);
     }
-    raw: [*]T = cast(t[0].columns[c], [*]T);
-    return raw[0..t[0].count];
+    raw: ^T = cast(t*.columns[c], ^T);
+    return raw[0..t*.count];
 }
 
 table_set: proc<T>(t: *table, row: u64, value: T) -> void = {
@@ -167,8 +167,8 @@ regen_system: proc(healths: noalias []health, per_second: f32, dt: f32) -> void 
 print_tables: proc(tables: []table) -> void = {
     for (ti: u64 = 0; ti < tables.length; ti += 1) {
         t: *table = tables[ti]&;
-        for (row: u64 = 0; row < t[0].count; row += 1) {
-            printf("    %-7s row %d", t[0].name, cast(row, i32));
+        for (row: u64 = 0; row < t*.count; row += 1) {
+            printf("    %-7s row %d", t*.name, cast(row, i32));
             if (table_has(t, component.position)) {
                 ps: []position = column<position>(t);
                 printf("  at (%5.1f, %5.1f)", cast(ps[row].at.x, f64), cast(ps[row].at.y, f64));
@@ -221,7 +221,7 @@ main: proc() -> i32 = {
         printfmt("{} signature {}:", tables[ti].name, tables[ti].signature);
         for (c: u64 = 0; c < component<>.count; c += 1) {
             if ((tables[ti].signature & (1'u64 shl c)) != 0) {
-                printfmt(" {}", component_info[c][0].name);
+                printfmt(" {}", component_info[c]*.name);
             }
         }
         printfmt("\n");
@@ -251,14 +251,14 @@ main: proc() -> i32 = {
         for (ti: u64 = 0; ti < 4; ti += 1) {
             t: *table = tables[ti]&;
             if (table_matches(t, moving)) {
-                printfmt("    move visits {}\n", t[0].name);
+                printfmt("    move visits {}\n", t*.name);
                 // move_system takes []const velocity. Widening a call's result
                 // reads it twice, so rin wants it in a local first.
                 velocities: []velocity = column<velocity>(t);
                 move_system(column<position>(t), velocities, dt);
             }
             if (table_matches(t, healing)) {
-                printfmt("    regen visits {}\n", t[0].name);
+                printfmt("    regen visits {}\n", t*.name);
                 regen_system(column<health>(t), 10.0, dt);
             }
         }

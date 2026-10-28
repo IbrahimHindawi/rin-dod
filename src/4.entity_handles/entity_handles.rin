@@ -55,30 +55,30 @@ register_components: proc(w: *kayan_world) -> void = {
     kayan_register(w, kayan_id_of<health>(), health<>&);
 }
 
-print_entity: proc(w: *kayan_world, name: [*]const c8, e: kayan_entity) -> void = {
+print_entity: proc(w: *kayan_world, name: ^const c8, e: kayan_entity) -> void = {
     printf("    %s = %u:%u", name, e.index, e.generation);
     if (!kayan_alive(w, e)) {
         printf(" is dead\n");
         return;
     }
-    slot: *kayan_slot = vec<kayan_slot>at(w[0].slots&, cast(e.index, u64));
-    printf(" in table %u row %u ", slot[0].table, slot[0].row);
+    slot: *kayan_slot = vec<kayan_slot>at(w*.slots&, cast(e.index, u64));
+    printf(" in table %u row %u ", slot*.table, slot*.row);
     kayan_print_signature(w, kayan_signature(w, e));
     p: *position = kayan_get<position>(w, e);
     if (p != null) {
-        printf(" at (%.1f, %.1f)", cast(p[0].at.x, f64), cast(p[0].at.y, f64));
+        printf(" at (%.1f, %.1f)", cast(p*.at.x, f64), cast(p*.at.y, f64));
     }
     h: *health = kayan_get<health>(w, e);
     if (h != null) {
-        printf(" health %.0f", cast(h[0].points, f64));
+        printf(" health %.0f", cast(h*.points, f64));
     }
     printf("\n");
 }
 
 spawn_mover: proc(w: *kayan_world, x: f32) -> kayan_entity = {
     e: kayan_entity = kayan_spawn(w, kayan_mask_of<position>() | kayan_mask_of<velocity>());
-    kayan_get<position>(w, e)[0] = { .at = { .x = x, .y = 0.0 } };
-    kayan_get<velocity>(w, e)[0] = { .per_second = { .x = 0.0, .y = 1.0 } };
+    kayan_get<position>(w, e)* = { .at = { .x = x, .y = 0.0 } };
+    kayan_get<velocity>(w, e)* = { .per_second = { .x = 0.0, .y = 1.0 } };
     return e;
 }
 
@@ -140,7 +140,7 @@ main: proc() -> i32 = {
     wrong: u32 = 0;
     for (i: u64 = 1; i < 40; i += 2) {
         p: *position = kayan_get<position>(world&, many[i]);
-        if (p == null || p[0].at.x != cast(i, f32)) {
+        if (p == null || p*.at.x != cast(i, f32)) {
             wrong += 1;
         }
     }

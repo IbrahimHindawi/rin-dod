@@ -40,7 +40,7 @@ component_of: proc<health>() -> component = { return component.health; }
 // A column does not know its count or capacity. A table keeps those once for
 // all its columns, since every column of a table has the same number of rows.
 kayan_column: struct = {
-    data: [*]u8;
+    data: ^u8;
     size: u64;
     align: u64;
 }
@@ -49,44 +49,44 @@ kayan_column: struct = {
 // component's reflect record.
 kayan_column_init: proc(info: *const reflect) -> kayan_column = {
     c: kayan_column = {};
-    c.size = info[0].size;
-    c.align = info[0].align;
+    c.size = info*.size;
+    c.align = info*.align;
     return c;
 }
 
 // Row `row`'s first byte.
 kayan_column_row: proc(c: *kayan_column, row: u64) -> *u8 = {
-    return c[0].data[row * c[0].size]&;
+    return c*.data[row * c*.size]&;
 }
 
 // A new block with room for `capacity` rows; the first `count` rows are copied
 // over. The old block stays in the arena: an arena frees everything at once,
 // never one allocation, and this course accepts the waste.
 kayan_column_grow: proc(arena: *memops_arena, c: *kayan_column, count: u64, capacity: u64) -> void = {
-    data: [*]u8 = cast(memops_arena_push_zero(arena, c[0].size * capacity, c[0].align), [*]u8);
+    data: ^u8 = cast(memops_arena_push_zero(arena, c*.size * capacity, c*.align), ^u8);
     if (count > 0) {
-        memcpy(data[0]&, c[0].data[0]&, c[0].size * count);
+        memcpy(data, c*.data, c*.size * count);
     }
-    c[0].data = data;
+    c*.data = data;
 }
 
 kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
-    memcpy(kayan_column_row(c, to), kayan_column_row(c, from), c[0].size);
+    memcpy(kayan_column_row(c, to), kayan_column_row(c, from), c*.size);
 }
 
 kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
-    memset(kayan_column_row(c, row), 0, c[0].size);
+    memset(kayan_column_row(c, row), 0, c*.size);
 }
 
 // The typed view: the column's first `count` rows as `[]T`. Reading a column
 // as the wrong type would reinterpret its bytes, so the size is checked: the
 // one mistake the byte level cannot catch is caught here, at the edge.
 kayan_column_slice: proc<T>(c: *kayan_column, count: u64) -> []T = {
-    if (c[0].size != sizeof(T)) {
-        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c[0].size, sizeof(T));
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
         exit(1);
     }
-    raw: [*]T = cast(c[0].data, [*]T);
+    raw: ^T = cast(c*.data, ^T);
     return raw[0..count];
 }
 
@@ -96,8 +96,8 @@ kayan_column_slice: proc<T>(c: *kayan_column, count: u64) -> []T = {
 
 print_bytes: proc(c: *kayan_column, row: u64) -> void = {
     bytes: *u8 = kayan_column_row(c, row);
-    raw: [*]u8 = cast(bytes, [*]u8);
-    for (i: u64 = 0; i < c[0].size; i += 1) {
+    raw: ^u8 = cast(bytes, ^u8);
+    for (i: u64 = 0; i < c*.size; i += 1) {
         printf(" %02x", cast(raw[i], u32));
     }
 }

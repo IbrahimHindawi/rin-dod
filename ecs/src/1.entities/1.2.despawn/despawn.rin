@@ -41,55 +41,55 @@ kayan_world: struct = {
 // when it was despawned.
 kayan_spawn: proc(w: *kayan_world) -> kayan_entity = {
     e: kayan_entity = {};
-    if (w[0].free_count > 0) {
-        w[0].free_count -= 1;
-        e.index = w[0].free[w[0].free_count];
+    if (w*.free_count > 0) {
+        w*.free_count -= 1;
+        e.index = w*.free[w*.free_count];
     } else {
-        if (w[0].count == 8) {
+        if (w*.count == 8) {
             printfmt("the world is full\n");
             exit(1);
         }
-        e.index = w[0].count;
-        w[0].count += 1;
+        e.index = w*.count;
+        w*.count += 1;
     }
-    w[0].alive[e.index] = true;
+    w*.alive[e.index] = true;
     return e;
 }
 
 // The entity's components are dropped by lowering their flags, and its number
 // goes on the free list. The values stay in the arrays, unread.
 kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> void = {
-    w[0].alive[e.index] = false;
-    w[0].has_position[e.index] = false;
-    w[0].has_velocity[e.index] = false;
-    w[0].has_health[e.index] = false;
-    w[0].free[w[0].free_count] = e.index;
-    w[0].free_count += 1;
+    w*.alive[e.index] = false;
+    w*.has_position[e.index] = false;
+    w*.has_velocity[e.index] = false;
+    w*.has_health[e.index] = false;
+    w*.free[w*.free_count] = e.index;
+    w*.free_count += 1;
 }
 
 set_position: proc(w: *kayan_world, e: kayan_entity, p: vec2) -> void = {
-    w[0].positions[e.index] = p;
-    w[0].has_position[e.index] = true;
+    w*.positions[e.index] = p;
+    w*.has_position[e.index] = true;
 }
 
 set_velocity: proc(w: *kayan_world, e: kayan_entity, v: vec2) -> void = {
-    w[0].velocities[e.index] = v;
-    w[0].has_velocity[e.index] = true;
+    w*.velocities[e.index] = v;
+    w*.has_velocity[e.index] = true;
 }
 
 set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
-    w[0].healths[e.index] = points;
-    w[0].has_health[e.index] = true;
+    w*.healths[e.index] = points;
+    w*.has_health[e.index] = true;
 }
 
 // Despawned entities have no flags left, so the system skips them without
 // knowing anything about despawning.
 movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
     moved: u32 = 0;
-    for (i: u32 = 0; i < w[0].count; i += 1) {
-        if (w[0].has_position[i] && w[0].has_velocity[i]) {
-            w[0].positions[i].x += w[0].velocities[i].x * dt;
-            w[0].positions[i].y += w[0].velocities[i].y * dt;
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (w*.has_position[i] && w*.has_velocity[i]) {
+            w*.positions[i].x += w*.velocities[i].x * dt;
+            w*.positions[i].y += w*.velocities[i].y * dt;
             moved += 1;
         }
     }
@@ -97,24 +97,24 @@ movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
 }
 
 print_world: proc(w: *kayan_world) -> void = {
-    for (i: u32 = 0; i < w[0].count; i += 1) {
-        if (!w[0].alive[i]) {
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (!w*.alive[i]) {
             printf("    entity %u  (free)\n", i);
             continue;
         }
         printf("    entity %u", i);
-        if (w[0].has_position[i]) {
-            printf("  position (%5.2f, %5.2f)", cast(w[0].positions[i].x, f64), cast(w[0].positions[i].y, f64));
+        if (w*.has_position[i]) {
+            printf("  position (%5.2f, %5.2f)", cast(w*.positions[i].x, f64), cast(w*.positions[i].y, f64));
         } else {
             printf("  position -              ");
         }
-        if (w[0].has_velocity[i]) {
-            printf("  velocity (%5.2f, %5.2f)", cast(w[0].velocities[i].x, f64), cast(w[0].velocities[i].y, f64));
+        if (w*.has_velocity[i]) {
+            printf("  velocity (%5.2f, %5.2f)", cast(w*.velocities[i].x, f64), cast(w*.velocities[i].y, f64));
         } else {
             printf("  velocity -              ");
         }
-        if (w[0].has_health[i]) {
-            printf("  health %.0f", cast(w[0].healths[i], f64));
+        if (w*.has_health[i]) {
+            printf("  health %.0f", cast(w*.healths[i], f64));
         } else {
             printf("  health -");
         }

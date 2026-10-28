@@ -3,13 +3,13 @@
 // Every lesson is its own program, named after its file. tools/check.py reads
 // this same list, builds each lesson, runs it and compares its output with the
 // .expected file beside it.
-build_name:      [*]const char = "rin-dod";
-build_dir:       [*]const char = "build";
-build_generator: [*]const char = "Ninja";
-build_compiler:  [*]const char = "clang-cl";
-build_type:      [*]const char = "Debug";
+build_name:      ^const char = "rin-dod";
+build_dir:       ^const char = "build";
+build_generator: ^const char = "Ninja";
+build_compiler:  ^const char = "clang-cl";
+build_type:      ^const char = "Debug";
 
-build_entries: [22][*]const char = {
+build_entries: [22]^const char = {
     // Build an ECS: start here, README.md
     "ecs/src/1.entities/1.1.ids/ids.rin",
     "ecs/src/1.entities/1.2.despawn/despawn.rin",

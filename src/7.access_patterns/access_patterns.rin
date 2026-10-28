@@ -79,7 +79,7 @@ split: struct = {
 
 // Cache-line aligned, so the line counts below are the same on every run.
 push_slice: proc<T>(arena: *memops_arena, count: u64) -> []T = {
-    raw: [*]T = cast(memops_arena_push_zero(arena, sizeof(T) * count, 64), [*]T);
+    raw: ^T = cast(memops_arena_push_zero(arena, sizeof(T) * count, 64), ^T);
     return raw[0..count];
 }
 
@@ -101,10 +101,10 @@ random_index: proc(n: u64) -> u32 = {
 integrate_aos: proc(bodies: noalias []body, dt: f32) -> void = {
     for (i: u64 = 0; i < bodies.length; i += 1) {
         b: *body = bodies[i]&;
-        b[0].velocity.y += gravity * dt;
-        b[0].position.x += b[0].velocity.x * dt;
-        b[0].position.y += b[0].velocity.y * dt;
-        b[0].position.z += b[0].velocity.z * dt;
+        b*.velocity.y += gravity * dt;
+        b*.position.x += b*.velocity.x * dt;
+        b*.position.y += b*.velocity.y * dt;
+        b*.position.z += b*.velocity.z * dt;
     }
 }
 
@@ -132,10 +132,10 @@ integrate_blocks: proc(blocks: noalias []body_block, dt: f32) -> void = {
     for (b: u64 = 0; b < blocks.length; b += 1) {
         k: *body_block = blocks[b]&;
         for (l: u64 = 0; l < 8; l += 1) {
-            k[0].vy[l] += gravity * dt;
-            k[0].px[l] += k[0].vx[l] * dt;
-            k[0].py[l] += k[0].vy[l] * dt;
-            k[0].pz[l] += k[0].vz[l] * dt;
+            k*.vy[l] += gravity * dt;
+            k*.px[l] += k*.vx[l] * dt;
+            k*.py[l] += k*.vy[l] * dt;
+            k*.pz[l] += k*.vz[l] * dt;
         }
     }
 }
@@ -150,15 +150,15 @@ contacts_aos: proc(bodies: noalias []body, cs: []const contact) -> void = {
     for (c: u64 = 0; c < cs.length; c += 1) {
         p: *vec3 = bodies[cast(cs[c].a, u64)].position&;
         q: *vec3 = bodies[cast(cs[c].b, u64)].position&;
-        dx: f32 = q[0].x - p[0].x;
-        dy: f32 = q[0].y - p[0].y;
-        dz: f32 = q[0].z - p[0].z;
-        p[0].x += dx * stiffness;
-        p[0].y += dy * stiffness;
-        p[0].z += dz * stiffness;
-        q[0].x -= dx * stiffness;
-        q[0].y -= dy * stiffness;
-        q[0].z -= dz * stiffness;
+        dx: f32 = q*.x - p*.x;
+        dy: f32 = q*.y - p*.y;
+        dz: f32 = q*.z - p*.z;
+        p*.x += dx * stiffness;
+        p*.y += dy * stiffness;
+        p*.z += dz * stiffness;
+        q*.x -= dx * stiffness;
+        q*.y -= dy * stiffness;
+        q*.z -= dz * stiffness;
     }
 }
 
@@ -166,15 +166,15 @@ contacts_columns: proc(positions: noalias []vec3, cs: []const contact) -> void =
     for (c: u64 = 0; c < cs.length; c += 1) {
         p: *vec3 = positions[cast(cs[c].a, u64)]&;
         q: *vec3 = positions[cast(cs[c].b, u64)]&;
-        dx: f32 = q[0].x - p[0].x;
-        dy: f32 = q[0].y - p[0].y;
-        dz: f32 = q[0].z - p[0].z;
-        p[0].x += dx * stiffness;
-        p[0].y += dy * stiffness;
-        p[0].z += dz * stiffness;
-        q[0].x -= dx * stiffness;
-        q[0].y -= dy * stiffness;
-        q[0].z -= dz * stiffness;
+        dx: f32 = q*.x - p*.x;
+        dy: f32 = q*.y - p*.y;
+        dz: f32 = q*.z - p*.z;
+        p*.x += dx * stiffness;
+        p*.y += dy * stiffness;
+        p*.z += dz * stiffness;
+        q*.x -= dx * stiffness;
+        q*.y -= dy * stiffness;
+        q*.z -= dz * stiffness;
     }
 }
 
@@ -202,15 +202,15 @@ contacts_blocks: proc(blocks: noalias []body_block, cs: []const contact) -> void
         q: *body_block = blocks[b / 8]&;
         la: u64 = a % 8;
         lb: u64 = b % 8;
-        dx: f32 = q[0].px[lb] - p[0].px[la];
-        dy: f32 = q[0].py[lb] - p[0].py[la];
-        dz: f32 = q[0].pz[lb] - p[0].pz[la];
-        p[0].px[la] += dx * stiffness;
-        p[0].py[la] += dy * stiffness;
-        p[0].pz[la] += dz * stiffness;
-        q[0].px[lb] -= dx * stiffness;
-        q[0].py[lb] -= dy * stiffness;
-        q[0].pz[lb] -= dz * stiffness;
+        dx: f32 = q*.px[lb] - p*.px[la];
+        dy: f32 = q*.py[lb] - p*.py[la];
+        dz: f32 = q*.pz[lb] - p*.pz[la];
+        p*.px[la] += dx * stiffness;
+        p*.py[la] += dy * stiffness;
+        p*.pz[la] += dz * stiffness;
+        q*.px[lb] -= dx * stiffness;
+        q*.py[lb] -= dy * stiffness;
+        q*.pz[lb] -= dz * stiffness;
     }
 }
 
@@ -288,7 +288,7 @@ seconds: proc() -> f64 = {
     return cast(clock(), f64) / cast(CLOCKS_PER_SEC, f64);
 }
 
-main: proc(argc: i32, argv: [*][*]c8) -> i32 = {
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
     timing: b32 = argc > 1 && strcmp(argv[1], "--time") == 0;
     steps: u64 = timing ? 20 : 2;
 
@@ -318,8 +318,8 @@ main: proc(argc: i32, argv: [*][*]c8) -> i32 = {
         spl.vx[i] = v.x; spl.vy[i] = v.y; spl.vz[i] = v.z;
         k: *body_block = blocks[i / 8]&;
         l: u64 = i % 8;
-        k[0].px[l] = p.x; k[0].py[l] = p.y; k[0].pz[l] = p.z;
-        k[0].vx[l] = v.x; k[0].vy[l] = v.y; k[0].vz[l] = v.z;
+        k*.px[l] = p.x; k*.py[l] = p.y; k*.pz[l] = p.z;
+        k*.vx[l] = v.x; k*.vy[l] = v.y; k*.vz[l] = v.z;
     }
     cs: []contact = push_slice<contact>(arena&, contact_count);
     for (c: u64 = 0; c < contact_count; c += 1) {

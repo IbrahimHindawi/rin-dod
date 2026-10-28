@@ -46,7 +46,7 @@ spawn_status: enum[must_use] = {
 }
 
 push_slice: proc<T>(arena: *memops_arena, count: u64) -> []T = {
-    raw: [*]T = cast(memops_arena_push_zero(arena, sizeof(T) * count, alignof(T)), [*]T);
+    raw: ^T = cast(memops_arena_push_zero(arena, sizeof(T) * count, alignof(T)), ^T);
     return raw[0..count];
 }
 
@@ -63,16 +63,16 @@ spark_table_create: proc(arena: *memops_arena, capacity: u64) -> spark_table = {
 // The only place a row is added: every column gets its value here.
 spark_spawn: proc(t: *spark_table, number: u32, position: vec2, velocity: vec2, life: f32,
                   row: *u64) -> spawn_status = {
-    if (t[0].count == t[0].capacity) {
+    if (t*.count == t*.capacity) {
         return spawn_status.full;
     }
-    r: u64 = t[0].count;
-    t[0].numbers[r] = number;
-    t[0].positions[r] = position;
-    t[0].velocities[r] = velocity;
-    t[0].lives[r] = life;
-    t[0].count += 1;
-    row[0] = r;
+    r: u64 = t*.count;
+    t*.numbers[r] = number;
+    t*.positions[r] = position;
+    t*.velocities[r] = velocity;
+    t*.lives[r] = life;
+    t*.count += 1;
+    row* = r;
     return spawn_status.ok;
 }
 
@@ -80,12 +80,12 @@ spark_spawn: proc(t: *spark_table, number: u32, position: vec2, velocity: vec2, 
 // column, and the table shrinks by one. Returns the row that moved, which is
 // `row` itself when the removed row was the last one.
 spark_despawn: proc(t: *spark_table, row: u64) -> u64 = {
-    last: u64 = t[0].count - 1;
-    t[0].numbers[row] = t[0].numbers[last];
-    t[0].positions[row] = t[0].positions[last];
-    t[0].velocities[row] = t[0].velocities[last];
-    t[0].lives[row] = t[0].lives[last];
-    t[0].count = last;
+    last: u64 = t*.count - 1;
+    t*.numbers[row] = t*.numbers[last];
+    t*.positions[row] = t*.positions[last];
+    t*.velocities[row] = t*.velocities[last];
+    t*.lives[row] = t*.lives[last];
+    t*.count = last;
     return last;
 }
 
@@ -111,15 +111,15 @@ age_system: proc(lives: noalias []f32, dt: f32) -> void = {
 // Structural change: rows leave the table. Backwards, so the row a swap-remove
 // pulls in has already been tested.
 expire_system: proc(t: *spark_table) -> void = {
-    i: u64 = t[0].count;
+    i: u64 = t*.count;
     while (i > 0) {
         i -= 1;
-        if (t[0].lives[i] <= 0.0) {
-            number: u32 = t[0].numbers[i];
+        if (t*.lives[i] <= 0.0) {
+            number: u32 = t*.numbers[i];
             moved: u64 = spark_despawn(t, i);
             if (moved != i) {
                 printfmt("    spark {} in row {} expired; spark {} moved from row {} into it\n",
-                    number, i, t[0].numbers[i], moved);
+                    number, i, t*.numbers[i], moved);
             } else {
                 printfmt("    spark {} in row {} expired; it was the last row\n", number, i);
             }
@@ -128,10 +128,10 @@ expire_system: proc(t: *spark_table) -> void = {
 }
 
 print_table: proc(t: *spark_table) -> void = {
-    for (i: u64 = 0; i < t[0].count; i += 1) {
+    for (i: u64 = 0; i < t*.count; i += 1) {
         printf("    row %d  spark %d  position (%6.2f, %6.2f)  life %.2f\n",
-            cast(i, i32), cast(t[0].numbers[i], i32),
-            cast(t[0].positions[i].x, f64), cast(t[0].positions[i].y, f64), cast(t[0].lives[i], f64));
+            cast(i, i32), cast(t*.numbers[i], i32),
+            cast(t*.positions[i].x, f64), cast(t*.positions[i].y, f64), cast(t*.lives[i], f64));
     }
 }
 

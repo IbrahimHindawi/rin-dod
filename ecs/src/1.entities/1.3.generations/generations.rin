@@ -50,26 +50,26 @@ kayan_world: struct = {
 // already holds a generation no handle has been given yet, and no handle
 // matches it.
 kayan_alive: proc(w: *kayan_world, e: kayan_entity) -> b32 = {
-    return e.index < w[0].count && w[0].generations[e.index] == e.generation;
+    return e.index < w*.count && w*.generations[e.index] == e.generation;
 }
 
 // Generations start at 1. So the zeroed handle, 0:0, never names a live
 // entity, and `{}` can stand for "no entity".
 kayan_spawn: proc(w: *kayan_world) -> kayan_entity = {
     e: kayan_entity = {};
-    if (w[0].free_count > 0) {
-        w[0].free_count -= 1;
-        e.index = w[0].free[w[0].free_count];
+    if (w*.free_count > 0) {
+        w*.free_count -= 1;
+        e.index = w*.free[w*.free_count];
     } else {
-        if (w[0].count == 8) {
+        if (w*.count == 8) {
             printfmt("the world is full\n");
             exit(1);
         }
-        e.index = w[0].count;
-        w[0].count += 1;
-        w[0].generations[e.index] = 1;
+        e.index = w*.count;
+        w*.count += 1;
+        w*.generations[e.index] = 1;
     }
-    e.generation = w[0].generations[e.index];
+    e.generation = w*.generations[e.index];
     return e;
 }
 
@@ -79,45 +79,45 @@ kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = {
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
-    w[0].has_position[e.index] = false;
-    w[0].has_velocity[e.index] = false;
-    w[0].has_health[e.index] = false;
-    w[0].generations[e.index] += 1;
-    w[0].free[w[0].free_count] = e.index;
-    w[0].free_count += 1;
+    w*.has_position[e.index] = false;
+    w*.has_velocity[e.index] = false;
+    w*.has_health[e.index] = false;
+    w*.generations[e.index] += 1;
+    w*.free[w*.free_count] = e.index;
+    w*.free_count += 1;
     return kayan_status.ok;
 }
 
 set_position: proc(w: *kayan_world, e: kayan_entity, p: vec2) -> void = {
-    w[0].positions[e.index] = p;
-    w[0].has_position[e.index] = true;
+    w*.positions[e.index] = p;
+    w*.has_position[e.index] = true;
 }
 
 set_velocity: proc(w: *kayan_world, e: kayan_entity, v: vec2) -> void = {
-    w[0].velocities[e.index] = v;
-    w[0].has_velocity[e.index] = true;
+    w*.velocities[e.index] = v;
+    w*.has_velocity[e.index] = true;
 }
 
 set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
-    w[0].healths[e.index] = points;
-    w[0].has_health[e.index] = true;
+    w*.healths[e.index] = points;
+    w*.has_health[e.index] = true;
 }
 
 // Reading through a handle checks it first. A dead handle, or an entity
 // without a position, gives null instead of whatever is at the number.
 get_position: proc(w: *kayan_world, e: kayan_entity) -> *vec2 = {
-    if (!kayan_alive(w, e) || !w[0].has_position[e.index]) {
+    if (!kayan_alive(w, e) || !w*.has_position[e.index]) {
         return null;
     }
-    return w[0].positions[e.index]&;
+    return w*.positions[e.index]&;
 }
 
 movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
     moved: u32 = 0;
-    for (i: u32 = 0; i < w[0].count; i += 1) {
-        if (w[0].has_position[i] && w[0].has_velocity[i]) {
-            w[0].positions[i].x += w[0].velocities[i].x * dt;
-            w[0].positions[i].y += w[0].velocities[i].y * dt;
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (w*.has_position[i] && w*.has_velocity[i]) {
+            w*.positions[i].x += w*.velocities[i].x * dt;
+            w*.positions[i].y += w*.velocities[i].y * dt;
             moved += 1;
         }
     }
@@ -125,24 +125,24 @@ movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
 }
 
 print_world: proc(w: *kayan_world) -> void = {
-    for (i: u32 = 0; i < w[0].count; i += 1) {
-        if (!w[0].has_position[i] && !w[0].has_velocity[i] && !w[0].has_health[i]) {
-            printf("    entity %u  (free, next generation %u)\n", i, w[0].generations[i]);
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (!w*.has_position[i] && !w*.has_velocity[i] && !w*.has_health[i]) {
+            printf("    entity %u  (free, next generation %u)\n", i, w*.generations[i]);
             continue;
         }
-        printf("    entity %u:%u", i, w[0].generations[i]);
-        if (w[0].has_position[i]) {
-            printf("  position (%5.2f, %5.2f)", cast(w[0].positions[i].x, f64), cast(w[0].positions[i].y, f64));
+        printf("    entity %u:%u", i, w*.generations[i]);
+        if (w*.has_position[i]) {
+            printf("  position (%5.2f, %5.2f)", cast(w*.positions[i].x, f64), cast(w*.positions[i].y, f64));
         } else {
             printf("  position -              ");
         }
-        if (w[0].has_velocity[i]) {
-            printf("  velocity (%5.2f, %5.2f)", cast(w[0].velocities[i].x, f64), cast(w[0].velocities[i].y, f64));
+        if (w*.has_velocity[i]) {
+            printf("  velocity (%5.2f, %5.2f)", cast(w*.velocities[i].x, f64), cast(w*.velocities[i].y, f64));
         } else {
             printf("  velocity -              ");
         }
-        if (w[0].has_health[i]) {
-            printf("  health %.0f", cast(w[0].healths[i], f64));
+        if (w*.has_health[i]) {
+            printf("  health %.0f", cast(w*.healths[i], f64));
         } else {
             printf("  health -");
         }
@@ -152,15 +152,15 @@ print_world: proc(w: *kayan_world) -> void = {
 
 // The turret's aim: the target's position, or a new target if it is gone.
 aim: proc(w: *kayan_world, target: *kayan_entity, fallback: kayan_entity) -> void = {
-    p: *vec2 = get_position(w, target[0]);
+    p: *vec2 = get_position(w, target*);
     if (p == null) {
         printfmt("the turret's target {}:{} is dead; it picks {}:{} instead\n",
-            target[0].index, target[0].generation, fallback.index, fallback.generation);
-        target[0] = fallback;
-        p = get_position(w, target[0]);
+            target*.index, target*.generation, fallback.index, fallback.generation);
+        target* = fallback;
+        p = get_position(w, target*);
     }
-    printf("the turret aims at %u:%u, at (%.2f, %.2f)\n", target[0].index, target[0].generation,
-        cast(p[0].x, f64), cast(p[0].y, f64));
+    printf("the turret aims at %u:%u, at (%.2f, %.2f)\n", target*.index, target*.generation,
+        cast(p*.x, f64), cast(p*.y, f64));
 }
 
 main: proc() -> i32 = {

@@ -86,9 +86,9 @@ kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect) -> void = {
         printfmt("kayan: component id {} is past the 64 a signature can hold\n", id);
         exit(1);
     }
-    w[0].infos[id] = info;
-    if (id + 1 > w[0].component_count) {
-        w[0].component_count = id + 1;
+    w*.infos[id] = info;
+    if (id + 1 > w*.component_count) {
+        w*.component_count = id + 1;
     }
 }
 
@@ -97,9 +97,9 @@ kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect) -> void = {
 kayan_print_signature: proc(w: *kayan_world, signature: u64) -> void = {
     printf("{");
     first: b32 = true;
-    for (id: u32 = 0; id < w[0].component_count; id += 1) {
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
         if ((signature & kayan_bit(id)) != 0) {
-            printf(first ? "%s" : " %s", w[0].infos[id][0].name);
+            printf(first ? "%s" : " %s", w*.infos[id]*.name);
             first = false;
         }
     }
@@ -109,7 +109,7 @@ kayan_print_signature: proc(w: *kayan_world, signature: u64) -> void = {
 // A signature as bits, highest component first, so each column of the output
 // is one component.
 print_bits: proc(w: *kayan_world, signature: u64) -> void = {
-    id: u32 = w[0].component_count;
+    id: u32 = w*.component_count;
     while (id > 0) {
         id -= 1;
         printf((signature & kayan_bit(id)) != 0 ? "1" : "0");
@@ -142,7 +142,7 @@ main: proc() -> i32 = {
     printfmt("    id  name       size  align\n");
     for (id: u32 = 0; id < w.component_count; id += 1) {
         info: *const reflect = w.infos[id];
-        printf("    %2u  %-9s  %4u  %5u\n", id, info[0].name, cast(info[0].size, u32), cast(info[0].align, u32));
+        printf("    %2u  %-9s  %4u  %5u\n", id, info*.name, cast(info*.size, u32), cast(info*.align, u32));
     }
 
     // What a thing is, written as the set of its components.

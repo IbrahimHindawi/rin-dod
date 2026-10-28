@@ -75,44 +75,44 @@ kayan_slot: struct = {
 // ---------------------------------------------------------------------------
 
 kayan_column: struct = {
-    data: [*]u8;
+    data: ^u8;
     size: u64;
     align: u64;
 }
 
 kayan_column_init: proc(info: *const reflect) -> kayan_column = {
     c: kayan_column = {};
-    c.size = info[0].size;
-    c.align = info[0].align;
+    c.size = info*.size;
+    c.align = info*.align;
     return c;
 }
 
 kayan_column_row: proc(c: *kayan_column, row: u64) -> *u8 = {
-    return c[0].data[row * c[0].size]&;
+    return c*.data[row * c*.size]&;
 }
 
 kayan_column_grow: proc(arena: *memops_arena, c: *kayan_column, count: u64, capacity: u64) -> void = {
-    data: [*]u8 = cast(memops_arena_push_zero(arena, c[0].size * capacity, c[0].align), [*]u8);
+    data: ^u8 = cast(memops_arena_push_zero(arena, c*.size * capacity, c*.align), ^u8);
     if (count > 0) {
-        memcpy(data[0]&, c[0].data[0]&, c[0].size * count);
+        memcpy(data, c*.data, c*.size * count);
     }
-    c[0].data = data;
+    c*.data = data;
 }
 
 kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
-    memcpy(kayan_column_row(c, to), kayan_column_row(c, from), c[0].size);
+    memcpy(kayan_column_row(c, to), kayan_column_row(c, from), c*.size);
 }
 
 kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
-    memset(kayan_column_row(c, row), 0, c[0].size);
+    memset(kayan_column_row(c, row), 0, c*.size);
 }
 
 kayan_column_slice: proc<T>(c: *kayan_column, count: u64) -> []T = {
-    if (c[0].size != sizeof(T)) {
-        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c[0].size, sizeof(T));
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
         exit(1);
     }
-    raw: [*]T = cast(c[0].data, [*]T);
+    raw: ^T = cast(c*.data, ^T);
     return raw[0..count];
 }
 
@@ -127,7 +127,7 @@ kayan_table: struct = {
     signature: u64;
     count: u64;
     capacity: u64;
-    entities: [*]kayan_entity;
+    entities: ^kayan_entity;
     columns: [64]kayan_column;
 }
 
@@ -163,14 +163,14 @@ kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect) -> void = {
         printfmt("kayan: component id {} is past the 64 a signature can hold\n", id);
         exit(1);
     }
-    w[0].infos[id] = info;
-    if (id + 1 > w[0].component_count) {
-        w[0].component_count = id + 1;
+    w*.infos[id] = info;
+    if (id + 1 > w*.component_count) {
+        w*.component_count = id + 1;
     }
 }
 
 kayan_table_has: proc(t: *kayan_table, id: u32) -> b32 = {
-    return (t[0].signature & kayan_bit(id)) != 0;
+    return (t*.signature & kayan_bit(id)) != 0;
 }
 
 // A table for a signature: one empty column per component in it, sized from
@@ -180,11 +180,11 @@ kayan_table_init: proc(w: *kayan_world, signature: u64) -> kayan_table = {
     t.signature = signature;
     for (id: u32 = 0; id < 64; id += 1) {
         if ((signature & kayan_bit(id)) != 0) {
-            if (id >= w[0].component_count || w[0].infos[id] == null) {
+            if (id >= w*.component_count || w*.infos[id] == null) {
                 printfmt("kayan: signature {} uses component {}, which was never registered\n", signature, id);
                 exit(1);
             }
-            t.columns[id] = kayan_column_init(w[0].infos[id]);
+            t.columns[id] = kayan_column_init(w*.infos[id]);
         }
     }
     return t;
@@ -192,32 +192,32 @@ kayan_table_init: proc(w: *kayan_world, signature: u64) -> kayan_table = {
 
 // Double the room in `entities` and in every column at once.
 kayan_table_grow: proc(w: *kayan_world, t: *kayan_table) -> void = {
-    capacity: u64 = t[0].capacity == 0 ? 4 : t[0].capacity * 2;
-    entities: [*]kayan_entity = cast(memops_arena_push_zero(w[0].arena,
-        sizeof(kayan_entity) * capacity, alignof(kayan_entity)), [*]kayan_entity);
-    if (t[0].count > 0) {
-        memcpy(entities[0]&, t[0].entities[0]&, sizeof(kayan_entity) * t[0].count);
+    capacity: u64 = t*.capacity == 0 ? 4 : t*.capacity * 2;
+    entities: ^kayan_entity = cast(memops_arena_push_zero(w*.arena,
+        sizeof(kayan_entity) * capacity, alignof(kayan_entity)), ^kayan_entity);
+    if (t*.count > 0) {
+        memcpy(entities, t*.entities, sizeof(kayan_entity) * t*.count);
     }
-    t[0].entities = entities;
-    for (id: u32 = 0; id < w[0].component_count; id += 1) {
+    t*.entities = entities;
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
         if (kayan_table_has(t, id)) {
-            kayan_column_grow(w[0].arena, t[0].columns[id]&, t[0].count, capacity);
+            kayan_column_grow(w*.arena, t*.columns[id]&, t*.count, capacity);
         }
     }
-    t[0].capacity = capacity;
+    t*.capacity = capacity;
 }
 
 // A new row at the end, owned by `e`, with every component zeroed.
 kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> u64 = {
-    if (t[0].count == t[0].capacity) {
+    if (t*.count == t*.capacity) {
         kayan_table_grow(w, t);
     }
-    row: u64 = t[0].count;
-    t[0].count += 1;
-    t[0].entities[row] = e;
-    for (id: u32 = 0; id < w[0].component_count; id += 1) {
+    row: u64 = t*.count;
+    t*.count += 1;
+    t*.entities[row] = e;
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
         if (kayan_table_has(t, id)) {
-            kayan_column_zero_row(t[0].columns[id]&, row);
+            kayan_column_zero_row(t*.columns[id]&, row);
         }
     }
     return row;
@@ -226,18 +226,18 @@ kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> 
 // 1.4's swap-remove, for every column: the last row is copied over `row`, and
 // the slot of the entity that owned the last row is told where it went.
 kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void = {
-    last: u64 = t[0].count - 1;
+    last: u64 = t*.count - 1;
     if (row != last) {
-        for (id: u32 = 0; id < w[0].component_count; id += 1) {
+        for (id: u32 = 0; id < w*.component_count; id += 1) {
             if (kayan_table_has(t, id)) {
-                kayan_column_copy_row(t[0].columns[id]&, row, last);
+                kayan_column_copy_row(t*.columns[id]&, row, last);
             }
         }
-        moved: kayan_entity = t[0].entities[last];
-        t[0].entities[row] = moved;
-        vec<kayan_slot>at(w[0].slots&, cast(moved.index, u64))[0].row = cast(row, u32);
+        moved: kayan_entity = t*.entities[last];
+        t*.entities[row] = moved;
+        vec<kayan_slot>at(w*.slots&, cast(moved.index, u64))*.row = cast(row, u32);
     }
-    t[0].count = last;
+    t*.count = last;
 }
 
 // The typed view of one of the table's columns: T's rows, all of them in use.
@@ -248,24 +248,24 @@ kayan_slice: proc<T>(t: *kayan_table) -> []T = {
         printfmt("kayan: the table has no column for component {}\n", id);
         exit(1);
     }
-    return kayan_column_slice<T>(t[0].columns[id]&, t[0].count);
+    return kayan_column_slice<T>(t*.columns[id]&, t*.count);
 }
 
 // A pointer to a table is good until the next table is made.
 kayan_table_at: proc(w: *kayan_world, index: u32) -> *kayan_table = {
-    return vec<kayan_table>at(w[0].tables&, cast(index, u64));
+    return vec<kayan_table>at(w*.tables&, cast(index, u64));
 }
 
 // The table for a signature: found if it exists, made if it does not. This is
 // where archetypes come from.
 kayan_table_for: proc(w: *kayan_world, signature: u64) -> u32 = {
-    found: *u32 = hashmap<u64, u32>get(w[0].by_signature&, signature);
+    found: *u32 = hashmap<u64, u32>get(w*.by_signature&, signature);
     if (found != null) {
-        return found[0];
+        return found*;
     }
-    index: u32 = cast(w[0].tables.length, u32);
-    _ = vec<kayan_table>append(w[0].arena, w[0].tables&, kayan_table_init(w, signature));
-    _ = hashmap<u64, u32>put(w[0].arena, w[0].by_signature&, signature, index);
+    index: u32 = cast(w*.tables.length, u32);
+    _ = vec<kayan_table>append(w*.arena, w*.tables&, kayan_table_init(w, signature));
+    _ = hashmap<u64, u32>put(w*.arena, w*.by_signature&, signature, index);
     return index;
 }
 
@@ -274,36 +274,36 @@ kayan_table_for: proc(w: *kayan_world, signature: u64) -> u32 = {
 // ---------------------------------------------------------------------------
 
 kayan_world_init: proc(w: *kayan_world, arena: *memops_arena) -> void = {
-    w[0] = {};
-    w[0].arena = arena;
+    w* = {};
+    w*.arena = arena;
 }
 
 kayan_alive: proc(w: *kayan_world, e: kayan_entity) -> b32 = {
-    if (cast(e.index, u64) >= w[0].slots.length) {
+    if (cast(e.index, u64) >= w*.slots.length) {
         return false;
     }
-    return vec<kayan_slot>at(w[0].slots&, cast(e.index, u64))[0].generation == e.generation;
+    return vec<kayan_slot>at(w*.slots&, cast(e.index, u64))*.generation == e.generation;
 }
 
 // A new entity with the components in `signature`, all zeroed, in the table
 // for that signature.
 kayan_spawn: proc(w: *kayan_world, signature: u64) -> kayan_entity = {
     e: kayan_entity = {};
-    if (!vec<u32>is_empty(w[0].free&)) {
-        e.index = vec<u32>pop(w[0].free&);
+    if (!vec<u32>is_empty(w*.free&)) {
+        e.index = vec<u32>pop(w*.free&);
     } else {
-        e.index = cast(w[0].slots.length, u32);
-        _ = vec<kayan_slot>append(w[0].arena, w[0].slots&, { .generation = 1 });
+        e.index = cast(w*.slots.length, u32);
+        _ = vec<kayan_slot>append(w*.arena, w*.slots&, { .generation = 1 });
     }
-    slot: *kayan_slot = vec<kayan_slot>at(w[0].slots&, cast(e.index, u64));
-    e.generation = slot[0].generation;
+    slot: *kayan_slot = vec<kayan_slot>at(w*.slots&, cast(e.index, u64));
+    e.generation = slot*.generation;
     // kayan_table_for can make a table and move the others, so the table's
     // pointer is taken after it.
     table_index: u32 = kayan_table_for(w, signature);
     t: *kayan_table = kayan_table_at(w, table_index);
-    slot[0].table = table_index;
-    slot[0].row = cast(kayan_table_add_row(w, t, e), u32);
-    w[0].live += 1;
+    slot*.table = table_index;
+    slot*.row = cast(kayan_table_add_row(w, t, e), u32);
+    w*.live += 1;
     return e;
 }
 
@@ -311,22 +311,22 @@ kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = {
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
-    slot: *kayan_slot = vec<kayan_slot>at(w[0].slots&, cast(e.index, u64));
-    kayan_table_remove_row(w, kayan_table_at(w, slot[0].table), cast(slot[0].row, u64));
-    slot[0].generation += 1;
-    _ = vec<u32>append(w[0].arena, w[0].free&, e.index);
-    w[0].live -= 1;
+    slot: *kayan_slot = vec<kayan_slot>at(w*.slots&, cast(e.index, u64));
+    kayan_table_remove_row(w, kayan_table_at(w, slot*.table), cast(slot*.row, u64));
+    slot*.generation += 1;
+    _ = vec<u32>append(w*.arena, w*.free&, e.index);
+    w*.live -= 1;
     return kayan_status.ok;
 }
 
 // The table and row a live entity is in. Typed get and set arrive in 2.5;
 // until then, game code finds the table and row and indexes the columns.
 kayan_table_of: proc(w: *kayan_world, e: kayan_entity) -> *kayan_table = {
-    return kayan_table_at(w, vec<kayan_slot>at(w[0].slots&, cast(e.index, u64))[0].table);
+    return kayan_table_at(w, vec<kayan_slot>at(w*.slots&, cast(e.index, u64))*.table);
 }
 
 kayan_row: proc(w: *kayan_world, e: kayan_entity) -> u64 = {
-    return cast(vec<kayan_slot>at(w[0].slots&, cast(e.index, u64))[0].row, u64);
+    return cast(vec<kayan_slot>at(w*.slots&, cast(e.index, u64))*.row, u64);
 }
 
 // The invariant, over every table: each row belongs to a live entity whose
@@ -335,26 +335,26 @@ kayan_row: proc(w: *kayan_world, e: kayan_entity) -> u64 = {
 kayan_verify: proc(w: *kayan_world) -> u64 = {
     problems: u64 = 0;
     rows: u64 = 0;
-    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+    for (ti: u64 = 0; ti < w*.tables.length; ti += 1) {
         t: *kayan_table = kayan_table_at(w, cast(ti, u32));
-        for (row: u64 = 0; row < t[0].count; row += 1) {
-            e: kayan_entity = t[0].entities[row];
+        for (row: u64 = 0; row < t*.count; row += 1) {
+            e: kayan_entity = t*.entities[row];
             if (!kayan_alive(w, e)) {
                 printfmt("kayan_verify: table {} row {} holds dead entity {}:{}\n", ti, row, e.index, e.generation);
                 problems += 1;
                 continue;
             }
-            slot: *kayan_slot = vec<kayan_slot>at(w[0].slots&, cast(e.index, u64));
-            if (cast(slot[0].table, u64) != ti || cast(slot[0].row, u64) != row) {
+            slot: *kayan_slot = vec<kayan_slot>at(w*.slots&, cast(e.index, u64));
+            if (cast(slot*.table, u64) != ti || cast(slot*.row, u64) != row) {
                 printfmt("kayan_verify: {}:{} is in table {} row {}, its slot says table {} row {}\n",
-                    e.index, e.generation, ti, row, slot[0].table, slot[0].row);
+                    e.index, e.generation, ti, row, slot*.table, slot*.row);
                 problems += 1;
             }
         }
-        rows += t[0].count;
+        rows += t*.count;
     }
-    if (rows != w[0].live) {
-        printfmt("kayan_verify: {} rows in tables, {} live entities\n", rows, w[0].live);
+    if (rows != w*.live) {
+        printfmt("kayan_verify: {} rows in tables, {} live entities\n", rows, w*.live);
         problems += 1;
     }
     return problems;
@@ -363,9 +363,9 @@ kayan_verify: proc(w: *kayan_world) -> u64 = {
 kayan_print_signature: proc(w: *kayan_world, signature: u64) -> void = {
     printf("{");
     first: b32 = true;
-    for (id: u32 = 0; id < w[0].component_count; id += 1) {
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
         if ((signature & kayan_bit(id)) != 0) {
-            printf(first ? "%s" : " %s", w[0].infos[id][0].name);
+            printf(first ? "%s" : " %s", w*.infos[id]*.name);
             first = false;
         }
     }
@@ -373,13 +373,13 @@ kayan_print_signature: proc(w: *kayan_world, signature: u64) -> void = {
 }
 
 kayan_print_tables: proc(w: *kayan_world) -> void = {
-    for (ti: u64 = 0; ti < w[0].tables.length; ti += 1) {
+    for (ti: u64 = 0; ti < w*.tables.length; ti += 1) {
         t: *kayan_table = kayan_table_at(w, cast(ti, u32));
         printf("    table %u ", cast(ti, u32));
-        kayan_print_signature(w, t[0].signature);
+        kayan_print_signature(w, t*.signature);
         printf(":");
-        for (row: u64 = 0; row < t[0].count; row += 1) {
-            printf(" %u:%u", t[0].entities[row].index, t[0].entities[row].generation);
+        for (row: u64 = 0; row < t*.count; row += 1) {
+            printf(" %u:%u", t*.entities[row].index, t*.entities[row].generation);
         }
         printf("\n");
     }
@@ -443,9 +443,9 @@ main: proc() -> i32 = {
     for (ti: u32 = 0; ti < cast(w.tables.length, u32); ti += 1) {
         t: *kayan_table = kayan_table_at(w&, ti);
         ps: []position = kayan_slice<position>(t);
-        for (row: u64 = 0; row < t[0].count; row += 1) {
+        for (row: u64 = 0; row < t*.count; row += 1) {
             printf("    table %u row %u  %u:%u at (%5.2f, %5.2f)\n", ti, cast(row, u32),
-                t[0].entities[row].index, t[0].entities[row].generation,
+                t*.entities[row].index, t*.entities[row].generation,
                 cast(ps[row].at.x, f64), cast(ps[row].at.y, f64));
         }
     }

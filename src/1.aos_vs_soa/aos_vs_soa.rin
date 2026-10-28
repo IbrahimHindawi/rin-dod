@@ -95,7 +95,7 @@ split_columns: struct = {
 
 // count elements of T from the arena, zeroed, as a slice that knows its length.
 push_slice: proc<T>(arena: *memops_arena, count: u64) -> []T = {
-    raw: [*]T = cast(memops_arena_push_zero(arena, sizeof(T) * count, alignof(T)), [*]T);
+    raw: ^T = cast(memops_arena_push_zero(arena, sizeof(T) * count, alignof(T)), ^T);
     return raw[0..count];
 }
 
@@ -126,10 +126,10 @@ make_particle: proc(i: u64) -> particle = {
 move_aos: proc(ps: noalias []particle, dt: f32) -> void = {
     for (i: u64 = 0; i < ps.length; i += 1) {
         p: *particle = ps[i]&;
-        p[0].velocity.y += gravity * dt;
-        p[0].position.x += p[0].velocity.x * dt;
-        p[0].position.y += p[0].velocity.y * dt;
-        p[0].position.z += p[0].velocity.z * dt;
+        p*.velocity.y += gravity * dt;
+        p*.position.x += p*.velocity.x * dt;
+        p*.position.y += p*.velocity.y * dt;
+        p*.position.z += p*.velocity.z * dt;
     }
 }
 
@@ -184,7 +184,7 @@ seconds: proc() -> f64 = {
     return cast(clock(), f64) / cast(CLOCKS_PER_SEC, f64);
 }
 
-main: proc(argc: i32, argv: [*][*]c8) -> i32 = {
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
     timing: b32 = argc > 1 && strcmp(argv[1], "--time") == 0;
 
     arena: memops_arena = {};
