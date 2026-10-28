@@ -1,0 +1,47 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start free_list 2
+
+handles: struct = {
+    arena: *memops_arena;
+    // The life each index is in now, or will be in next if it is free.
+    generations: vec<u32>;
+    // Freed indices, waiting to be reused.
+    free: vec<u32>;
+}
+
+handles_init: proc(h: *handles, arena: *memops_arena) -> void = {
+    h* = {};
+    h*.arena = arena;
+}
+
+// A handle no one has had before. A freed index is reused before a new one is
+// made.
+handles_alloc: proc(h: *handles) -> dojo_handle = {
+    e: dojo_handle = {};
+    return e;
+}
+
+// After this, no handle to e's index is alive until alloc reuses the index. A
+// dead handle returns dojo_status.dead and changes nothing.
+handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status = {
+    return dojo_status.dead;
+}
+
+// Is e the life its index is in now?
+handles_alive: proc(h: *handles, e: dojo_handle) -> b32 = {
+    return 0;
+}
+
+// How many handles are alive.
+handles_live: proc(h: *handles) -> u64 = {
+    return 0;
+}
+
+// How many indices have been handed out, alive or free.
+handles_slots: proc(h: *handles) -> u64 = {
+    return 0;
+}

@@ -1,0 +1,52 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start swap_remove 2
+
+sparse_set: struct = {
+    arena: *memops_arena;
+    // Packed: values[row] belongs to ids[row]. No holes, in no order.
+    values: vec<u64>;
+    ids: vec<u32>;
+    // Sparse: rows[id] is one more than the row id's value is in, so 0, what
+    // a new entry starts as, means id has no value.
+    rows: vec<u32>;
+}
+
+sparse_set_init: proc(s: *sparse_set, arena: *memops_arena) -> void = {
+    s* = {};
+    s*.arena = arena;
+}
+
+// id's value, to read or to change, or null if it has none.
+sparse_set_get: proc(s: *sparse_set, id: u32) -> *u64 = {
+    return null;
+}
+
+// Give id a value. If it has one already, the new value replaces it and the
+// old one comes back; otherwise it goes in a new row at the end.
+sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> option<u64> = {
+    return option<u64>none();
+}
+
+// Take id's value out. The rows stay packed, and every id's row stays right.
+sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64> = {
+    return option<u64>none();
+}
+
+// How many ids have a value.
+sparse_set_len: proc(s: *sparse_set) -> u64 = {
+    return 0;
+}
+
+// The values, packed, in row order.
+sparse_set_values: proc(s: *sparse_set) -> []u64 = {
+    return vec<u64>items(s*.values&);
+}
+
+// ids[row] is the id that owns values[row].
+sparse_set_ids: proc(s: *sparse_set) -> []u32 = {
+    return vec<u32>items(s*.ids&);
+}

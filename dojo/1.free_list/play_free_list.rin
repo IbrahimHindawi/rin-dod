@@ -1,0 +1,132 @@
+// Dojo 1, the playground: a free list and generations.
+//
+// Handles name things that come and go: entities, textures, sounds, network
+// connections. Two small ideas make them safe to keep:
+//
+//   * a free list: freed indices are reused before new ones are made, so the
+//     arrays an index points into stay as small as the most things alive;
+//   * a generation per index: freeing bumps it, so every handle made for the
+//     old life stops matching, and a reused index can't be mistaken for the
+//     thing that had it before.
+//
+// This program runs the allocator step by step and draws its two arrays after
+// each step. To see it in a debugger, break on `handles_alloc` and
+// `handles_free` and watch `generations` and `free` change.
+//
+// The switch: set bump_on_free to 0 and run it again. The reused index comes
+// back with the old generation, and a dead handle is alive again.
+
+import "std/print.rin"
+
+bump_on_free: b32 = 1;
+
+handle: struct = {
+    index: u32;
+    generation: u32;
+}
+
+handles: struct = {
+    // The life each index is in now, or will be in next if it is free.
+    generations: [8]u32;
+    count: u32;
+    // Freed indices, a stack: the last one freed is the first one reused.
+    free: [8]u32;
+    free_count: u32;
+}
+
+handles_alloc: proc(h: *handles) -> handle = {
+    index: u32 = 0;
+    if (h*.free_count > 0) {
+        h*.free_count -= 1;
+        index = h*.free[h*.free_count];
+    } else {
+        index = h*.count;
+        h*.generations[index] = 1;
+        h*.count += 1;
+    }
+    return { .index = index, .generation = h*.generations[index] };
+}
+
+handles_alive: proc(h: *handles, e: handle) -> b32 = {
+    return e.index < h*.count && h*.generations[e.index] == e.generation;
+}
+
+handles_free: proc(h: *handles, e: handle) -> b32 = {
+    if (!handles_alive(h, e)) {
+        return 0;
+    }
+    if (bump_on_free) {
+        h*.generations[e.index] += 1;
+    }
+    h*.free[h*.free_count] = e.index;
+    h*.free_count += 1;
+    return 1;
+}
+
+// Each index with the generation it holds, then the free list.
+draw: proc(h: *handles) -> void = {
+    printfmt("    generations");
+    for (i: u32 = 0; i < h*.count; i += 1) {
+        printfmt("  {}:{}", i, h*.generations[i]);
+    }
+    printfmt("\n    free list    [");
+    for (i: u32 = 0; i < h*.free_count; i += 1) {
+        if (i > 0) {
+            printfmt(" ");
+        }
+        printfmt("{}", h*.free[i]);
+    }
+    printfmt("]\n");
+}
+
+says: proc(alive: b32) -> ^const char = {
+    return alive ? "alive" : "dead";
+}
+
+main: proc() -> i32 = {
+    h: handles = {};
+    printfmt("alloc a, b, c, d: four new indices, each in its first life\n");
+    a: handle = handles_alloc(h&);
+    b: handle = handles_alloc(h&);
+    c: handle = handles_alloc(h&);
+    d: handle = handles_alloc(h&);
+    printfmt("    a {}:{}  b {}:{}  c {}:{}  d {}:{}\n", a.index, a.generation, b.index, b.generation,
+        c.index, c.generation, d.index, d.generation);
+    draw(h&);
+
+    printfmt("free b, then d: their generations go up now, before anyone reuses them\n");
+    _ = handles_free(h&, b);
+    _ = handles_free(h&, d);
+    draw(h&);
+
+    printfmt("alloc e: alloc takes from the end of the free list, so index 3, in its next life\n");
+    e: handle = handles_alloc(h&);
+    printfmt("    e {}:{}\n", e.index, e.generation);
+    draw(h&);
+
+    printfmt("the old handles\n");
+    printfmt("    d {}:{} is {}\n", d.index, d.generation, says(handles_alive(h&, d)));
+    printfmt("    e {}:{} is {}\n", e.index, e.generation, says(handles_alive(h&, e)));
+    printfmt("    b {}:{} is {}\n", b.index, b.generation, says(handles_alive(h&, b)));
+    if (d.index == e.index && d.generation == e.generation) {
+        printfmt("    d and e are the same handle: whoever kept d now reaches e\n");
+    } else {
+        printfmt("    d and e share index {} but not a generation, so d can never reach e\n", e.index);
+    }
+
+    printfmt("free d again\n");
+    if (handles_free(h&, d)) {
+        printfmt("    freed: d named e, so e is gone\n");
+    } else {
+        printfmt("    refused: d is dead, nothing changes\n");
+    }
+    draw(h&);
+
+    printfmt("alloc f, g: index 1 first, then a new one\n");
+    f: handle = handles_alloc(h&);
+    g: handle = handles_alloc(h&);
+    printfmt("    f {}:{}  g {}:{}\n", f.index, f.generation, g.index, g.generation);
+    draw(h&);
+    printfmt("    c {}:{} was never freed: still {}\n", c.index, c.generation, says(handles_alive(h&, c)));
+    return 0;
+}

@@ -1,0 +1,176 @@
+// What every harness in the dojo shares: the run's settings, a random number
+// generator that gives the same numbers everywhere, how a step is checked, and
+// how a failure is reported. It also holds the two types the katas take as
+// given: a handle, and a status.
+//
+// A harness imports it beside the kata:
+//
+//   import "../dojo.rin"
+//   import "kata.rin"
+
+import "std/print.rin"
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/fmt.rin"
+
+// A generational handle: an index, and which life of that index it was made
+// for. Generations start at 1, so a zeroed handle, `{}`, is never alive and can
+// mean "no handle".
+dojo_handle: struct = {
+    index: u32;
+    generation: u32;
+}
+
+// What a change reports. `dead` means the handle no longer names anything
+// alive, so nothing changed.
+dojo_status: enum[must_use] = {
+    ok,
+    dead,
+}
+
+dojo_handle_eq: proc(a: dojo_handle, b: dojo_handle) -> b32 = {
+    return a.index == b.index && a.generation == b.generation;
+}
+
+// Writes `index:generation`.
+dojo_fmt_handle: proc(f: *fmt, h: dojo_handle) -> void = {
+    fmt_u64(f, cast(h.index, u64));
+    fmt_char(f, ':');
+    fmt_u64(f, cast(h.generation, u64));
+}
+
+dojo_status_name: proc(s: dojo_status) -> ^const char = {
+    return s == dojo_status.ok ? "ok" : "dead";
+}
+
+dojo_bool_name: proc(b: b32) -> ^const char = {
+    return b ? "true" : "false";
+}
+
+// One harness run: which block, the fuzz seed, how many operations, where to
+// stop for the debugger, and whether to print each operation. The command line
+// sets them:
+//
+//   harness --seed 42 --ops 5000 --stop 1337 --trace 1
+dojo_run: struct = {
+    block: ^const char;
+    seed: u64;
+    ops: u64;
+    stop: u64;
+    trace: u64;
+}
+
+dojo_parse_u64: proc(text: ^const c8, out: *u64) -> b32 = {
+    value: u64 = 0;
+    i: u64 = 0;
+    while (text[i] >= '0' && text[i] <= '9') {
+        value = value * 10 + cast(text[i] - '0', u64);
+        i += 1;
+    }
+    out* = value;
+    return i > 0 && text[i] == 0;
+}
+
+dojo_run_init: proc(argc: i32, argv: ^^c8, block: ^const char, title: ^const char) -> dojo_run = {
+    run: dojo_run = {};
+    run.block = block;
+    run.seed = 1;
+    run.ops = 20000;
+    for (i: i32 = 1; i < argc; i += 2) {
+        value: u64 = 0;
+        if (i + 1 >= argc || !dojo_parse_u64(argv[i + 1], value&)) {
+            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+            exit(2);
+        }
+        if (strcmp(argv[i], "--seed") == 0) {
+            run.seed = value;
+        } else if (strcmp(argv[i], "--ops") == 0) {
+            run.ops = value;
+        } else if (strcmp(argv[i], "--stop") == 0) {
+            run.stop = value;
+        } else if (strcmp(argv[i], "--trace") == 0) {
+            run.trace = value;
+        } else {
+            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+            exit(2);
+        }
+    }
+    printfmt("dojo: {}\n", title);
+    return run;
+}
+
+// A step of the scenario: what was done, what came back, and what should have.
+// Printed when it matches; the end of the run when it does not.
+dojo_same: proc(what: ^const char, got: ^const char, want: ^const char) -> void = {
+    if (strcmp(got, want) != 0) {
+        printfmt("FAIL in the scenario: {} gave {}, it should give {}\n", what, got, want);
+        exit(1);
+    }
+    printfmt("    {}: {}\n", what, got);
+}
+
+dojo_fuzz: proc(run: *dojo_run) -> void = {
+    printfmt("fuzz: {} operations from seed {}, checked after each\n", run*.ops, run*.seed);
+}
+
+// Set a breakpoint here, and run with --stop N.
+dojo_stopped_at: u64 = 0;
+
+dojo_stop_here: proc(op: u64) -> void = {
+    dojo_stopped_at = op;
+}
+
+// Call before operation `op`. It returns 1 when the operation should be
+// described, and the caller prints the description and a newline: with
+// --trace, every operation is, so a crash shows the last one that started;
+// with --stop at this operation, it is, after dojo_stop_here has run, so a
+// breakpoint there lands just before it.
+dojo_before: proc(run: *dojo_run, op: u64) -> b32 = {
+    if (run*.stop == op) {
+        dojo_stop_here(op);
+        printfmt("stopped before operation {}: ", op);
+        return 1;
+    }
+    if (run*.trace != 0) {
+        printfmt("operation {}: ", op);
+        return 1;
+    }
+    return 0;
+}
+
+// A failure in the fuzz run, in three parts: dojo_fail starts the line, the
+// caller prints what went wrong and a newline, and dojo_failed says how to get
+// back here in the debugger and ends the run.
+dojo_fail: proc(run: *dojo_run, op: u64) -> void = {
+    printfmt("FAIL at operation {} (seed {}): ", op, run*.seed);
+}
+
+dojo_failed: proc(run: *dojo_run, op: u64) -> void = {
+    printfmt("    debug it: build/dojo/{}/harness --seed {} --stop {}\n", run*.block, run*.seed, op);
+    printfmt("    with a breakpoint on dojo_stop_here, which runs just before that operation\n");
+    exit(1);
+}
+
+dojo_pass: proc() -> void = {
+    printfmt("PASS\n");
+}
+
+// splitmix64: a few lines, fast, and the same numbers on every machine and in
+// rust-dod's dojo, so a seed means the same run everywhere. u64 arithmetic
+// wraps, as splitmix64 wants.
+dojo_rng: struct = {
+    state: u64;
+}
+
+dojo_rng_next: proc(r: *dojo_rng) -> u64 = {
+    r*.state = r*.state + 11400714819323198485'u64;
+    z: u64 = r*.state;
+    z = (z ^ (z shr 30)) * 13787848793156543929'u64;
+    z = (z ^ (z shr 27)) * 10723151780598845931'u64;
+    return z ^ (z shr 31);
+}
+
+// A number in 0..n.
+dojo_rng_below: proc(r: *dojo_rng, n: u64) -> u64 = {
+    return dojo_rng_next(r) % n;
+}

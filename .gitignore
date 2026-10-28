@@ -1,1 +1,5 @@
 build/
+tools/__pycache__/
+# The dojo: your katas, and the clock of the one you started.
+dojo/*/kata.rin
+dojo/.started.json

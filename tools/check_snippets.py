@@ -12,6 +12,11 @@ backticks. Then:
     is an output sample: its lines, except "...", must appear in the .expected
     in the same order.
 
+Each dojo block's README is checked the same way against every file of its
+block: its playground, harness, solution and levels, and dojo/dojo.rin; and
+its output samples against the playground's and the harness's expected
+output.
+
 Plain blocks that do not start with an output line, such as diagrams, are not
 checked. A guide that passes can be copied from with confidence.
 """
@@ -56,32 +61,46 @@ def in_order(sample: list[str], expected: list[str]) -> bool:
     return True
 
 
-def main() -> int:
-    failures = 0
-    checked = 0
+def guides() -> list[tuple[Path, list[str], list[str], str, str]]:
+    """(guide, source texts, expected lines, what the code is, what the output is)"""
+    found = []
     for doc in sorted(DOCS.glob("*.md")):
-        text = doc.read_text(encoding="utf-8")
-        m = re.search(r"^`(ecs/src/[^`]+\.rin)`", text, re.M)
+        m = re.search(r"^`(ecs/src/[^`]+\.rin)`", doc.read_text(encoding="utf-8"), re.M)
         if not m:
             continue
         source_path = ROOT / m.group(1)
-        source = source_path.read_text(encoding="utf-8")
         expected_path = source_path.with_suffix(".expected")
         expected = expected_path.read_text(encoding="utf-8").split("\n") if expected_path.exists() else []
+        found.append((doc, [source_path.read_text(encoding="utf-8")], expected, m.group(1),
+                      expected_path.relative_to(ROOT).as_posix()))
+    for block in sorted(p for p in (ROOT / "dojo").glob("*.*") if (p / "README.md").exists()):
+        files = sorted(f for f in block.rglob("*.rin") if f.name != "kata.rin" or f.parent.name == "solution")
+        texts = [f.read_text(encoding="utf-8") for f in files + [ROOT / "dojo" / "dojo.rin"]]
+        outputs = sorted(block.glob("*.expected"))
+        expected = [line for o in outputs for line in o.read_text(encoding="utf-8").split("\n")]
+        name = block.relative_to(ROOT).as_posix()
+        found.append((block / "README.md", texts, expected, name, name + "'s expected output"))
+    return found
+
+
+def main() -> int:
+    failures = 0
+    checked = 0
+    for doc, sources, expected, code_name, output_name in guides():
+        text = doc.read_text(encoding="utf-8")
         for lang, body, line in blocks(text):
             if lang == "rin":
                 checked += 1
-                if "\n".join(body) not in source:
+                if not any("\n".join(body) in source for source in sources):
                     failures += 1
-                    print(f"{doc.relative_to(ROOT)}:{line}: rin sample not found in {m.group(1)}")
+                    print(f"{doc.relative_to(ROOT)}:{line}: rin sample not found in {code_name}")
                     for b in body[:3]:
                         print(f"      {b}")
             elif lang == "" and body and body[0] in expected:
                 checked += 1
                 if not in_order(body, expected):
                     failures += 1
-                    print(f"{doc.relative_to(ROOT)}:{line}: output sample does not match "
-                          f"{expected_path.relative_to(ROOT)}")
+                    print(f"{doc.relative_to(ROOT)}:{line}: output sample does not match {output_name}")
     print(f"{checked - failures} of {checked} samples match")
     return 1 if failures else 0
 

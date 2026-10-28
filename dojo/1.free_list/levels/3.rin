@@ -1,0 +1,15 @@
+// Level 3: a blank page. Write the allocator from memory.
+//
+// Start it with: python tools/dojo.py start free_list 3
+//
+// The harness needs exactly this, and checks what each does. dojo_handle
+// ({ index: u32; generation: u32; }) and dojo_status ({ ok, dead }) are given,
+// in dojo/dojo.rin, as are vec<T> and memops_arena.
+//
+//   handles: struct
+//   handles_init: proc(h: *handles, arena: *memops_arena) -> void
+//   handles_alloc: proc(h: *handles) -> dojo_handle            reuses a freed index first
+//   handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status
+//   handles_alive: proc(h: *handles, e: dojo_handle) -> b32
+//   handles_live: proc(h: *handles) -> u64                     handles alive now
+//   handles_slots: proc(h: *handles) -> u64                    indices handed out, alive or free

@@ -1,0 +1,81 @@
+// Level 1: one proc. Everything here works except slot_map_remove. Write its
+// body.
+//
+// Start it with: python tools/dojo.py start slot_map 1
+
+// One slot per index: the life it is in now (or next, if it is free), and the
+// row its value is in while it is alive.
+slot_map_slot: struct = {
+    generation: u32;
+    row: u32;
+}
+
+slot_map: struct = {
+    arena: *memops_arena;
+    slots: vec<slot_map_slot>;
+    free: vec<u32>;
+    // Packed: values[row] belongs to handles[row].
+    values: vec<u64>;
+    handles: vec<dojo_handle>;
+}
+
+slot_map_init: proc(m: *slot_map, arena: *memops_arena) -> void = {
+    m* = {};
+    m*.arena = arena;
+}
+
+// The value goes in a new row at the end; its handle reuses a freed index
+// before making a new one.
+slot_map_insert: proc(m: *slot_map, value: u64) -> dojo_handle = {
+    index: u32 = 0;
+    if (!vec<u32>is_empty(m*.free&)) {
+        index = vec<u32>pop(m*.free&);
+    } else {
+        index = cast(m*.slots.length, u32);
+        _ = vec<slot_map_slot>append(m*.arena, m*.slots&, { .generation = 1 });
+    }
+    slot: *slot_map_slot = vec<slot_map_slot>at(m*.slots&, cast(index, u64));
+    slot*.row = cast(m*.values.length, u32);
+    h: dojo_handle = { .index = index, .generation = slot*.generation };
+    _ = vec<u64>append(m*.arena, m*.values&, value);
+    _ = vec<dojo_handle>append(m*.arena, m*.handles&, h);
+    return h;
+}
+
+slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32 = {
+    if (cast(h.index, u64) >= m*.slots.length) {
+        return 0;
+    }
+    return vec<slot_map_slot>at(m*.slots&, cast(h.index, u64))*.generation == h.generation;
+}
+
+// Handle, slot, row, value: the value to read or to change, or null if h is
+// dead.
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> *u64 = {
+    if (!slot_map_contains(m, h)) {
+        return null;
+    }
+    row: u32 = vec<slot_map_slot>at(m*.slots&, cast(h.index, u64))*.row;
+    return vec<u64>at(m*.values&, cast(row, u64));
+}
+
+// Free the index (dojo 1), then swap-remove the row (dojo 2).
+slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64> = {
+    // Level 1: free h's index and take its value out, keeping the rows
+    // packed. A dead handle gives none and changes nothing.
+    return option<u64>none();
+}
+
+slot_map_len: proc(m: *slot_map) -> u64 = {
+    return m*.values.length;
+}
+
+// The values, packed, in row order: what a system loops over.
+slot_map_values: proc(m: *slot_map) -> []u64 = {
+    return vec<u64>items(m*.values&);
+}
+
+// handles[row] is the handle that owns values[row].
+slot_map_handles: proc(m: *slot_map) -> []dojo_handle = {
+    return vec<dojo_handle>items(m*.handles&);
+}

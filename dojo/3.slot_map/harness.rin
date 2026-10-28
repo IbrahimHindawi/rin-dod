@@ -1,0 +1,368 @@
+// The harness for dojo 3, the slot map. It is fixed: your work is kata.rin,
+// beside it. Run both with
+//
+//   python tools/dojo.py slot_map
+//
+// First a short scenario, the same steps as the playground, each printed as
+// it passes. Then a fuzz run: thousands of random inserts, removes, reads and
+// writes from a seed, against a model that keeps, per index, the last
+// generation handed out, whether the index is free, and its value. It checks
+// dojo 1's rules for the handles (a generation never handed out twice, a freed
+// index reused first, dead ones stay dead) and dojo 2's for the rows (packed,
+// each row's handle holding that row's value).
+
+import "../dojo.rin"
+import "kata.rin"
+
+fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
+    if (o.has_value) {
+        fmt_u64(f, o.value);
+    } else {
+        fmt_cstr(f, "none");
+    }
+}
+
+fmt_found: proc(f: *fmt, p: *u64) -> void = {
+    if (p != null) {
+        fmt_u64(f, p*);
+    } else {
+        fmt_cstr(f, "null");
+    }
+}
+
+fmt_handles: proc(f: *fmt, hs: []dojo_handle) -> void = {
+    for (i: u64 = 0; i < hs.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        dojo_fmt_handle(f, hs[i]);
+    }
+}
+
+fmt_values: proc(f: *fmt, values: []u64) -> void = {
+    for (i: u64 = 0; i < values.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, values[i]);
+    }
+}
+
+scenario: proc(arena: *memops_arena) -> void = {
+    printfmt("scenario\n");
+    m: slot_map = {};
+    slot_map_init(m&, arena);
+    text: [64]c8 = {};
+    f: fmt = {};
+
+    a: dojo_handle = slot_map_insert(m&, 10);
+    b: dojo_handle = slot_map_insert(m&, 20);
+    c: dojo_handle = slot_map_insert(m&, 30);
+    f = fmt_to(text);
+    dojo_fmt_handle(f&, a);
+    fmt_char(f&, ' ');
+    dojo_fmt_handle(f&, b);
+    fmt_char(f&, ' ');
+    dojo_fmt_handle(f&, c);
+    dojo_same("insert 10, 20, 30 as a, b, c", f.data, "0:1 1:1 2:1");
+    f = fmt_to(text);
+    fmt_option(f&, slot_map_remove(m&, b));
+    dojo_same("remove b", f.data, "20");
+    f = fmt_to(text);
+    fmt_handles(f&, slot_map_handles(m&));
+    dojo_same("c moved into b's row: handles by row", f.data, "0:1 2:1");
+    f = fmt_to(text);
+    fmt_values(f&, slot_map_values(m&));
+    dojo_same("values by row", f.data, "10 30");
+    f = fmt_to(text);
+    fmt_found(f&, slot_map_get(m&, c));
+    dojo_same("get c, through its slot", f.data, "30");
+    f = fmt_to(text);
+    fmt_found(f&, slot_map_get(m&, b));
+    dojo_same("get b", f.data, "null");
+    dojo_same("contains b", dojo_bool_name(slot_map_contains(m&, b)), "false");
+    f = fmt_to(text);
+    fmt_option(f&, slot_map_remove(m&, b));
+    dojo_same("remove b again", f.data, "none");
+    d: dojo_handle = slot_map_insert(m&, 40);
+    f = fmt_to(text);
+    dojo_fmt_handle(f&, d);
+    dojo_same("insert 40 as d: b's index, next life", f.data, "1:2");
+    f = fmt_to(text);
+    fmt_found(f&, slot_map_get(m&, b));
+    dojo_same("get b, now that its index is d's", f.data, "null");
+    nobody: dojo_handle = {};
+    dojo_same("contains a zeroed handle", dojo_bool_name(slot_map_contains(m&, nobody)), "false");
+    p: *u64 = slot_map_get(m&, a);
+    if (p != null) {
+        p* += 1;
+    }
+    f = fmt_to(text);
+    fmt_found(f&, slot_map_get(m&, a));
+    dojo_same("get a, add 1 through the pointer", f.data, "11");
+    f = fmt_to(text);
+    fmt_u64(f&, slot_map_len(m&));
+    dojo_same("len", f.data, "3");
+}
+
+// What a correct slot map must do, kept the simple way: per index, the last
+// generation handed out, whether the index is free, and the value of its live
+// handle; and lists of the handles alive and dead.
+model: struct = {
+    last: vec<u32>;
+    is_free: vec<b32>;
+    value: vec<u64>;
+    free_count: u64;
+    live: vec<dojo_handle>;
+    dead: vec<dojo_handle>;
+}
+
+model_alive: proc(m: *model, h: dojo_handle) -> b32 = {
+    i: u64 = cast(h.index, u64);
+    return i < m*.last.length && !vec<b32>at(m*.is_free&, i)* && vec<u32>at(m*.last&, i)* == h.generation;
+}
+
+model_get: proc(m: *model, h: dojo_handle) -> option<u64> = {
+    if (!model_alive(m, h)) {
+        return option<u64>none();
+    }
+    return option<u64>some(vec<u64>at(m*.value&, cast(h.index, u64))*);
+}
+
+same_option: proc(a: option<u64>, b: option<u64>) -> b32 = {
+    return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
+}
+
+found_is: proc(p: *u64, o: option<u64>) -> b32 = {
+    if (p == null) {
+        return !o.has_value;
+    }
+    return o.has_value && p* == o.value;
+}
+
+print_option: proc(o: option<u64>) -> void = {
+    if (o.has_value) {
+        printfmt("{}", o.value);
+    } else {
+        printfmt("none");
+    }
+}
+
+print_found: proc(p: *u64) -> void = {
+    if (p != null) {
+        printfmt("{}", p*);
+    } else {
+        printfmt("null");
+    }
+}
+
+pick: proc(rng: *dojo_rng, hs: *vec<dojo_handle>) -> dojo_handle = {
+    return vec<dojo_handle>at(hs, dojo_rng_below(rng, hs*.length))*;
+}
+
+// Everything at once: the rows against the model, and every handle, live and
+// dead.
+all_agree: proc(run: *dojo_run, op: u64, s: *slot_map, m: *model) -> void = {
+    if (slot_map_len(s) != m*.live.length) {
+        dojo_fail(run, op);
+        printfmt("len() is {}, the model has {}\n", slot_map_len(s), m*.live.length);
+        dojo_failed(run, op);
+    }
+    values: []u64 = slot_map_values(s);
+    handles: []dojo_handle = slot_map_handles(s);
+    if (values.length != slot_map_len(s) || handles.length != slot_map_len(s)) {
+        dojo_fail(run, op);
+        printfmt("len() is {}, values() has {}, handles() has {}\n", slot_map_len(s), values.length, handles.length);
+        dojo_failed(run, op);
+    }
+    for (row: u64 = 0; row < handles.length; row += 1) {
+        h: dojo_handle = handles[row];
+        value: u64 = values[row];
+        if (!found_is(value&, model_get(m, h))) {
+            dojo_fail(run, op);
+            printfmt("row {} says {}:{} holds {}; the model says {}:{} holds ", row, h.index, h.generation,
+                value, h.index, h.generation);
+            print_option(model_get(m, h));
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+    }
+    for (k: u64 = 0; k < m*.live.length; k += 1) {
+        h: dojo_handle = vec<dojo_handle>at(m*.live&, k)*;
+        if (!found_is(slot_map_get(s, h), model_get(m, h))) {
+            dojo_fail(run, op);
+            printfmt("get({}:{}) gives ", h.index, h.generation);
+            print_found(slot_map_get(s, h));
+            printfmt(", the model says ");
+            print_option(model_get(m, h));
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+    }
+    for (k: u64 = 0; k < m*.dead.length; k += 1) {
+        h: dojo_handle = vec<dojo_handle>at(m*.dead&, k)*;
+        if (slot_map_contains(s, h) || slot_map_get(s, h) != null) {
+            dojo_fail(run, op);
+            printfmt("{}:{} was removed, but the map still has it\n", h.index, h.generation);
+            dojo_failed(run, op);
+        }
+    }
+}
+
+fuzz: proc(run: *dojo_run, arena: *memops_arena) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    s: slot_map = {};
+    slot_map_init(s&, arena);
+    m: model = {};
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 45 || m.live.length == 0) {
+            value: u64 = op;
+            if (dojo_before(run, op)) {
+                printfmt("insert({})\n", value);
+            }
+            h: dojo_handle = slot_map_insert(s&, value);
+            i: u64 = cast(h.index, u64);
+            if (m.free_count == 0) {
+                if (i != m.last.length) {
+                    dojo_fail(run, op);
+                    printfmt("insert returned {}:{} with nothing free; the next new index is {}\n",
+                        h.index, h.generation, m.last.length);
+                    dojo_failed(run, op);
+                }
+                _ = vec<u32>append(arena, m.last&, 0);
+                _ = vec<b32>append(arena, m.is_free&, 0);
+                _ = vec<u64>append(arena, m.value&, 0);
+            } else {
+                if (i >= m.last.length || !vec<b32>at(m.is_free&, i)*) {
+                    dojo_fail(run, op);
+                    printfmt("insert returned {}:{}, but index {} is not free, and {} freed indices wait\n",
+                        h.index, h.generation, h.index, m.free_count);
+                    dojo_failed(run, op);
+                }
+                vec<b32>at(m.is_free&, i)* = 0;
+                m.free_count -= 1;
+            }
+            if (h.generation <= vec<u32>at(m.last&, i)*) {
+                dojo_fail(run, op);
+                printfmt("insert handed out a generation it has handed out before: {}:{}\n", h.index, h.generation);
+                dojo_failed(run, op);
+            }
+            vec<u32>at(m.last&, i)* = h.generation;
+            vec<u64>at(m.value&, i)* = value;
+            if (!found_is(slot_map_get(s&, h), option<u64>some(value))) {
+                dojo_fail(run, op);
+                printfmt("insert({}) returned {}:{}, and get({}:{}) gives ", value, h.index, h.generation,
+                    h.index, h.generation);
+                print_found(slot_map_get(s&, h));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+            _ = vec<dojo_handle>append(arena, m.live&, h);
+        } else if (roll < 75) {
+            at: u64 = dojo_rng_below(rng&, m.live.length);
+            h: dojo_handle = vec<dojo_handle>at(m.live&, at)*;
+            last: dojo_handle = vec<dojo_handle>pop(m.live&);
+            if (at < m.live.length) {
+                vec<dojo_handle>at(m.live&, at)* = last;
+            }
+            want: option<u64> = model_get(m&, h);
+            vec<b32>at(m.is_free&, cast(h.index, u64))* = 1;
+            m.free_count += 1;
+            _ = vec<dojo_handle>append(arena, m.dead&, h);
+            if (dojo_before(run, op)) {
+                printfmt("remove({}:{})\n", h.index, h.generation);
+            }
+            got: option<u64> = slot_map_remove(s&, h);
+            if (!same_option(got, want)) {
+                dojo_fail(run, op);
+                printfmt("remove({}:{}) returned ", h.index, h.generation);
+                print_option(got);
+                printfmt(", the model says ");
+                print_option(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+            if (slot_map_contains(s&, h)) {
+                dojo_fail(run, op);
+                printfmt("after remove({}:{}), contains({}:{}) is still true\n", h.index, h.generation,
+                    h.index, h.generation);
+                dojo_failed(run, op);
+            }
+        } else if (roll < 80 && m.dead.length > 0) {
+            h: dojo_handle = pick(rng&, m.dead&);
+            if (dojo_before(run, op)) {
+                printfmt("remove({}:{}), a dead handle\n", h.index, h.generation);
+            }
+            len: u64 = slot_map_len(s&);
+            got: option<u64> = slot_map_remove(s&, h);
+            if (got.has_value || slot_map_len(s&) != len) {
+                dojo_fail(run, op);
+                printfmt("remove({}:{}) of a dead handle should give none and change nothing\n",
+                    h.index, h.generation);
+                dojo_failed(run, op);
+            }
+        } else if (roll < 90) {
+            h: dojo_handle = {};
+            if (m.dead.length > 0 && dojo_rng_below(rng&, 3) == 0) {
+                h = pick(rng&, m.dead&);
+            } else {
+                h = pick(rng&, m.live&);
+            }
+            if (dojo_before(run, op)) {
+                printfmt("get({}:{})\n", h.index, h.generation);
+            }
+            got: *u64 = slot_map_get(s&, h);
+            if (!found_is(got, model_get(m&, h))) {
+                dojo_fail(run, op);
+                printfmt("get({}:{}) gives ", h.index, h.generation);
+                print_found(got);
+                printfmt(", the model says ");
+                print_option(model_get(m&, h));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else {
+            h: dojo_handle = pick(rng&, m.live&);
+            if (dojo_before(run, op)) {
+                printfmt("get({}:{}), then add 1 through the pointer\n", h.index, h.generation);
+            }
+            got: *u64 = slot_map_get(s&, h);
+            if (got != null) {
+                got* += 1;
+            }
+            if (model_alive(m&, h)) {
+                vec<u64>at(m.value&, cast(h.index, u64))* += 1;
+            }
+            if (!found_is(slot_map_get(s&, h), model_get(m&, h))) {
+                dojo_fail(run, op);
+                printfmt("after adding 1 through get({}:{}), it gives ", h.index, h.generation);
+                print_found(slot_map_get(s&, h));
+                printfmt(", the model says ");
+                print_option(model_get(m&, h));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        }
+        if (slot_map_len(s&) != m.live.length) {
+            dojo_fail(run, op);
+            printfmt("len() is {}, the model has {}\n", slot_map_len(s&), m.live.length);
+            dojo_failed(run, op);
+        }
+        if (op % 256 == 0) {
+            all_agree(run, op, s&, m&);
+        }
+    }
+    all_agree(run, run*.ops, s&, m&);
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    run: dojo_run = dojo_run_init(argc, argv, "slot_map", "3. the slot map");
+    scenario(arena&);
+    fuzz(run&, arena&);
+    return 0;
+}

@@ -1,0 +1,53 @@
+// Level 1: one proc. Everything here works except handles_free. Write its body.
+//
+// Start it with: python tools/dojo.py start free_list 1
+
+handles: struct = {
+    arena: *memops_arena;
+    // The life each index is in now, or will be in next if it is free.
+    generations: vec<u32>;
+    // Freed indices, waiting to be reused. A stack: the last one freed is the
+    // first one reused.
+    free: vec<u32>;
+}
+
+handles_init: proc(h: *handles, arena: *memops_arena) -> void = {
+    h* = {};
+    h*.arena = arena;
+}
+
+// A handle no one has had before: a freed index in its next life, or a new
+// index in its first.
+handles_alloc: proc(h: *handles) -> dojo_handle = {
+    index: u32 = 0;
+    if (!vec<u32>is_empty(h*.free&)) {
+        index = vec<u32>pop(h*.free&);
+    } else {
+        index = cast(h*.generations.length, u32);
+        _ = vec<u32>append(h*.arena, h*.generations&, 1);
+    }
+    return { .index = index, .generation = vec<u32>at(h*.generations&, cast(index, u64))* };
+}
+
+// The generation goes up now, not at the next alloc, so a free index already
+// holds a generation that no handle has.
+handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status = {
+    // Level 1: free e, so no handle to it is alive again. A dead handle
+    // returns dojo_status.dead and changes nothing.
+    return dojo_status.ok;
+}
+
+handles_alive: proc(h: *handles, e: dojo_handle) -> b32 = {
+    if (cast(e.index, u64) >= h*.generations.length) {
+        return 0;
+    }
+    return vec<u32>at(h*.generations&, cast(e.index, u64))* == e.generation;
+}
+
+handles_live: proc(h: *handles) -> u64 = {
+    return h*.generations.length - h*.free.length;
+}
+
+handles_slots: proc(h: *handles) -> u64 = {
+    return h*.generations.length;
+}

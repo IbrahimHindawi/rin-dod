@@ -38,4 +38,9 @@ build_entries: [_]^const char = {
     "src/5.inspector/inspector.rin",
     "src/6.kayan/kayan.rin",
     "src/7.access_patterns/access_patterns.rin",
+
+    // The dojo's playgrounds, dojo/README.md
+    "dojo/1.free_list/play_free_list.rin",
+    "dojo/2.swap_remove/play_swap_remove.rin",
+    "dojo/3.slot_map/play_slot_map.rin",
 };

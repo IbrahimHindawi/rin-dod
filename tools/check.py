@@ -12,7 +12,11 @@ A lesson passes only if all four steps are clean:
   3. the program exits with 0,
   4. its output matches the .expected file beside it, byte for byte.
 
-The lessons are the list in build.rin, so there is one list to keep.
+The lessons are the list in build.rin, so there is one list to keep. The
+dojo's playgrounds are in it too. Each dojo block is also checked on its own
+(`python tools/check.py dojo` for only them): its harness is built with its
+reference solution and must print its harness.expected; level 1 must build and
+fail, since it has a gap; level 2 must build.
 
 rin is found through RIN, then RIN_HOME, then PATH; its std is the folder beside
 it, as `rin build` assumes. The C compiler is CC, or clang.
@@ -130,6 +134,75 @@ def check(rin: Path, cc: str, lesson: Path, bless: bool, sanitize: bool,
     return True, ""
 
 
+# ---------------------------------------------------------------- the dojo
+
+DOJO = ROOT / "dojo"
+# A kata in progress is full of unused parameters and locals.
+KATA_QUIET = ["-Wno-unused-parameter", "-Wno-unused-variable", "-Wno-unused-but-set-variable",
+              "-Wno-unused-function"]
+
+
+def dojo_blocks() -> list[Path]:
+    return sorted(p for p in DOJO.iterdir() if p.is_dir() and re.match(r"\d+\.", p.name))
+
+
+# A harness is built next to a kata.rin. Here the kata is the solution or a
+# level, copied into a build folder with the harness, and dojo.rin one folder
+# up, where the harness imports it from.
+def dojo_build(rin: Path, cc: str, block: Path, kata: Path, where: str, sanitize: bool,
+               quiet: bool) -> tuple[Path | None, str]:
+    folder = OUT / "dojo" / block.name / where
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(block / "harness.rin", folder / "harness.rin")
+    shutil.copyfile(kata, folder / "kata.rin")
+    shutil.copyfile(DOJO / "dojo.rin", folder.parent / "dojo.rin")
+    c_path = folder / "harness.c"
+    exe = folder / ("harness.exe" if os.name == "nt" else "harness")
+    translate = run([str(rin), "compile", str(folder / "harness.rin"), "-o", str(c_path),
+                     "--header", str(folder / "harness.h")])
+    noise = [line for line in translate.stdout.splitlines()
+             if line.strip() and not line.startswith("rin: generated")]
+    if translate.returncode != 0 or noise:
+        return None, "rin compile:\n" + translate.stdout
+    flags = ["-std=c11", "-g", "-Wall", "-Wextra", "-Werror", *(KATA_QUIET if quiet else [])]
+    flags += [f"-D{define}" for define in list_from_build_rin("build_defines") or []]
+    if sanitize:
+        flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
+    includes = ["-I", str(rin.parent), "-I", str(rin.parent / "std")]
+    libs = [] if os.name == "nt" else ["-lm"]
+    build = run([cc, *flags, *includes, str(c_path), "-o", str(exe), *libs])
+    if build.returncode != 0 or build.stdout.strip():
+        return None, f"{cc}:\n" + build.stdout
+    return exe, ""
+
+
+def check_dojo(rin: Path, cc: str, block: Path, bless: bool, sanitize: bool,
+               env: dict[str, str] | None) -> tuple[bool, str]:
+    exe, err = dojo_build(rin, cc, block, block / "solution" / "kata.rin", "solution", sanitize, False)
+    if not exe:
+        return False, "the harness with the solution, " + err
+    ran = run([str(exe)], env=env)
+    if ran.returncode != 0:
+        return False, f"the solution fails its harness, exit {ran.returncode}:\n{ran.stdout}"
+    actual = ran.stdout.replace("\r\n", "\n")
+    expected_path = block / "harness.expected"
+    detail = ""
+    if bless:
+        expected_path.write_text(actual, encoding="utf-8", newline="\n")
+        detail = "blessed"
+    elif not expected_path.exists():
+        return False, f"no harness.expected; run with --bless after reading the output:\n{actual}"
+    elif actual != expected_path.read_text(encoding="utf-8").replace("\r\n", "\n"):
+        return False, "the harness's output with the solution is not harness.expected"
+    for level in (1, 2):
+        exe, err = dojo_build(rin, cc, block, block / "levels" / f"{level}.rin", f"level{level}", sanitize, True)
+        if not exe:
+            return False, f"the harness with level {level}, " + err
+        if level == 1 and run([str(exe)], env=env).returncode == 0:
+            return False, "level 1 passes the harness as given; its gap is not a gap"
+    return True, detail
+
+
 def main() -> int:
     args = sys.argv[1:]
     bless = "--bless" in args
@@ -152,7 +225,20 @@ def main() -> int:
             failed += 1
             print("     " + detail.replace("\n", "\n     "))
     print(f"{len(lessons) - failed} of {len(lessons)} passed")
-    return 1 if failed else 0
+
+    blocks = [b for b in dojo_blocks()
+              if not filters or any(f in b.relative_to(ROOT).as_posix() for f in filters)]
+    dojo_failed = 0
+    for block in blocks:
+        ok, detail = check_dojo(rin, cc, block, bless, sanitize, env)
+        print(f"{'ok  ' if ok else 'FAIL'} {block.relative_to(ROOT).as_posix()}, the solution and the levels"
+              + (f"  ({detail})" if ok and detail else ""))
+        if not ok:
+            dojo_failed += 1
+            print("     " + detail.replace("\n", "\n     "))
+    if blocks:
+        print(f"{len(blocks) - dojo_failed} of {len(blocks)} dojo blocks passed")
+    return 1 if failed or dojo_failed else 0
 
 
 if __name__ == "__main__":

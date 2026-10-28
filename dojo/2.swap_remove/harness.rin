@@ -1,0 +1,301 @@
+// The harness for dojo 2, swap-remove and the back-reference. It is fixed:
+// your work is kata.rin, beside it. Run both with
+//
+//   python tools/dojo.py swap_remove
+//
+// First a short scenario, the same steps as the playground, each printed as
+// it passes. Then a fuzz run: thousands of random inserts and removes over a
+// small range of ids, so the same ids come and go many times, each checked
+// against a model that is a plain array from id to value. Every few operations
+// it also checks the packed rows themselves: no holes, each row's owner holds
+// exactly that row's value.
+
+import "../dojo.rin"
+import "kata.rin"
+
+// The model's ids go up to this; the fuzz run picks ids below it.
+id_limit: u64 = 5000;
+
+// Writes an option the way the scenario shows it: its value, or none.
+fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
+    if (o.has_value) {
+        fmt_u64(f, o.value);
+    } else {
+        fmt_cstr(f, "none");
+    }
+}
+
+// Writes what a get found: the value, or null.
+fmt_found: proc(f: *fmt, p: *u64) -> void = {
+    if (p != null) {
+        fmt_u64(f, p*);
+    } else {
+        fmt_cstr(f, "null");
+    }
+}
+
+fmt_ids: proc(f: *fmt, ids: []u32) -> void = {
+    for (i: u64 = 0; i < ids.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, cast(ids[i], u64));
+    }
+}
+
+fmt_values: proc(f: *fmt, values: []u64) -> void = {
+    for (i: u64 = 0; i < values.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, values[i]);
+    }
+}
+
+scenario: proc(arena: *memops_arena) -> void = {
+    printfmt("scenario\n");
+    s: sparse_set = {};
+    sparse_set_init(s&, arena);
+    text: [64]c8 = {};
+    f: fmt = {};
+
+    ids: [4]u32 = { 3, 7, 1, 5 };
+    for (i: u64 = 0; i < 4; i += 1) {
+        _ = sparse_set_insert(s&, ids[i], cast(ids[i], u64) * 10);
+    }
+    f = fmt_to(text);
+    fmt_ids(f&, sparse_set_ids(s&));
+    dojo_same("insert 3, 7, 1, 5: ids by row", f.data, "3 7 1 5");
+    f = fmt_to(text);
+    fmt_values(f&, sparse_set_values(s&));
+    dojo_same("values by row", f.data, "30 70 10 50");
+    f = fmt_to(text);
+    fmt_option(f&, sparse_set_remove(s&, 7));
+    dojo_same("remove 7", f.data, "70");
+    f = fmt_to(text);
+    fmt_ids(f&, sparse_set_ids(s&));
+    dojo_same("the last row moved into row 1: ids", f.data, "3 5 1");
+    f = fmt_to(text);
+    fmt_values(f&, sparse_set_values(s&));
+    dojo_same("values", f.data, "30 50 10");
+    f = fmt_to(text);
+    fmt_found(f&, sparse_set_get(s&, 5));
+    dojo_same("get 5, through its fixed row", f.data, "50");
+    f = fmt_to(text);
+    fmt_found(f&, sparse_set_get(s&, 7));
+    dojo_same("get 7", f.data, "null");
+    f = fmt_to(text);
+    fmt_option(f&, sparse_set_remove(s&, 7));
+    dojo_same("remove 7 again", f.data, "none");
+    f = fmt_to(text);
+    fmt_option(f&, sparse_set_insert(s&, 3, 33));
+    dojo_same("insert 3 again: the old value comes back", f.data, "30");
+    f = fmt_to(text);
+    fmt_option(f&, sparse_set_insert(s&, 7, 77));
+    dojo_same("insert 7: a new row at the end", f.data, "none");
+    f = fmt_to(text);
+    fmt_ids(f&, sparse_set_ids(s&));
+    dojo_same("ids", f.data, "3 5 1 7");
+    one: *u64 = sparse_set_get(s&, 1);
+    if (one != null) {
+        one* += 1;
+    }
+    f = fmt_to(text);
+    fmt_found(f&, sparse_set_get(s&, 1));
+    dojo_same("get 1, add 1 through the pointer", f.data, "11");
+    f = fmt_to(text);
+    fmt_u64(f&, sparse_set_len(s&));
+    dojo_same("len", f.data, "4");
+}
+
+// The model: a plain array from id to value, and how many ids have one.
+model: struct = {
+    has: vec<b32>;
+    value: vec<u64>;
+    count: u64;
+}
+
+print_option: proc(o: option<u64>) -> void = {
+    if (o.has_value) {
+        printfmt("{}", o.value);
+    } else {
+        printfmt("none");
+    }
+}
+
+print_found: proc(p: *u64) -> void = {
+    if (p != null) {
+        printfmt("{}", p*);
+    } else {
+        printfmt("null");
+    }
+}
+
+model_get: proc(m: *model, id: u32) -> option<u64> = {
+    if (!vec<b32>at(m*.has&, cast(id, u64))*) {
+        return option<u64>none();
+    }
+    return option<u64>some(vec<u64>at(m*.value&, cast(id, u64))*);
+}
+
+same_option: proc(a: option<u64>, b: option<u64>) -> b32 = {
+    return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
+}
+
+found_is: proc(p: *u64, o: option<u64>) -> b32 = {
+    if (p == null) {
+        return !o.has_value;
+    }
+    return o.has_value && p* == o.value;
+}
+
+// The rows, checked against the model: packed, every row's owner holds that
+// row's value, and every id the model has is in a row.
+rows_agree: proc(run: *dojo_run, op: u64, s: *sparse_set, m: *model) -> void = {
+    values: []u64 = sparse_set_values(s);
+    ids: []u32 = sparse_set_ids(s);
+    if (values.length != sparse_set_len(s) || ids.length != sparse_set_len(s)) {
+        dojo_fail(run, op);
+        printfmt("len() is {}, values() has {}, ids() has {}\n", sparse_set_len(s), values.length, ids.length);
+        dojo_failed(run, op);
+    }
+    if (sparse_set_len(s) != m*.count) {
+        dojo_fail(run, op);
+        printfmt("len() is {}, the model has {}\n", sparse_set_len(s), m*.count);
+        dojo_failed(run, op);
+    }
+    for (row: u64 = 0; row < ids.length; row += 1) {
+        id: u32 = ids[row];
+        value: u64 = values[row];
+        if (cast(id, u64) >= id_limit || !found_is(value&, model_get(m, id))) {
+            dojo_fail(run, op);
+            printfmt("row {} says id {} holds {}; the model says id {} holds ", row, id, value, id);
+            if (cast(id, u64) < id_limit) {
+                print_option(model_get(m, id));
+            } else {
+                printfmt("nothing: no such id");
+            }
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+        if (!found_is(sparse_set_get(s, id), option<u64>some(value))) {
+            dojo_fail(run, op);
+            printfmt("row {} holds {}'s value {}, but get({}) gives ", row, id, value, id);
+            print_found(sparse_set_get(s, id));
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+    }
+}
+
+fuzz: proc(run: *dojo_run, arena: *memops_arena) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    s: sparse_set = {};
+    sparse_set_init(s&, arena);
+    m: model = {};
+    for (i: u64 = 0; i < id_limit; i += 1) {
+        _ = vec<b32>append(arena, m.has&, 0);
+        _ = vec<u64>append(arena, m.value&, 0);
+    }
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        // Mostly small ids, so the same ones come and go; now and then a big
+        // one, so the sparse side has to grow.
+        id: u32 = 0;
+        if (dojo_rng_below(rng&, 50) == 0) {
+            id = cast(dojo_rng_below(rng&, id_limit), u32);
+        } else {
+            id = cast(dojo_rng_below(rng&, 48), u32);
+        }
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 45) {
+            value: u64 = op * 1000 + cast(id, u64);
+            if (dojo_before(run, op)) {
+                printfmt("insert({}, {})\n", id, value);
+            }
+            got: option<u64> = sparse_set_insert(s&, id, value);
+            want: option<u64> = model_get(m&, id);
+            if (!want.has_value) {
+                m.count += 1;
+            }
+            vec<b32>at(m.has&, cast(id, u64))* = 1;
+            vec<u64>at(m.value&, cast(id, u64))* = value;
+            if (!same_option(got, want)) {
+                dojo_fail(run, op);
+                printfmt("insert({}, {}) returned ", id, value);
+                print_option(got);
+                printfmt(", the model says ");
+                print_option(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 85) {
+            if (dojo_before(run, op)) {
+                printfmt("remove({})\n", id);
+            }
+            got: option<u64> = sparse_set_remove(s&, id);
+            want: option<u64> = model_get(m&, id);
+            if (want.has_value) {
+                m.count -= 1;
+            }
+            vec<b32>at(m.has&, cast(id, u64))* = 0;
+            if (!same_option(got, want)) {
+                dojo_fail(run, op);
+                printfmt("remove({}) returned ", id);
+                print_option(got);
+                printfmt(", the model says ");
+                print_option(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 95) {
+            if (dojo_before(run, op)) {
+                printfmt("get({})\n", id);
+            }
+            got: *u64 = sparse_set_get(s&, id);
+            if (!found_is(got, model_get(m&, id))) {
+                dojo_fail(run, op);
+                printfmt("get({}) returned ", id);
+                print_found(got);
+                printfmt(", the model says ");
+                print_option(model_get(m&, id));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else {
+            if (dojo_before(run, op)) {
+                printfmt("get({}), then add 1 through the pointer\n", id);
+            }
+            got: *u64 = sparse_set_get(s&, id);
+            if (got != null) {
+                got* += 1;
+            }
+            if (vec<b32>at(m.has&, cast(id, u64))*) {
+                vec<u64>at(m.value&, cast(id, u64))* += 1;
+            }
+        }
+        if (!found_is(sparse_set_get(s&, id), model_get(m&, id))) {
+            dojo_fail(run, op);
+            printfmt("after that, get({}) is ", id);
+            print_found(sparse_set_get(s&, id));
+            printfmt(", the model says ");
+            print_option(model_get(m&, id));
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+        if (op % 64 == 0) {
+            rows_agree(run, op, s&, m&);
+        }
+    }
+    rows_agree(run, run*.ops, s&, m&);
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    run: dojo_run = dojo_run_init(argc, argv, "swap_remove", "2. swap-remove and the back-reference");
+    scenario(arena&);
+    fuzz(run&, arena&);
+    return 0;
+}
