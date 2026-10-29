@@ -1,0 +1,53 @@
+// Level 1: one proc. Everything here works except bump_push. Write its body.
+//
+// Start it with: python tools/dojo.py start arena 1
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+bump: struct = {
+    base: ^u8;
+    capacity: u64;
+    // Bytes before `used` are handed out; bytes after it are free.
+    used: u64;
+}
+
+// An arena over the `capacity` bytes at `base`. Pushes are aligned from
+// base, so base should be aligned to the most a push will ask for; the
+// harness's is 16-aligned.
+bump_init: proc(b: *bump, base: ^u8, capacity: u64) -> void = {
+    b* = {};
+    b*.base = base;
+    b*.capacity = capacity;
+}
+
+// `size` bytes at the first multiple of `align`, a power of two, at or after
+// `used`. Null, and nothing changes, if they would end past the last byte.
+bump_push: proc(b: *bump, size: u64, align: u64) -> ^u8 = {
+    // Level 1: round used up to align, check the end fits, move used past it,
+    // and return the address there.
+    return null;
+}
+
+bump_used: proc(b: *bump) -> u64 = {
+    return b*.used;
+}
+
+bump_capacity: proc(b: *bump) -> u64 = {
+    return b*.capacity;
+}
+
+// Where the arena is now, to come back to.
+bump_mark: proc(b: *bump) -> u64 = {
+    return b*.used;
+}
+
+// Let go of everything pushed since `mark`.
+bump_rewind: proc(b: *bump, mark: u64) -> void = {
+    b*.used = mark;
+}
+
+bump_clear: proc(b: *bump) -> void = {
+    b*.used = 0;
+}

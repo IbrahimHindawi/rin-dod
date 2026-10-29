@@ -45,4 +45,12 @@ build_entries: [_]^const char = {
     "dojo/3.slot_map/play_slot_map.rin",
     "dojo/4.column/play_column.rin",
     "dojo/5.commands/play_commands.rin",
+    "dojo/6.bitset/play_bitset.rin",
+    "dojo/7.arena/play_arena.rin",
+    "dojo/8.index/play_index.rin",
+    "dojo/9.interning/play_interning.rin",
+    "dojo/10.edges/play_edges.rin",
+    "dojo/11.reflect/play_reflect.rin",
+    "dojo/12.watermark/play_watermark.rin",
+    "dojo/13.dispatch/play_dispatch.rin",
 };

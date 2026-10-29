@@ -1,0 +1,33 @@
+// Level 3: a blank page. Write the walk from memory.
+//
+// Start it with: python tools/dojo.py start reflect 3
+//
+// The harness needs exactly this, and checks what each does. The compiler's
+// reflect records are given, in std/reflect.rin: a reflect_field has a name,
+// a type (its type's name), an offset from the start of its own struct, a
+// size, and info, the record of its type if that's a struct (null for f32 or
+// u8). reflect_field_has_attr(f, "hidden") says if it is tagged hidden.
+//
+//   walk_path: struct = { text: [48]c8; }
+//   walk_paths: proc(arena: *memops_arena, type: *const reflect) -> vec<walk_path>
+//       "at.x": every leaf a tool shows, in order
+//   walk_diff: proc(arena: *memops_arena, type: *const reflect, a: []const u8, b: []const u8) -> vec<walk_path>
+//       the paths whose bytes differ
+//   walk_get_f32: proc(type: *const reflect, bytes: []const u8, path: ^const char) -> option<f32>
+//   walk_set_f32: proc(type: *const reflect, bytes: []u8, path: ^const char, value: f32) -> b32
+//
+// A hidden field is left out of walk_paths and walk_diff, with everything
+// inside it, but a path still reaches it. walk_get_f32 and walk_set_f32
+// refuse a path that names a struct, a u8, or nothing.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "std/fmt.rin"
+import "std/cstd.rin"
+import "std/reflect.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

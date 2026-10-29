@@ -1,0 +1,23 @@
+// Level 3: a blank page. Write the bitset procs from memory.
+//
+// Start it with: python tools/dojo.py start bitset 3
+//
+// The harness needs exactly this, and checks what each does. A set is a u64,
+// bit `id` set for each id in it, ids 0 to 63.
+//
+//   bitset_bit: proc(id: u32) -> u64                                the set of id alone
+//   bitset_with: proc(set: u64, id: u32) -> u64
+//   bitset_without: proc(set: u64, id: u32) -> u64
+//   bitset_has: proc(set: u64, id: u32) -> b32
+//   bitset_contains_all: proc(set: u64, wanted: u64) -> b32         every id of wanted is in set
+//   bitset_intersects: proc(a: u64, b: u64) -> b32                  an id in both
+//   bitset_matches: proc(set: u64, all: u64, none: u64) -> b32      all of all, none of none
+//   bitset_count: proc(set: u64) -> u32
+//   bitset_ids: proc(set: u64, out: []u32) -> u32                   smallest first, into out (room
+//                                                                   for 64); returns how many
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

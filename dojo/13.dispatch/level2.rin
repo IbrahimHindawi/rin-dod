@@ -1,0 +1,85 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start dispatch 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "std/cstd.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A system is a plain pointer to a proc.
+system_proc: alias = *proc(c: *ctx) -> void;
+
+schedule_system: struct = {
+    name: ^const char;
+    run: system_proc;
+    enabled: b32;
+    // How many times schedule_run has called it.
+    calls: u32;
+}
+
+schedule: struct = {
+    arena: *memops_arena;
+    // In the order they run.
+    systems: vec<schedule_system>;
+}
+
+schedule_init: proc(s: *schedule, arena: *memops_arena) -> void = {
+    // An empty schedule.
+}
+
+// Where the system called `name` is in the list, if it's there.
+schedule_find: proc(s: *schedule, name: ^const char) -> option<u64> = {
+    return option<u64>none();
+}
+
+// At the end: it runs after every system already there.
+schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void = {
+    // A new system, enabled, at the end.
+}
+
+// Just before `before`, so it runs first. 0, and nothing added, if there is
+// no `before`.
+schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char, run: system_proc) -> b32 = {
+    // A new system, enabled, just before the one called `before`.
+    return 0;
+}
+
+// The others keep their order.
+schedule_remove: proc(s: *schedule, name: ^const char) -> b32 = {
+    // Take it out of the list.
+    return 0;
+}
+
+// A disabled system keeps its place, and is skipped.
+schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
+    // Switch it on or off, in its place.
+    return 0;
+}
+
+// One frame: every enabled system, once, in order.
+schedule_run: proc(s: *schedule, c: *ctx) -> void = {
+    // Call every enabled system, once, in order, and count it.
+}
+
+// How many systems, enabled or not.
+schedule_len: proc(s: *schedule) -> u64 = {
+    return 0;
+}
+
+// The name of the i-th system to run.
+schedule_name: proc(s: *schedule, i: u64) -> ^const char = {
+    return "";
+}
+
+// How many times schedule_run has called the system; 0 if there's none by
+// that name.
+schedule_calls: proc(s: *schedule, name: ^const char) -> u32 = {
+    return 0;
+}

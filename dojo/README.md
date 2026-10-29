@@ -23,10 +23,20 @@ dojo takes the blocks out and gives each one two halves:
 | 3 | [the slot map](3.slot_map/README.md) | 1 and 2 together: handles into packed values | 1.4, 2.4 |
 | 4 | [a type-erased column](4.column/README.md) | an array of any type as bytes, viewed as a typed slice | 2.2, 2.3, 2.5 |
 | 5 | [a command buffer](5.commands/README.md) | structural changes recorded now and applied later | 3.3, 3.4 |
+| 6 | [bitsets](6.bitset/README.md) | a set of components in a u64: has, all of, none of | 2.1, 3.1 |
+| 7 | [an arena](7.arena/README.md) | push, push, clear: memory for things that die together | every chapter |
+| 8 | [index, not pointer](8.index/README.md) | links that stay right when their storage moves | 2.2, 2.4, 2.5 |
+| 9 | [interning](9.interning/README.md) | find or make, by key: a hash table that hands out dense ids | 2.4 |
+| 10 | [memoized edges](10.edges/README.md) | a slow lookup done once, then remembered on the edge | 2.6 |
+| 11 | [a reflection walk](11.reflect/README.md) | reading, writing and comparing any value through its type's record | 2.7 |
+| 12 | [a watermark](12.watermark/README.md) | looking only at what was added since last time | 3.1 |
+| 13 | [a dispatch table](13.dispatch/README.md) | behaviour as data: the schedule as a list of functions | 3.2 |
 
-Do them in order the first time: 3 is 1 and 2 put together, and 5 applies its
-commands to something like 3. They can come before the course, alongside it,
-or after it.
+Do 1 to 5 in order the first time: 3 is 1 and 2 put together, and 5 applies
+its commands to something like 3. 6 to 13 come in the order the course meets
+them and stand on their own, except that 9, 10 and 12 work on 6's
+signatures. Any of them can come before the course, alongside it, or after
+it.
 
 ## Each block
 
@@ -54,6 +64,28 @@ which seed, and how to stop just before it in a debugger.
    block's README.
 
 Each README gives a target time for levels 1 to 3.
+
+## Watching a playground
+
+    python tools/dojo.py play slot_map
+
+A playground runs one scenario, one operation per line of `main`, and prints
+what changed after each, so it works without a debugger. In one, put a
+breakpoint on a line of `main` and step over the operations. Where the block
+has slots there are only a few of them, in fixed arrays, so the watch window
+shows the whole state. From block 6 on, a `verify` proc runs after every
+operation, checks the block's invariant, and says what broke; a breakpoint
+inside its failure branch stops at the first operation that breaks it.
+
+The switch is a global `b32`, read each time it's used, so besides editing it
+and running again, you can flip it mid-run: stop where the playground's
+header says, set it to 0 in the watch window, and continue. rin writes C, and
+the global keeps its name, so in gdb:
+
+    (gdb) break handles_free
+    (gdb) run
+    (gdb) set var bump_on_free = 0
+    (gdb) continue
 
 ## Doing reps
 
@@ -117,4 +149,7 @@ the mistakes each block is about, and catch each one.
 The same dojo exists in Rust, in [rust-dod](https://github.com/IbrahimHindawi/rust-dod).
 The random number generator is the same, so a seed is the same run in both,
 and the playgrounds print the same thing, except where block 4's column gets
-its memory: an arena in rin, a Vec in Rust.
+its memory: an arena in rin, a Vec in Rust. The katas differ where the
+languages do: block 7's arena hands out offsets in Rust and addresses in rin,
+and in block 8 only rin can keep a pointer across a move, so only rin's switch
+does; each README says how.

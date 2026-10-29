@@ -1,0 +1,51 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start arena 2
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+bump: struct = {
+    base: ^u8;
+    capacity: u64;
+    // Bytes before `used` are handed out; bytes after it are free.
+    used: u64;
+}
+
+// An arena over the `capacity` bytes at `base`, which is 16-aligned. Nothing
+// used yet.
+bump_init: proc(b: *bump, base: ^u8, capacity: u64) -> void = {
+}
+
+// `size` bytes at the first multiple of `align`, a power of two, at or after
+// `used`. Null, and nothing changes, if they would end past the last byte.
+bump_push: proc(b: *bump, size: u64, align: u64) -> ^u8 = {
+    return null;
+}
+
+// How many bytes are handed out, padding included.
+bump_used: proc(b: *bump) -> u64 = {
+    return 0;
+}
+
+// How many bytes there are.
+bump_capacity: proc(b: *bump) -> u64 = {
+    return 0;
+}
+
+// Where the arena is now, to come back to.
+bump_mark: proc(b: *bump) -> u64 = {
+    return 0;
+}
+
+// Let go of everything pushed since `mark`.
+bump_rewind: proc(b: *bump, mark: u64) -> void = {
+}
+
+// Let go of everything.
+bump_clear: proc(b: *bump) -> void = {
+}

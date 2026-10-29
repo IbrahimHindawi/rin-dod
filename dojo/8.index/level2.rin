@@ -1,0 +1,109 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start index 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// No node: the link past either end, and what a proc gives for a node that
+// isn't in the list. Nodes count up from 0, so this one is never made.
+list_none: u32 = 0xffffffff'u32;
+
+// A node links to its neighbours by their index in `nodes`. A freed node
+// stays in the vec, not alive, until a new value takes it.
+list_node: struct = {
+    value: u64;
+    prev: u32;
+    next: u32;
+    alive: b32;
+}
+
+list: struct = {
+    arena: *memops_arena;
+    nodes: vec<list_node>;
+    // Freed nodes, used again before the vec grows.
+    free: vec<u32>;
+    head: u32;
+    tail: u32;
+    length: u64;
+}
+
+// An empty list, its nodes from `arena`.
+list_init: proc(l: *list, arena: *memops_arena) -> void = {
+    l* = {};
+}
+
+// Node `index`, alive or free. The pointer is good until the next node is
+// made, which can move them all.
+list_at: proc(l: *list, index: u32) -> *list_node = {
+    return null;
+}
+
+// Node `index` if it's in the list, or null.
+list_live: proc(l: *list, index: u32) -> *list_node = {
+    return null;
+}
+
+// A node for `value`, linked to nothing yet: a freed one if there is one, or
+// a new one at the end of the vec, which may move every node.
+list_take: proc(l: *list, value: u64) -> u32 = {
+    return list_none;
+}
+
+// A new node at the end; its index stays its own until it's removed.
+list_push_back: proc(l: *list, value: u64) -> u32 = {
+    return list_none;
+}
+
+list_push_front: proc(l: *list, value: u64) -> u32 = {
+    return list_none;
+}
+
+// A new node between `node` and the one after it; list_none if `node` isn't
+// in the list. Four links to set, and maybe the tail.
+list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
+    return list_none;
+}
+
+// A live node's value comes back, its neighbours link past it, and its index
+// can be handed out again. A node not in the list gives none and changes
+// nothing.
+list_remove: proc(l: *list, node: u32) -> option<u64> = {
+    return option<u64>none();
+}
+
+// The node's value, to read or to change, or null if it isn't in the list.
+list_get: proc(l: *list, node: u32) -> *u64 = {
+    return null;
+}
+
+// The ends of the list, and the links between: the list in order is
+// list_head, list_next of that, and so on, until list_none. A node not in the
+// list has no links.
+list_head: proc(l: *list) -> u32 = {
+    return list_none;
+}
+
+list_tail: proc(l: *list) -> u32 = {
+    return list_none;
+}
+
+list_next: proc(l: *list, node: u32) -> u32 = {
+    return list_none;
+}
+
+list_prev: proc(l: *list, node: u32) -> u32 = {
+    return list_none;
+}
+
+// How many nodes are in the list.
+list_len: proc(l: *list) -> u64 = {
+    return 0;
+}

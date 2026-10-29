@@ -1,0 +1,174 @@
+// The reference: a doubly linked list whose nodes live in one vec and link to
+// each other by index, so the vec can grow and move without breaking a link.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// No node: the link past either end, and what a proc gives for a node that
+// isn't in the list. Nodes count up from 0, so this one is never made.
+list_none: u32 = 0xffffffff'u32;
+
+// A node links to its neighbours by their index in `nodes`. A freed node
+// stays in the vec, not alive, until a new value takes it.
+list_node: struct = {
+    value: u64;
+    prev: u32;
+    next: u32;
+    alive: b32;
+}
+
+list: struct = {
+    arena: *memops_arena;
+    nodes: vec<list_node>;
+    // Freed nodes, used again before the vec grows.
+    free: vec<u32>;
+    head: u32;
+    tail: u32;
+    length: u64;
+}
+
+list_init: proc(l: *list, arena: *memops_arena) -> void = {
+    l* = {};
+    l*.arena = arena;
+    l*.head = list_none;
+    l*.tail = list_none;
+}
+
+// Node `index`, alive or free. The pointer is good until the next node is
+// made, which can move them all.
+list_at: proc(l: *list, index: u32) -> *list_node = {
+    return vec<list_node>at(l*.nodes&, cast(index, u64));
+}
+
+// Node `index` if it's in the list, or null.
+list_live: proc(l: *list, index: u32) -> *list_node = {
+    if (cast(index, u64) >= l*.nodes.length || !list_at(l, index)*.alive) {
+        return null;
+    }
+    return list_at(l, index);
+}
+
+// A node for `value`, linked to nothing yet: a freed one if there is one, or
+// a new one at the end of the vec, which may move every node.
+list_take: proc(l: *list, value: u64) -> u32 = {
+    fresh: list_node = { .value = value, .prev = list_none, .next = list_none, .alive = 1 };
+    l*.length += 1;
+    if (!vec<u32>is_empty(l*.free&)) {
+        index: u32 = vec<u32>pop(l*.free&);
+        list_at(l, index)* = fresh;
+        return index;
+    }
+    _ = vec<list_node>append(l*.arena, l*.nodes&, fresh);
+    return cast(l*.nodes.length - 1, u32);
+}
+
+list_push_back: proc(l: *list, value: u64) -> u32 = {
+    index: u32 = list_take(l, value);
+    list_at(l, index)*.prev = l*.tail;
+    if (l*.tail != list_none) {
+        list_at(l, l*.tail)*.next = index;
+    } else {
+        l*.head = index;
+    }
+    l*.tail = index;
+    return index;
+}
+
+list_push_front: proc(l: *list, value: u64) -> u32 = {
+    index: u32 = list_take(l, value);
+    list_at(l, index)*.next = l*.head;
+    if (l*.head != list_none) {
+        list_at(l, l*.head)*.prev = index;
+    } else {
+        l*.tail = index;
+    }
+    l*.head = index;
+    return index;
+}
+
+// A new node between `node` and the one after it; list_none if `node` isn't
+// in the list. Every pointer into the nodes is taken after list_take, which
+// can move them.
+list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
+    if (list_live(l, node) == null) {
+        return list_none;
+    }
+    index: u32 = list_take(l, value);
+    next: u32 = list_at(l, node)*.next;
+    fresh: *list_node = list_at(l, index);
+    fresh*.prev = node;
+    fresh*.next = next;
+    list_at(l, node)*.next = index;
+    if (next != list_none) {
+        list_at(l, next)*.prev = index;
+    } else {
+        l*.tail = index;
+    }
+    return index;
+}
+
+// Its neighbours link to each other, past it, and its index goes on the free
+// list.
+list_remove: proc(l: *list, node: u32) -> option<u64> = {
+    n: *list_node = list_live(l, node);
+    if (n == null) {
+        return option<u64>none();
+    }
+    if (n*.prev != list_none) {
+        list_at(l, n*.prev)*.next = n*.next;
+    } else {
+        l*.head = n*.next;
+    }
+    if (n*.next != list_none) {
+        list_at(l, n*.next)*.prev = n*.prev;
+    } else {
+        l*.tail = n*.prev;
+    }
+    n*.alive = 0;
+    _ = vec<u32>append(l*.arena, l*.free&, node);
+    l*.length -= 1;
+    return option<u64>some(n*.value);
+}
+
+// The node's value, to read or to change, or null if it isn't in the list.
+list_get: proc(l: *list, node: u32) -> *u64 = {
+    n: *list_node = list_live(l, node);
+    if (n == null) {
+        return null;
+    }
+    return n*.value&;
+}
+
+// The ends of the list, and the links between: the list in order is
+// list_head, list_next of that, and so on, until list_none.
+list_head: proc(l: *list) -> u32 = {
+    return l*.head;
+}
+
+list_tail: proc(l: *list) -> u32 = {
+    return l*.tail;
+}
+
+list_next: proc(l: *list, node: u32) -> u32 = {
+    n: *list_node = list_live(l, node);
+    if (n == null) {
+        return list_none;
+    }
+    return n*.next;
+}
+
+list_prev: proc(l: *list, node: u32) -> u32 = {
+    n: *list_node = list_live(l, node);
+    if (n == null) {
+        return list_none;
+    }
+    return n*.prev;
+}
+
+list_len: proc(l: *list) -> u64 = {
+    return l*.length;
+}

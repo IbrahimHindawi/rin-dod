@@ -1,0 +1,291 @@
+// The harness for dojo 9, interning. It is fixed. Your work is kata.rin,
+// beside it: kata.rin imports this file, which has main, so the two are one
+// program. The reference, solution.rin, and each level file do the same, so
+// each of them builds on its own, and this file never does. Build and run
+// yours with
+//
+//   python tools/dojo.py interning
+//
+// First a short scenario, the playground's steps, each printed as it passes.
+// Then a fuzz run: thousands of random interns and finds from a seed, against
+// a model that is std's hashmap and a vec of the keys in the order they came.
+// The keys are the kinds a hash table meets in an ECS: small numbers, 0
+// among them; signatures with a few bits set; keys that differ only in their
+// high bits; and any u64 at all. Ids must be dense, in the order keys were
+// first interned, and never change; find must agree with intern; and key(id)
+// must give the key back.
+
+import "std/hashmap.rin"
+import "../dojo.rin"
+
+fmt_id: proc(f: *fmt, id: option<u32>) -> void = {
+    if (id.has_value) {
+        fmt_u64(f, cast(id.value, u64));
+    } else {
+        fmt_cstr(f, "none");
+    }
+}
+
+print_id: proc(id: option<u32>) -> void = {
+    if (id.has_value) {
+        printfmt("{}", id.value);
+    } else {
+        printfmt("none");
+    }
+}
+
+scenario: proc(arena: *memops_arena) -> void = {
+    printfmt("scenario\n");
+    t: interner = {};
+    interner_init(t&, arena);
+    text: [64]c8 = {};
+    f: fmt = {};
+    player: u64 = 31;
+    drone: u64 = 47;
+    turret: u64 = 103;
+    rock: u64 = 7;
+    chest: u64 = 135;
+    tank: u64 = 111;
+    bird: u64 = 15;
+
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, player), u64));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, cast(interner_intern(t&, drone), u64));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, cast(interner_intern(t&, turret), u64));
+    dojo_same("intern player, drone, turret", f.data, "0 1 2");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, drone), u64));
+    dojo_same("intern drone again", f.data, "1");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, rock), u64));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, cast(interner_intern(t&, chest), u64));
+    dojo_same("intern rock, chest", f.data, "3 4");
+    f = fmt_to(text);
+    fmt_id(f&, interner_find(t&, tank));
+    dojo_same("find tank", f.data, "none");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, tank), u64));
+    dojo_same("intern tank", f.data, "5");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, bird), u64));
+    dojo_same("intern bird: the table grows", f.data, "6");
+    f = fmt_to(text);
+    fmt_id(f&, interner_find(t&, turret));
+    dojo_same("find turret", f.data, "2");
+    f = fmt_to(text);
+    fmt_u64(f&, interner_key(t&, 2));
+    dojo_same("key(2)", f.data, "103");
+    f = fmt_to(text);
+    fmt_u64(f&, interner_len(t&));
+    dojo_same("len", f.data, "7");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, 0), u64));
+    dojo_same("intern 0", f.data, "7");
+    f = fmt_to(text);
+    fmt_id(f&, interner_find(t&, 0));
+    dojo_same("find 0", f.data, "7");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(interner_intern(t&, 1'u64 shl 63), u64));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, cast(interner_intern(t&, 1'u64 shl 62), u64));
+    dojo_same("intern 1 << 63, 1 << 62: only high bits", f.data, "8 9");
+    f = fmt_to(text);
+    fmt_id(f&, interner_find(t&, 1'u64 shl 61));
+    dojo_same("find 1 << 61", f.data, "none");
+    f = fmt_to(text);
+    fmt_u64(f&, interner_key(t&, 8));
+    dojo_same("key(8)", f.data, "9223372036854775808");
+    first: u32 = interner_intern(t&, 1000);
+    for (i: u64 = 1; i < 10; i += 1) {
+        _ = interner_intern(t&, 1000 + i);
+    }
+    f = fmt_to(text);
+    fmt_u64(f&, cast(first, u64));
+    dojo_same("intern 10 more: the table grows again; the first", f.data, "10");
+    all: b32 = 1;
+    for (id: u32 = 0; id < 20; id += 1) {
+        found: option<u32> = interner_find(t&, interner_key(t&, id));
+        if (!found.has_value || found.value != id) {
+            all = 0;
+        }
+    }
+    dojo_same("find each key so far", dojo_bool_name(all), "true");
+}
+
+// A key of the kinds an ECS's tables meet. The same draws, in the same order,
+// as rust-dod's harness, so a seed is the same run in both.
+fresh_key: proc(rng: *dojo_rng) -> u64 = {
+    kind: u64 = dojo_rng_below(rng, 4);
+    if (kind == 0) {
+        return dojo_rng_below(rng, 64);
+    }
+    if (kind == 1) {
+        bits: u64 = dojo_rng_below(rng, 4) + 1;
+        signature: u64 = 0;
+        for (i: u64 = 0; i < bits; i += 1) {
+            signature |= 1'u64 shl dojo_rng_below(rng, 64);
+        }
+        return signature;
+    }
+    if (kind == 2) {
+        return dojo_rng_below(rng, 65536) shl 48;
+    }
+    return dojo_rng_next(rng);
+}
+
+// What a correct interner must do, kept the simple way: std's hashmap from
+// key to id, and the keys in the order they came.
+model: struct = {
+    ids: hashmap<u64, u32>;
+    keys: vec<u64>;
+}
+
+model_find: proc(m: *model, key: u64) -> option<u32> = {
+    found: *u32 = hashmap<u64, u32>get(m*.ids&, key);
+    if (found == null) {
+        return option<u32>none();
+    }
+    return option<u32>some(found*);
+}
+
+same_id: proc(a: option<u32>, b: option<u32>) -> b32 = {
+    return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
+}
+
+// Everything at once: every id's key, and every key's id.
+all_agree: proc(run: *dojo_run, op: u64, t: *interner, m: *model) -> void = {
+    if (interner_len(t) != m*.keys.length) {
+        dojo_fail(run, op);
+        printfmt("len() is {}, the model has {}\n", interner_len(t), m*.keys.length);
+        dojo_failed(run, op);
+    }
+    for (i: u64 = 0; i < m*.keys.length; i += 1) {
+        id: u32 = cast(i, u32);
+        key: u64 = vec<u64>at(m*.keys&, i)*;
+        if (interner_key(t, id) != key) {
+            dojo_fail(run, op);
+            printfmt("key({}) gives {}, but id {} is {}'s\n", id, interner_key(t, id), id, key);
+            dojo_failed(run, op);
+        }
+        found: option<u32> = interner_find(t, key);
+        if (!same_id(found, option<u32>some(id))) {
+            dojo_fail(run, op);
+            printfmt("find({}) gives ", key);
+            print_id(found);
+            printfmt(", but {} is id {}\n", key, id);
+            dojo_failed(run, op);
+        }
+    }
+}
+
+fuzz: proc(run: *dojo_run, arena: *memops_arena) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    t: interner = {};
+    interner_init(t&, arena);
+    m: model = {};
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 45 || m.keys.length == 0) {
+            key: u64 = fresh_key(rng&);
+            if (dojo_before(run, op)) {
+                printfmt("intern({})\n", key);
+            }
+            got: u32 = interner_intern(t&, key);
+            next: u32 = cast(m.keys.length, u32);
+            before: option<u32> = model_find(m&, key);
+            want: u32 = next;
+            if (before.has_value) {
+                want = before.value;
+            } else {
+                _ = hashmap<u64, u32>put(arena, m.ids&, key, next);
+                _ = vec<u64>append(arena, m.keys&, key);
+            }
+            if (got != want) {
+                dojo_fail(run, op);
+                if (before.has_value) {
+                    printfmt("intern({}) gives {}, but {} was interned before, as {}\n", key, got, key, want);
+                } else {
+                    printfmt("intern({}) gives {}, but {} is new, so its id is the next one, {}\n", key, got, key, want);
+                }
+                dojo_failed(run, op);
+            }
+        } else if (roll < 70) {
+            id: u32 = cast(dojo_rng_below(rng&, m.keys.length), u32);
+            key: u64 = vec<u64>at(m.keys&, cast(id, u64))*;
+            if (dojo_before(run, op)) {
+                printfmt("intern({}), interned before\n", key);
+            }
+            got: u32 = interner_intern(t&, key);
+            if (got != id) {
+                dojo_fail(run, op);
+                printfmt("intern({}) gives {}, but {} was interned before, as {}\n", key, got, key, id);
+                dojo_failed(run, op);
+            }
+        } else if (roll < 85) {
+            key: u64 = fresh_key(rng&);
+            if (dojo_before(run, op)) {
+                printfmt("find({})\n", key);
+            }
+            got: option<u32> = interner_find(t&, key);
+            want: option<u32> = model_find(m&, key);
+            if (!same_id(got, want)) {
+                dojo_fail(run, op);
+                printfmt("find({}) gives ", key);
+                print_id(got);
+                printfmt(", the model says ");
+                print_id(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 95) {
+            id: u32 = cast(dojo_rng_below(rng&, m.keys.length), u32);
+            key: u64 = vec<u64>at(m.keys&, cast(id, u64))*;
+            if (dojo_before(run, op)) {
+                printfmt("find({}), interned before\n", key);
+            }
+            got: option<u32> = interner_find(t&, key);
+            if (!same_id(got, option<u32>some(id))) {
+                dojo_fail(run, op);
+                printfmt("find({}) gives ", key);
+                print_id(got);
+                printfmt(", but {} is id {}\n", key, id);
+                dojo_failed(run, op);
+            }
+        } else {
+            id: u32 = cast(dojo_rng_below(rng&, m.keys.length), u32);
+            if (dojo_before(run, op)) {
+                printfmt("key({})\n", id);
+            }
+            got: u64 = interner_key(t&, id);
+            want: u64 = vec<u64>at(m.keys&, cast(id, u64))*;
+            if (got != want) {
+                dojo_fail(run, op);
+                printfmt("key({}) gives {}, but id {} is {}'s\n", id, got, id, want);
+                dojo_failed(run, op);
+            }
+        }
+        if (interner_len(t&) != m.keys.length) {
+            dojo_fail(run, op);
+            printfmt("len() is {}, the model has {}\n", interner_len(t&), m.keys.length);
+            dojo_failed(run, op);
+        }
+        if (op % 256 == 0) {
+            all_agree(run, op, t&, m&);
+        }
+    }
+    all_agree(run, run*.ops, t&, m&);
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    run: dojo_run = dojo_run_init(argc, argv, "interning", "9. interning");
+    scenario(arena&);
+    fuzz(run&, arena&);
+    return 0;
+}

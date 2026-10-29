@@ -1,0 +1,133 @@
+// Level 1: one proc. Everything here works except walk_leaves, the walk that
+// walk_paths and walk_diff use. Write its body.
+//
+// Start it with: python tools/dojo.py start reflect 1
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "std/fmt.rin"
+import "std/cstd.rin"
+import "std/reflect.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A field's path, "light.at.x", as text that ends in a zero.
+walk_path: struct = {
+    text: [48]c8;
+}
+
+// A field a tool shows: its path, and where its bytes are in the outermost
+// value.
+walk_leaf: struct = {
+    path: walk_path;
+    offset: u64;
+    size: u64;
+}
+
+// Every field a tool shows, depth first in the record's order, onto `out`. A
+// struct field is walked into rather than listed, and its offset is added to
+// everything inside it. A hidden field is left out, with everything inside
+// it.
+walk_leaves: proc(arena: *memops_arena, type: *const reflect, prefix: ^const char, base: u64,
+                  out: *vec<walk_leaf>) -> void = {
+    // Level 1: append every shown field's path, offset and size, walking into
+    // struct fields.
+}
+
+// The paths of the fields a tool shows: "at.x", "at.y".
+walk_paths: proc(arena: *memops_arena, type: *const reflect) -> vec<walk_path> = {
+    leaves: vec<walk_leaf> = {};
+    walk_leaves(arena, type, "", 0, leaves&);
+    out: vec<walk_path> = {};
+    for (i: u64 = 0; i < leaves.length; i += 1) {
+        _ = vec<walk_path>append(arena, out&, vec<walk_leaf>at(leaves&, i)*.path);
+    }
+    return out;
+}
+
+// The paths, of those, whose bytes differ between two values of the type.
+walk_diff: proc(arena: *memops_arena, type: *const reflect, a: []const u8, b: []const u8) -> vec<walk_path> = {
+    leaves: vec<walk_leaf> = {};
+    walk_leaves(arena, type, "", 0, leaves&);
+    out: vec<walk_path> = {};
+    for (i: u64 = 0; i < leaves.length; i += 1) {
+        leaf: *walk_leaf = vec<walk_leaf>at(leaves&, i);
+        x: []const u8 = a[leaf*.offset..leaf*.offset + leaf*.size];
+        y: []const u8 = b[leaf*.offset..leaf*.offset + leaf*.size];
+        if (memcmp(x.data, y.data, cast(leaf*.size, usize)) != 0) {
+            _ = vec<walk_path>append(arena, out&, leaf*.path);
+        }
+    }
+    return out;
+}
+
+// Is `name` exactly path[start..end]?
+walk_name_is: proc(name: ^const char, path: ^const char, start: u64, end: u64) -> b32 = {
+    i: u64 = 0;
+    while (start + i < end) {
+        if (name[i] != path[start + i]) {
+            return 0;
+        }
+        i += 1;
+    }
+    return name[i] == 0;
+}
+
+// The field a path names, hidden or not, and where its bytes start in the
+// outermost value: each name is looked up in the record of the field before
+// it, and the offsets add up. Null if no field has that path.
+walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> *const reflect_field = {
+    found: *const reflect_field = null;
+    record: *const reflect = type;
+    at: u64 = 0;
+    start: u64 = 0;
+    more: b32 = 1;
+    while (more) {
+        end: u64 = start;
+        while (path[end] != 0 && path[end] != '.') {
+            end += 1;
+        }
+        fields: ^const reflect_field = reflect_fields(record);
+        found = null;
+        for (i: u64 = 0; i < reflect_field_count(record); i += 1) {
+            if (walk_name_is(fields[i].name, path, start, end)) {
+                found = fields[i]&;
+            }
+        }
+        if (found == null) {
+            return null;
+        }
+        at += found*.offset;
+        record = found*.info;
+        more = path[end] != 0;
+        start = end + 1;
+    }
+    offset* = at;
+    return found;
+}
+
+// The f32 a path names, or none if it names something else, or nothing.
+walk_get_f32: proc(type: *const reflect, bytes: []const u8, path: ^const char) -> option<f32> = {
+    at: u64 = 0;
+    f: *const reflect_field = walk_find(type, path, at&);
+    if (f == null || !reflect_cstr_equal(f*.type, "f32")) {
+        return option<f32>none();
+    }
+    field: []const u8 = bytes[at..at + 4];
+    return option<f32>some(cast(field[0]&, *const f32)*);
+}
+
+// Write the f32 a path names. 0, and nothing written, if it names something
+// else, or nothing.
+walk_set_f32: proc(type: *const reflect, bytes: []u8, path: ^const char, value: f32) -> b32 = {
+    at: u64 = 0;
+    f: *const reflect_field = walk_find(type, path, at&);
+    if (f == null || !reflect_cstr_equal(f*.type, "f32")) {
+        return 0;
+    }
+    field: []u8 = bytes[at..at + 4];
+    cast(field[0]&, *f32)* = value;
+    return 1;
+}

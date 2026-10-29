@@ -1,0 +1,223 @@
+// Dojo 10, the playground: memoized edges.
+//
+// In an archetype ECS, an entity that gains a component moves to the table
+// whose signature has one more bit. Finding that table by its signature is a
+// search. But a game moves entities between the same few tables over and
+// over, so each table remembers where each component leads: an add edge per
+// component, and a remove edge back. The tables and their edges form a graph,
+// the archetype graph of the course's 2.6.
+//
+// Here the nodes are bare signatures, eight at most, over four components. A
+// drone gains and loses components, and each move prints the node it went to
+// and whether it took a lookup or followed an edge. verify runs after every
+// move: every known edge must lead to the node with that one component added
+// (or removed) and have its edge back, and the drone's node must have the
+// components the drone has. Put a breakpoint inside its failure branch to stop
+// where the graph goes wrong.
+//
+// The switch: set memo to 0 and run it again. Nothing is remembered: the
+// drone goes to the same nodes, but every move is a lookup. It's a global,
+// read on every move, so a debugger can flip it mid-run too: stop on the
+// first `lose` in main, set it to 0 in the watch window, and continue.
+
+import "std/print.rin"
+
+memo: b32 = 1;
+
+names: [4]^const char = { "position", "velocity", "health", "burning" };
+position: const u32 = 0;
+velocity: const u32 = 1;
+health: const u32 = 2;
+burning: const u32 = 3;
+
+bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+node: struct = {
+    signature: u64;
+    // add[id] is one more than the node with component id added, once a move
+    // has found it, so 0 means not known yet; remove[id] the same, with it
+    // removed.
+    add: [4]u32;
+    remove: [4]u32;
+}
+
+graph: struct = {
+    nodes: [8]node;
+    count: u32;
+    lookups: u32;
+    edges: u32;
+}
+
+// The slow path: search every node for the signature, and make one if none
+// has it.
+find_or_make: proc(g: *graph, signature: u64) -> u32 = {
+    g*.lookups += 1;
+    for (i: u32 = 0; i < g*.count; i += 1) {
+        if (g*.nodes[i].signature == signature) {
+            return i;
+        }
+    }
+    g*.nodes[g*.count] = { .signature = signature };
+    g*.count += 1;
+    return g*.count - 1;
+}
+
+with: proc(g: *graph, from: u32, id: u32) -> u32 = {
+    if (memo && g*.nodes[from].add[id] != 0) {
+        g*.edges += 1;
+        return g*.nodes[from].add[id] - 1;
+    }
+    to: u32 = find_or_make(g, g*.nodes[from].signature | bit(id));
+    if (memo) {
+        g*.nodes[from].add[id] = to + 1;
+        g*.nodes[to].remove[id] = from + 1;
+    }
+    return to;
+}
+
+without: proc(g: *graph, from: u32, id: u32) -> u32 = {
+    if (memo && g*.nodes[from].remove[id] != 0) {
+        g*.edges += 1;
+        return g*.nodes[from].remove[id] - 1;
+    }
+    to: u32 = find_or_make(g, g*.nodes[from].signature & ~bit(id));
+    if (memo) {
+        g*.nodes[from].remove[id] = to + 1;
+        g*.nodes[to].add[id] = from + 1;
+    }
+    return to;
+}
+
+print_names: proc(signature: u64) -> void = {
+    printfmt("{");
+    first: b32 = 1;
+    for (id: u32 = 0; id < 4; id += 1) {
+        if ((signature & bit(id)) != 0) {
+            if (!first) {
+                printfmt(" ");
+            }
+            printfmt("{}", names[id]);
+            first = 0;
+        }
+    }
+    printfmt("}");
+}
+
+drone: struct = {
+    node: u32;
+    // What the drone has, kept apart from the graph: verify checks the two
+    // agree.
+    has: u64;
+}
+
+// Every edge leads to the node one component away, and comes back; and the
+// drone's node is the one with its components.
+verify: proc(g: *graph, d: *drone) -> void = {
+    for (n: u32 = 0; n < g*.count; n += 1) {
+        here: *node = g*.nodes[n]&;
+        for (id: u32 = 0; id < 4; id += 1) {
+            if (here*.add[id] != 0) {
+                there: *node = g*.nodes[here*.add[id] - 1]&;
+                if (there*.signature != (here*.signature | bit(id)) || there*.remove[id] != n + 1) {
+                    printfmt("verify: node {}'s +{} edge leads to node {} ", n, names[id], here*.add[id] - 1);
+                    print_names(there*.signature);
+                    printfmt("\n");
+                }
+            }
+            if (here*.remove[id] != 0) {
+                there: *node = g*.nodes[here*.remove[id] - 1]&;
+                if (there*.signature != (here*.signature & ~bit(id)) || there*.add[id] != n + 1) {
+                    printfmt("verify: node {}'s -{} edge leads to node {} ", n, names[id], here*.remove[id] - 1);
+                    print_names(there*.signature);
+                    printfmt("\n");
+                }
+            }
+        }
+    }
+    if (g*.nodes[d*.node].signature != d*.has) {
+        printfmt("verify: the drone has ");
+        print_names(d*.has);
+        printfmt(", but its node {} is ", d*.node);
+        print_names(g*.nodes[d*.node].signature);
+        printfmt("\n");
+    }
+}
+
+report: proc(g: *graph, d: *drone, what: ^const char, from: u32, lookups: u32) -> void = {
+    printfmt("{}: node {} -> {} ", what, from, d*.node);
+    print_names(g*.nodes[d*.node].signature);
+    if (g*.lookups > lookups) {
+        printfmt(", by a lookup\n");
+    } else {
+        printfmt(", by an edge\n");
+    }
+    verify(g, d);
+}
+
+gain: proc(g: *graph, d: *drone, id: u32, what: ^const char) -> void = {
+    from: u32 = d*.node;
+    lookups: u32 = g*.lookups;
+    d*.node = with(g, d*.node, id);
+    d*.has = d*.has | bit(id);
+    report(g, d, what, from, lookups);
+}
+
+lose: proc(g: *graph, d: *drone, id: u32, what: ^const char) -> void = {
+    from: u32 = d*.node;
+    lookups: u32 = g*.lookups;
+    d*.node = without(g, d*.node, id);
+    d*.has = d*.has & ~bit(id);
+    report(g, d, what, from, lookups);
+}
+
+draw: proc(g: *graph) -> void = {
+    for (n: u32 = 0; n < g*.count; n += 1) {
+        here: *node = g*.nodes[n]&;
+        printfmt("    node {} ", n);
+        print_names(here*.signature);
+        printfmt(":");
+        known: u32 = 0;
+        for (id: u32 = 0; id < 4; id += 1) {
+            if (here*.add[id] != 0) {
+                printfmt("{} +{} {}", known > 0 ? "," : "", names[id], here*.add[id] - 1);
+                known += 1;
+            }
+        }
+        for (id: u32 = 0; id < 4; id += 1) {
+            if (here*.remove[id] != 0) {
+                printfmt("{} -{} {}", known > 0 ? "," : "", names[id], here*.remove[id] - 1);
+                known += 1;
+            }
+        }
+        if (known == 0) {
+            printfmt(" no edges known");
+        }
+        printfmt("\n");
+    }
+}
+
+main: proc() -> i32 = {
+    g: graph = {};
+    g.count = 1;
+    d: drone = {};
+    printfmt("the drone starts at node 0 {}\n", "{}");
+    gain(g&, d&, position, "gains position");
+    gain(g&, d&, velocity, "gains velocity");
+    gain(g&, d&, health, "gains health");
+    gain(g&, d&, burning, "catches fire");
+    lose(g&, d&, burning, "the fire goes out");
+    gain(g&, d&, burning, "catches fire again");
+    lose(g&, d&, burning, "the fire goes out");
+    printfmt("the graph so far:\n");
+    draw(g&);
+    lose(g&, d&, velocity, "stops");
+    gain(g&, d&, burning, "catches fire");
+    gain(g&, d&, velocity, "moves again");
+    lose(g&, d&, burning, "the fire goes out");
+    printfmt("the graph:\n");
+    draw(g&);
+    printfmt("moves that looked up a node by signature: {}; that followed an edge: {}\n", g.lookups, g.edges);
+    return 0;
+}

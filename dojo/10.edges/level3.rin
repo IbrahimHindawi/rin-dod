@@ -1,0 +1,28 @@
+// Level 3: a blank page. Write the graph from memory.
+//
+// Start it with: python tools/dojo.py start edges 3
+//
+// The harness needs exactly this, and checks what each does. vec<T> and
+// memops_arena are given.
+//
+//   graph: struct
+//   graph_init: proc(g: *graph, arena: *memops_arena) -> void      node 0 is the empty signature
+//   graph_signature: proc(g: *graph, node: u32) -> u64
+//   graph_with: proc(g: *graph, node: u32, id: u32) -> u32         the node with id added
+//   graph_without: proc(g: *graph, node: u32, id: u32) -> u32      the node with id removed
+//   graph_len: proc(g: *graph) -> u64                              how many nodes
+//   graph_lookups: proc(g: *graph) -> u64                          moves that searched by signature
+//   graph_hits: proc(g: *graph) -> u64                             moves that followed an edge
+//
+// A new node is numbered graph_len at the time. A move to a node one
+// component away follows an edge if one is known (a hit); otherwise it
+// searches (a lookup) and writes the edge and the edge back. A move that
+// changes nothing counts as neither. Ids go up to 63.
+
+import "std/memops.rin"
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

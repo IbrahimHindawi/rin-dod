@@ -73,7 +73,8 @@ def guides() -> list[tuple[Path, list[str], list[str], str, str]]:
         expected = expected_path.read_text(encoding="utf-8").split("\n") if expected_path.exists() else []
         found.append((doc, [source_path.read_text(encoding="utf-8")], expected, m.group(1),
                       expected_path.relative_to(ROOT).as_posix()))
-    for block in sorted(p for p in (ROOT / "dojo").glob("*.*") if (p / "README.md").exists()):
+    for block in sorted((p for p in (ROOT / "dojo").glob("[0-9]*.*") if (p / "README.md").exists()),
+                       key=lambda p: int(p.name.split(".")[0])):
         files = sorted(f for f in block.rglob("*.rin") if f.name != "kata.rin")
         texts = [f.read_text(encoding="utf-8") for f in files + [ROOT / "dojo" / "dojo.rin"]]
         outputs = sorted(block.glob("*.expected"))

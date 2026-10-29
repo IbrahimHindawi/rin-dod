@@ -20,7 +20,9 @@
 //
 // The switch: set fix_back_reference to 0 and run it again. The moved id's row
 // still points where its value used to be, and the next insert writes another
-// id's value there.
+// id's value there. It's a global, read each time it's used, so a debugger can
+// flip it mid-run too: stop on sparse_set_remove, set it to 0 in the watch
+// window, and continue.
 
 import "std/print.rin"
 

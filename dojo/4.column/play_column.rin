@@ -19,7 +19,9 @@
 //
 // The switch: set grow_by_doubling to 0, so a full column grows by one row,
 // and run it again. Look at the last line: the same 1000 pushes, and how many
-// rows were copied to make room for them.
+// rows were copied to make room for them. It's a global, read each time a
+// column grows, so a debugger can flip it mid-run too: stop on column_grow, set
+// it to 0 in the watch window, and continue.
 
 import "std/print.rin"
 import "std/memops.rin"

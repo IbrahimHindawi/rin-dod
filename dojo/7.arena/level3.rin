@@ -1,0 +1,23 @@
+// Level 3: a blank page. Write the arena from memory.
+//
+// Start it with: python tools/dojo.py start arena 3
+//
+// The harness needs exactly this, and checks what each does. It owns the
+// bytes, 16-aligned, and gives the arena their address.
+//
+//   bump: struct
+//   bump_init: proc(b: *bump, base: ^u8, capacity: u64) -> void
+//   bump_push: proc(b: *bump, size: u64, align: u64) -> ^u8    at an offset from base that is a
+//                                                              multiple of align; null, and no
+//                                                              change, when full
+//   bump_used: proc(b: *bump) -> u64                           padding included
+//   bump_capacity: proc(b: *bump) -> u64
+//   bump_mark: proc(b: *bump) -> u64
+//   bump_rewind: proc(b: *bump, mark: u64) -> void             let go of what came after mark
+//   bump_clear: proc(b: *bump) -> void
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

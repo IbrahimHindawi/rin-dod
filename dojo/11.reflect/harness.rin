@@ -1,0 +1,367 @@
+// The harness for dojo 11, a reflection walk. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build
+// and run yours with
+//
+//   python tools/dojo.py reflect
+//
+// It gives the kata four test types, whose reflect records the compiler
+// writes: lamp has padding after `on`, and room has a lamp, and a hidden
+// vec2. The kata reads values as bytes, laid out as the compiler lays them
+// out, and finds its way through them by the records alone.
+//
+// First a short scenario, the playground's steps, each printed as it passes.
+// Then a fuzz run: thousands of random reads, writes and diffs of a room from
+// a seed, by path, each checked against the same fields reached directly, the
+// compiler doing the offsets.
+
+import "../dojo.rin"
+import "std/reflect.rin"
+
+vec2: struct = { x: f32; y: f32; }
+rgb: struct = { r: u8; g: u8; b: u8; }
+lamp: struct = { on: u8; power: f32; at: vec2; color: rgb; flicker: f32 @ "hidden"; range: f32; }
+room: struct = { door: u8; light: lamp; corner: vec2; draft: vec2 @ "hidden"; }
+
+lamp_bytes: proc(l: *lamp) -> []u8 = {
+    return cast(l, ^u8)[0..lamp<>.size];
+}
+
+room_bytes: proc(r: *room) -> []u8 = {
+    return cast(r, ^u8)[0..room<>.size];
+}
+
+fmt_f32s: proc(f: *fmt, o: option<f32>) -> void = {
+    if (o.has_value) {
+        fmt_f64(f, cast(o.value, f64), 2);
+    } else {
+        fmt_cstr(f, "none");
+    }
+}
+
+same_f32s: proc(what: ^const char, o: option<f32>, want: ^const char) -> void = {
+    text: [64]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_f32s(f&, o);
+    dojo_same(what, f.data, want);
+}
+
+// The paths, joined by spaces.
+fmt_paths: proc(f: *fmt, paths: *vec<walk_path>) -> void = {
+    for (i: u64 = 0; i < paths*.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_cstr(f, cast(vec<walk_path>at(paths, i)*.text[0]&, ^const c8));
+    }
+}
+
+same_paths: proc(what: ^const char, paths: vec<walk_path>, want: ^const char) -> void = {
+    text: [512]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_paths(f&, paths&);
+    dojo_same(what, f.data, want);
+}
+
+scenario: proc(arena: *memops_arena) -> void = {
+    printfmt("scenario\n");
+    l: lamp = {};
+    memset(l&, 0, cast(lamp<>.size, usize));
+    l.on = 1;
+    l.power = 60.0;
+    l.at = { .x = 3.0, .y = 4.0 };
+    l.color = { .r = 255, .g = 200, .b = 120 };
+    l.flicker = 0.25;
+    l.range = 10.0;
+    row: []u8 = lamp_bytes(l&);
+    text: [64]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_cstr(f&, lamp<>.name);
+    fmt_cstr(f&, ", ");
+    fmt_u64(f&, lamp<>.size);
+    fmt_cstr(f&, " bytes, ");
+    fmt_u64(f&, lamp<>.count);
+    fmt_cstr(f&, " fields");
+    dojo_same("lamp's record", f.data, "lamp, 28 bytes, 6 fields");
+    same_paths("paths(vec2)", walk_paths(arena, vec2<>&), "x y");
+    same_paths("paths(lamp): nested fields by path, flicker hidden", walk_paths(arena, lamp<>&),
+        "on power at.x at.y color.r color.g color.b range");
+    same_paths("paths(room): the hidden draft left out whole", walk_paths(arena, room<>&),
+        "door light.on light.power light.at.x light.at.y light.color.r light.color.g light.color.b light.range corner.x corner.y");
+    same_f32s("get_f32 power: past the padding after on", walk_get_f32(lamp<>&, row, "power"), "60.00");
+    same_f32s("get_f32 at.y: at's offset plus y's", walk_get_f32(lamp<>&, row, "at.y"), "4.00");
+    same_f32s("get_f32 range", walk_get_f32(lamp<>&, row, "range"), "10.00");
+    same_f32s("get_f32 flicker: hidden from lists, not from paths", walk_get_f32(lamp<>&, row, "flicker"), "0.25");
+    same_f32s("get_f32 on: a u8, not an f32", walk_get_f32(lamp<>&, row, "on"), "none");
+    same_f32s("get_f32 at: a struct", walk_get_f32(lamp<>&, row, "at"), "none");
+    same_f32s("get_f32 at.z: no such field", walk_get_f32(lamp<>&, row, "at.z"), "none");
+    before: lamp = l;
+    dojo_same("set_f32 power 75", dojo_bool_name(walk_set_f32(lamp<>&, row, "power", 75.0)), "true");
+    dojo_same("set_f32 at.x 5", dojo_bool_name(walk_set_f32(lamp<>&, row, "at.x", 5.0)), "true");
+    f = fmt_to(text);
+    fmt_f64(f&, cast(l.power, f64), 2);
+    fmt_char(f&, ' ');
+    fmt_f64(f&, cast(l.at.x, f64), 2);
+    dojo_same("the lamp, read directly: power and at.x", f.data, "75.00 5.00");
+    same_paths("diff with the lamp before", walk_diff(arena, lamp<>&, lamp_bytes(before&), row), "power at.x");
+    dojo_same("set_f32 flicker 0.5", dojo_bool_name(walk_set_f32(lamp<>&, row, "flicker", 0.5)), "true");
+    same_paths("diff again: flicker is hidden", walk_diff(arena, lamp<>&, lamp_bytes(before&), row), "power at.x");
+    dojo_same("set_f32 on 0: a u8", dojo_bool_name(walk_set_f32(lamp<>&, row, "on", 0.0)), "false");
+    dojo_same("set_f32 color: a struct", dojo_bool_name(walk_set_f32(lamp<>&, row, "color", 0.0)), "false");
+    f = fmt_to(text);
+    fmt_u64(f&, cast(l.on, u64));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, cast(l.color.r, u64));
+    dojo_same("the lamp's on and color, unchanged", f.data, "1 255");
+}
+
+// Every leaf of a room, in the order its record lists them, and whether a
+// tool shows it.
+room_leaf: struct = {
+    path: ^const char;
+    shown: b32;
+}
+
+room_leaves: [14]room_leaf = {
+    { .path = "door", .shown = 1 },
+    { .path = "light.on", .shown = 1 },
+    { .path = "light.power", .shown = 1 },
+    { .path = "light.at.x", .shown = 1 },
+    { .path = "light.at.y", .shown = 1 },
+    { .path = "light.color.r", .shown = 1 },
+    { .path = "light.color.g", .shown = 1 },
+    { .path = "light.color.b", .shown = 1 },
+    { .path = "light.flicker", .shown = 0 },
+    { .path = "light.range", .shown = 1 },
+    { .path = "corner.x", .shown = 1 },
+    { .path = "corner.y", .shown = 1 },
+    { .path = "draft.x", .shown = 0 },
+    { .path = "draft.y", .shown = 0 },
+};
+
+// What the fuzz run asks for by path: every leaf, then paths that name a
+// struct, or nothing.
+odd: [12]^const char = {
+    "light", "light.at", "draft", "corner.x.y", "light.at.z", "light.atx.x", "light.a.x", "lamp.power",
+    "power", "door.x", "", "light.",
+};
+
+// A leaf of a room reached directly, the compiler doing the offsets: what the
+// walk has to agree with. One of the two is set, or neither, for a path that
+// is not a leaf.
+leaf: struct = {
+    f: *f32;
+    b: *u8;
+}
+
+leaf_of: proc(r: *room, path: ^const char) -> leaf = {
+    l: leaf = {};
+    if (strcmp(path, "door") == 0) {
+        l.b = r*.door&;
+    } else if (strcmp(path, "light.on") == 0) {
+        l.b = r*.light.on&;
+    } else if (strcmp(path, "light.power") == 0) {
+        l.f = r*.light.power&;
+    } else if (strcmp(path, "light.at.x") == 0) {
+        l.f = r*.light.at.x&;
+    } else if (strcmp(path, "light.at.y") == 0) {
+        l.f = r*.light.at.y&;
+    } else if (strcmp(path, "light.color.r") == 0) {
+        l.b = r*.light.color.r&;
+    } else if (strcmp(path, "light.color.g") == 0) {
+        l.b = r*.light.color.g&;
+    } else if (strcmp(path, "light.color.b") == 0) {
+        l.b = r*.light.color.b&;
+    } else if (strcmp(path, "light.flicker") == 0) {
+        l.f = r*.light.flicker&;
+    } else if (strcmp(path, "light.range") == 0) {
+        l.f = r*.light.range&;
+    } else if (strcmp(path, "corner.x") == 0) {
+        l.f = r*.corner.x&;
+    } else if (strcmp(path, "corner.y") == 0) {
+        l.f = r*.corner.y&;
+    } else if (strcmp(path, "draft.x") == 0) {
+        l.f = r*.draft.x&;
+    } else if (strcmp(path, "draft.y") == 0) {
+        l.f = r*.draft.y&;
+    }
+    return l;
+}
+
+// The f32 a path names in the room, read directly, or none.
+direct_f32: proc(r: *room, path: ^const char) -> option<f32> = {
+    l: leaf = leaf_of(r, path);
+    if (l.f == null) {
+        return option<f32>none();
+    }
+    return option<f32>some(l.f*);
+}
+
+same_leaf: proc(a: *room, b: *room, path: ^const char) -> b32 = {
+    x: leaf = leaf_of(a, path);
+    y: leaf = leaf_of(b, path);
+    if (x.f != null) {
+        return x.f* == y.f*;
+    }
+    return x.b* == y.b*;
+}
+
+print_leaf: proc(r: *room, path: ^const char) -> void = {
+    l: leaf = leaf_of(r, path);
+    if (l.f != null) {
+        printf("%.2f", cast(l.f*, f64));
+    } else {
+        printfmt("{}", l.b*);
+    }
+}
+
+print_f32s: proc(o: option<f32>) -> void = {
+    if (o.has_value) {
+        printf("%.2f", cast(o.value, f64));
+    } else {
+        printfmt("none");
+    }
+}
+
+// A quarter between -250 and 250: exact in an f32, and printed the same
+// everywhere.
+random_f32: proc(rng: *dojo_rng) -> f32 = {
+    return cast(cast(dojo_rng_below(rng, 2001), i64) - 1000, f32) / 4.0;
+}
+
+// Change one leaf to a random value.
+change: proc(rng: *dojo_rng, r: *room, path: ^const char) -> void = {
+    l: leaf = leaf_of(r, path);
+    if (l.f != null) {
+        l.f* = random_f32(rng);
+    } else {
+        l.b* = cast(dojo_rng_below(rng, 256), u8);
+    }
+}
+
+// Every leaf random; the padding zero, so the bytes are the same every run.
+random_room: proc(rng: *dojo_rng, r: *room) -> void = {
+    memset(r, 0, cast(room<>.size, usize));
+    for (i: u64 = 0; i < 14; i += 1) {
+        change(rng, r, room_leaves[i].path);
+    }
+}
+
+pick_path: proc(rng: *dojo_rng) -> ^const char = {
+    if (dojo_rng_below(rng, 2) == 0) {
+        return room_leaves[dojo_rng_below(rng, 14)].path;
+    }
+    return odd[dojo_rng_below(rng, 12)];
+}
+
+fuzz: proc(run: *dojo_run, arena: *memops_arena) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    // The room the kata reads and writes as bytes, and the model, changed
+    // directly.
+    r: room = {};
+    m: room = {};
+    random_room(rng&, m&);
+    memcpy(r&, m&, cast(room<>.size, usize));
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        // What the kata allocates lasts one operation.
+        temp: memops_arena_temp = memops_arena_temp_begin(arena);
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 10) {
+            if (dojo_before(run, op)) {
+                printfmt("a new room\n");
+            }
+            random_room(rng&, m&);
+            memcpy(r&, m&, cast(room<>.size, usize));
+        } else if (roll < 40) {
+            path: ^const char = pick_path(rng&);
+            if (dojo_before(run, op)) {
+                printfmt("get_f32(\"{}\")\n", path);
+            }
+            got: option<f32> = walk_get_f32(room<>&, room_bytes(r&), path);
+            want: option<f32> = direct_f32(m&, path);
+            if (got.has_value != want.has_value || (got.has_value && got.value != want.value)) {
+                dojo_fail(run, op);
+                printfmt("get_f32(\"{}\") gives ", path);
+                print_f32s(got);
+                printfmt(", it should give ");
+                print_f32s(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 70) {
+            path: ^const char = pick_path(rng&);
+            value: f32 = random_f32(rng&);
+            if (dojo_before(run, op)) {
+                printf("set_f32(\"%s\", %.2f)\n", path, cast(value, f64));
+            }
+            got: b32 = walk_set_f32(room<>&, room_bytes(r&), path, value);
+            l: leaf = leaf_of(m&, path);
+            want: b32 = l.f != null;
+            if (want) {
+                l.f* = value;
+            }
+            if (got != want) {
+                dojo_fail(run, op);
+                printf("set_f32(\"%s\", %.2f) returns %s, it should return %s\n", path, cast(value, f64),
+                    dojo_bool_name(got), dojo_bool_name(want));
+                dojo_failed(run, op);
+            }
+            for (i: u64 = 0; i < 14; i += 1) {
+                at: ^const char = room_leaves[i].path;
+                if (!same_leaf(r&, m&, at)) {
+                    dojo_fail(run, op);
+                    printf("after set_f32(\"%s\", %.2f), the room's %s is ", path, cast(value, f64), at);
+                    print_leaf(r&, at);
+                    printfmt("; it should be ");
+                    print_leaf(m&, at);
+                    printfmt("\n");
+                    dojo_failed(run, op);
+                }
+            }
+        } else {
+            other: room = m;
+            changes: u64 = dojo_rng_below(rng&, 4);
+            for (k: u64 = 0; k < changes; k += 1) {
+                path: ^const char = room_leaves[dojo_rng_below(rng&, 14)].path;
+                change(rng&, other&, path);
+            }
+            want: [512]c8 = {};
+            w: fmt = fmt_to(want);
+            for (i: u64 = 0; i < 14; i += 1) {
+                if (room_leaves[i].shown && !same_leaf(m&, other&, room_leaves[i].path)) {
+                    if (fmt_done(w&) > 0) {
+                        fmt_char(w&, ' ');
+                    }
+                    fmt_cstr(w&, room_leaves[i].path);
+                }
+            }
+            if (dojo_before(run, op)) {
+                printfmt("diff, after {} changes\n", changes);
+            }
+            got: [512]c8 = {};
+            g: fmt = fmt_to(got);
+            paths: vec<walk_path> = walk_diff(arena, room<>&, room_bytes(r&), room_bytes(other&));
+            fmt_paths(g&, paths&);
+            if (strcmp(g.data, w.data) != 0) {
+                dojo_fail(run, op);
+                printfmt("diff gives [{}]; the fields a tool shows that changed are [{}]\n", g.data, w.data);
+                dojo_failed(run, op);
+            }
+            m = other;
+            memcpy(r&, other&, cast(room<>.size, usize));
+        }
+        memops_arena_temp_end(temp);
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    run: dojo_run = dojo_run_init(argc, argv, "reflect", "11. a reflection walk");
+    scenario(arena&);
+    fuzz(run&, arena&);
+    return 0;
+}

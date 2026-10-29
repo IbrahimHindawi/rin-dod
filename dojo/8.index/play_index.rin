@@ -1,0 +1,351 @@
+// Dojo 8, the playground: index, not pointer.
+//
+// A linked list whose nodes live side by side in one array and link to each
+// other by index: a node's next is "node 2", not an address. When the array is
+// full it moves: the nodes are copied to a place twice the size, and the old
+// place is let go. An index is a position in the array, so it finds its node
+// after the move. A pointer is a place in memory, so it still points where
+// the node was.
+//
+// Memory here is an array of 16 cells, small enough to see whole in a
+// debugger's watch window. The list takes 2 cells, then 4, then 8: cells 0..2,
+// then 2..6, then 6..14. Each move leaves the old copy where it was, the way
+// freed memory keeps its bytes until something else is put there.
+//
+// The program keeps node b two ways: its index, and a pointer to it. Then the
+// list moves, and the program writes to b. verify() runs after every step: it
+// checks the links, and that every node holds what the program last wrote to
+// it. Put a breakpoint on `broken` to stop where it finds something wrong.
+//
+// The switch: use_index. Break on the line that writes 21 into b, set it to 0
+// in the watch window, and continue. The write goes through the kept pointer
+// to the old copy, and verify reports it lost.
+
+import "std/print.rin"
+import "std/option.rin"
+
+use_index: b32 = 1;
+
+// No node: the link past either end.
+no_node: u32 = 0xffffffff'u32;
+
+node: struct = {
+    value: u64;
+    prev: u32;
+    next: u32;
+    alive: b32;
+}
+
+list: struct = {
+    // All of memory. Node i is in cell base + i, and the list owns cells
+    // base..base + capacity.
+    memory: [16]node;
+    base: u32;
+    capacity: u32;
+    // Nodes made so far are 0..made; the freed ones wait in free.
+    made: u32;
+    free: [8]u32;
+    free_count: u32;
+    head: u32;
+    tail: u32;
+}
+
+// Where node `index` is now.
+list_node: proc(l: *list, index: u32) -> *node = {
+    return l*.memory[l*.base + index]&;
+}
+
+// A node for `value`: a freed one, or a new one, moving the list to twice the
+// room first when it's full.
+list_take: proc(l: *list, value: u64) -> u32 = {
+    index: u32 = 0;
+    if (l*.free_count > 0) {
+        l*.free_count -= 1;
+        index = l*.free[l*.free_count];
+    } else {
+        if (l*.made == l*.capacity) {
+            to: u32 = l*.base + l*.capacity;
+            printfmt("    the list moves from cells {}..{} to cells {}..{}\n", l*.base, to, to, to + 2 * l*.capacity);
+            for (i: u32 = 0; i < l*.made; i += 1) {
+                l*.memory[to + i] = l*.memory[l*.base + i];
+            }
+            l*.base = to;
+            l*.capacity *= 2;
+        }
+        l*.made += 1;
+        index = l*.made - 1;
+    }
+    list_node(l, index)* = { .value = value, .prev = no_node, .next = no_node, .alive = 1 };
+    return index;
+}
+
+list_push_back: proc(l: *list, value: u64) -> u32 = {
+    index: u32 = list_take(l, value);
+    list_node(l, index)*.prev = l*.tail;
+    if (l*.tail != no_node) {
+        list_node(l, l*.tail)*.next = index;
+    } else {
+        l*.head = index;
+    }
+    l*.tail = index;
+    return index;
+}
+
+list_push_front: proc(l: *list, value: u64) -> u32 = {
+    index: u32 = list_take(l, value);
+    list_node(l, index)*.next = l*.head;
+    if (l*.head != no_node) {
+        list_node(l, l*.head)*.prev = index;
+    } else {
+        l*.tail = index;
+    }
+    l*.head = index;
+    return index;
+}
+
+list_insert_after: proc(l: *list, at: u32, value: u64) -> u32 = {
+    index: u32 = list_take(l, value);
+    next: u32 = list_node(l, at)*.next;
+    list_node(l, index)* = { .value = value, .prev = at, .next = next, .alive = 1 };
+    list_node(l, at)*.next = index;
+    if (next != no_node) {
+        list_node(l, next)*.prev = index;
+    } else {
+        l*.tail = index;
+    }
+    return index;
+}
+
+list_remove: proc(l: *list, index: u32) -> void = {
+    n: *node = list_node(l, index);
+    if (n*.prev != no_node) {
+        list_node(l, n*.prev)*.next = n*.next;
+    } else {
+        l*.head = n*.next;
+    }
+    if (n*.next != no_node) {
+        list_node(l, n*.next)*.prev = n*.prev;
+    } else {
+        l*.tail = n*.prev;
+    }
+    n*.alive = 0;
+    l*.free[l*.free_count] = index;
+    l*.free_count += 1;
+}
+
+// A link, or - for none.
+print_link: proc(link: u32) -> void = {
+    if (link == no_node) {
+        printfmt("-");
+    } else {
+        printfmt("{}", link);
+    }
+}
+
+// A value, or - for none.
+print_value: proc(value: option<u64>) -> void = {
+    if (value.has_value) {
+        printfmt("{}", value.value);
+    } else {
+        printfmt("-");
+    }
+}
+
+draw: proc(l: *list) -> void = {
+    printfmt("    nodes    ");
+    for (i: u32 = 0; i < l*.made; i += 1) {
+        if (i > 0) {
+            printfmt(" | ");
+        }
+        n: *node = l*.memory[l*.base + i]&;
+        if (n*.alive) {
+            printfmt("{}: {}, prev ", i, n*.value);
+            print_link(n*.prev);
+            printfmt(", next ");
+            print_link(n*.next);
+        } else {
+            printfmt("{}: free", i);
+        }
+    }
+    printfmt("\n    list     ");
+    count: u32 = 0;
+    for (at: u32 = l*.head; at != no_node && count < l*.made; at = l*.memory[l*.base + at].next) {
+        if (count > 0) {
+            printfmt(" ");
+        }
+        printfmt("{}", l*.memory[l*.base + at].value);
+        count += 1;
+    }
+    printfmt("\n");
+}
+
+// Every place the list has lived, oldest first, and what's in each cell.
+draw_memory: proc(l: *list) -> void = {
+    printfmt("    memory   ");
+    from: u32 = 0;
+    size: u32 = 2;
+    while (from <= l*.base) {
+        if (from > 0) {
+            printfmt(" | ");
+        }
+        if (from == l*.base) {
+            printfmt("{}..{} the list:", from, from + size);
+        } else {
+            printfmt("{}..{} old copy:", from, from + size);
+        }
+        for (c: u32 = from; c < from + size; c += 1) {
+            if (l*.memory[c].alive) {
+                printfmt(" {}", l*.memory[c].value);
+            } else {
+                printfmt(" .");
+            }
+        }
+        from += size;
+        size *= 2;
+    }
+    printfmt("\n");
+}
+
+// verify calls this when it finds something wrong, then says what.
+broken: proc() -> void = {
+    printfmt("    verify: ");
+}
+
+// The list's invariant, and the program's: walking from the head reaches
+// every live node once, each node's prev is the one before it, the walk ends
+// at the tail, and every node holds what the program last wrote to it.
+verify: proc(l: *list, wrote: []option<u64>) -> void = {
+    before: u32 = no_node;
+    linked: u32 = 0;
+    for (at: u32 = l*.head; at != no_node; at = l*.memory[l*.base + at].next) {
+        n: *node = l*.memory[l*.base + at]&;
+        if (!n*.alive) {
+            broken();
+            printfmt("node {} is linked, but it's free\n", at);
+        }
+        if (n*.prev != before) {
+            broken();
+            printfmt("node {} comes after ", at);
+            print_link(before);
+            printfmt(", but its prev is ");
+            print_link(n*.prev);
+            printfmt("\n");
+        }
+        linked += 1;
+        if (linked > l*.made) {
+            broken();
+            printfmt("the links go round in a loop\n");
+            break;
+        }
+        before = at;
+    }
+    if (l*.tail != before) {
+        broken();
+        printfmt("the list ends at ");
+        print_link(before);
+        printfmt(", but the tail is ");
+        print_link(l*.tail);
+        printfmt("\n");
+    }
+    alive: u32 = 0;
+    for (i: u32 = 0; i < l*.made; i += 1) {
+        n: *node = l*.memory[l*.base + i]&;
+        holds: option<u64> = option<u64>none();
+        if (n*.alive) {
+            holds = option<u64>some(n*.value);
+            alive += 1;
+        }
+        want: option<u64> = wrote[i];
+        if (holds.has_value != want.has_value || holds.value != want.value) {
+            broken();
+            printfmt("node {} holds ", i);
+            print_value(holds);
+            printfmt(", but the program last wrote ");
+            print_value(want);
+            printfmt(" to it\n");
+        }
+    }
+    if (linked != alive) {
+        broken();
+        printfmt("{} nodes are linked, but {} are alive\n", linked, alive);
+    }
+}
+
+main: proc() -> i32 = {
+    l: list = {};
+    l.capacity = 2;
+    l.head = no_node;
+    l.tail = no_node;
+    // What the program last wrote to each node, for verify.
+    wrote: [8]option<u64> = {};
+    printfmt("a list with room for 2 nodes, in cells 0..2 of memory\n");
+
+    printfmt("push_back 10 as a\n");
+    a: u32 = list_push_back(l&, 10);
+    wrote[a] = option<u64>some(10);
+    printfmt("    a is node {}\n", a);
+    draw(l&);
+    verify(l&, wrote);
+
+    printfmt("push_back 20 as b\n");
+    b: u32 = list_push_back(l&, 20);
+    wrote[b] = option<u64>some(20);
+    printfmt("    b is node {}\n", b);
+    draw(l&);
+    verify(l&, wrote);
+
+    kept: *node = list_node(l&, b);
+    kept_cell: u32 = l.base + b;
+    printfmt("keep b's index, {}, and where it is, cell {}, which is what a pointer holds: the same, until the list moves\n",
+        b, kept_cell);
+
+    printfmt("push_back 30 as c: the list is full\n");
+    c: u32 = list_push_back(l&, 30);
+    wrote[c] = option<u64>some(30);
+    printfmt("    c is node {}\n", c);
+    draw(l&);
+    verify(l&, wrote);
+
+    if (use_index) {
+        printfmt("write 21 into b through its index, {}: cell {} now\n", b, l.base + b);
+        list_node(l&, b)*.value = 21;
+    } else {
+        printfmt("write 21 into b through what was kept, cell {}: where b was before the move\n", kept_cell);
+        kept*.value = 21;
+    }
+    wrote[b] = option<u64>some(21);
+    draw(l&);
+    draw_memory(l&);
+    verify(l&, wrote);
+
+    printfmt("push_front 5 as d\n");
+    d: u32 = list_push_front(l&, 5);
+    wrote[d] = option<u64>some(5);
+    printfmt("    d is node {}\n", d);
+    draw(l&);
+    verify(l&, wrote);
+
+    printfmt("remove a: node {} goes on the free list\n", a);
+    list_remove(l&, a);
+    wrote[a] = option<u64>none();
+    draw(l&);
+    verify(l&, wrote);
+
+    printfmt("insert 25 after b as e\n");
+    e: u32 = list_insert_after(l&, b, 25);
+    wrote[e] = option<u64>some(25);
+    printfmt("    e is node {}: a's node, from the free list\n", e);
+    draw(l&);
+    verify(l&, wrote);
+
+    printfmt("push_back 40 as f: the list is full again\n");
+    f: u32 = list_push_back(l&, 40);
+    wrote[f] = option<u64>some(40);
+    printfmt("    f is node {}\n", f);
+    draw(l&);
+    draw_memory(l&);
+    verify(l&, wrote);
+
+    printfmt("read b through its index, {}: {}\n", b, list_node(l&, b)*.value);
+    return 0;
+}

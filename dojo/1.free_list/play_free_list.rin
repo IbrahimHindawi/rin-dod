@@ -14,7 +14,9 @@
 // `handles_free` and watch `generations` and `free` change.
 //
 // The switch: set bump_on_free to 0 and run it again. The reused index comes
-// back with the old generation, and a dead handle is alive again.
+// back with the old generation, and a dead handle is alive again. It's a
+// global, read each time it's used, so a debugger can flip it mid-run too:
+// stop on handles_free, set it to 0 in the watch window, and continue.
 
 import "std/print.rin"
 

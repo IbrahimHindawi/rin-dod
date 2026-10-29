@@ -1,0 +1,237 @@
+// Dojo 13, the playground: a dispatch table.
+//
+// A frame is a list of systems run in order, and the list is data: a name and
+// a pointer to a proc for each, in an array the program changes as it runs.
+// Adding, removing, reordering or switching off a system is an edit to the
+// array, not to the code that calls them:
+//
+//   schedule  0 move   1 shoot   2 damage   3 die
+//   a frame   for each enabled system, in order: entry.run(world)
+//
+// The order is a statement about data: a system that reads what another
+// writes runs after it. damage writes health and die reads it, so damage
+// goes before die, and a drone dies in the frame its health runs out. This is
+// the course's schedule (3.2).
+//
+// This program builds a schedule of four systems for a drone flying at a
+// turret, runs it frame by frame, and edits it between frames: shoot is
+// switched off while the turret reloads, and removed at the end. After each
+// step it prints the schedule or the world, and verify checks that the drone
+// is dead exactly when its health has run out; break inside its `if` to stop
+// there. To see the dispatch in a debugger, break on `schedule_run` and step
+// into each call.
+//
+// The switch: set in_order to 0 and run it again. damage is added at the end
+// of the schedule, after die, instead of before it, and the drone dies a
+// frame late. It's a global, read when damage is added, so a debugger can
+// flip it too: stop on the first line of main, set it to 0 in the watch
+// window, and continue.
+
+import "std/print.rin"
+import "std/cstd.rin"
+
+in_order: b32 = 1;
+
+// A drone flying at a turret.
+world: struct = {
+    distance: i32;
+    health: i32;
+    alive: b32;
+    // Hits this frame, waiting for damage.
+    hits: i32;
+}
+
+// The systems. Each reads and writes a little of the world.
+move_system: proc(w: *world) -> void = {
+    if (w*.alive) {
+        w*.distance -= 2;
+        if (w*.distance < 0) {
+            w*.distance = 0;
+        }
+    }
+}
+
+shoot_system: proc(w: *world) -> void = {
+    if (w*.alive && w*.distance <= 4) {
+        w*.hits += 1;
+    }
+}
+
+damage_system: proc(w: *world) -> void = {
+    if (w*.alive) {
+        w*.health -= 40 * w*.hits;
+    }
+    w*.hits = 0;
+}
+
+die_system: proc(w: *world) -> void = {
+    if (w*.alive && w*.health <= 0) {
+        w*.alive = 0;
+    }
+}
+
+// A system is a plain pointer to a proc.
+system_proc: alias = *proc(w: *world) -> void;
+
+schedule_entry: struct = {
+    name: ^const char;
+    run: system_proc;
+    enabled: b32;
+}
+
+schedule: struct = {
+    entries: [8]schedule_entry;
+    count: u64;
+}
+
+// Where the system called `name` is, or count if it isn't there.
+schedule_find: proc(s: *schedule, name: ^const char) -> u64 = {
+    for (i: u64 = 0; i < s*.count; i += 1) {
+        if (strcmp(s*.entries[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return s*.count;
+}
+
+schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void = {
+    s*.entries[s*.count] = { .name = name, .run = run, .enabled = 1 };
+    s*.count += 1;
+}
+
+schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char, run: system_proc) -> b32 = {
+    at: u64 = schedule_find(s, before);
+    if (at == s*.count) {
+        return 0;
+    }
+    for (i: u64 = s*.count; i > at; i -= 1) {
+        s*.entries[i] = s*.entries[i - 1];
+    }
+    s*.entries[at] = { .name = name, .run = run, .enabled = 1 };
+    s*.count += 1;
+    return 1;
+}
+
+schedule_remove: proc(s: *schedule, name: ^const char) -> b32 = {
+    at: u64 = schedule_find(s, name);
+    if (at == s*.count) {
+        return 0;
+    }
+    for (i: u64 = at; i + 1 < s*.count; i += 1) {
+        s*.entries[i] = s*.entries[i + 1];
+    }
+    s*.count -= 1;
+    s*.entries[s*.count] = {};
+    return 1;
+}
+
+schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
+    at: u64 = schedule_find(s, name);
+    if (at == s*.count) {
+        return 0;
+    }
+    s*.entries[at].enabled = on;
+    return 1;
+}
+
+// One frame: every enabled system, once, in order.
+schedule_run: proc(s: *schedule, w: *world) -> void = {
+    printfmt("    ran      ");
+    for (i: u64 = 0; i < s*.count; i += 1) {
+        if (s*.entries[i].enabled) {
+            s*.entries[i].run(w);
+            printfmt(" {}", s*.entries[i].name);
+        }
+    }
+    printfmt("\n");
+}
+
+schedule_show: proc(s: *schedule) -> void = {
+    printfmt("    schedule ");
+    for (i: u64 = 0; i < s*.count; i += 1) {
+        if (s*.entries[i].enabled) {
+            printfmt(" {}", s*.entries[i].name);
+        } else {
+            printfmt(" ({} off)", s*.entries[i].name);
+        }
+    }
+    printfmt("\n");
+}
+
+show: proc(w: *world) -> void = {
+    printfmt("    drone     {} from the turret, health {}, ", w*.distance, w*.health);
+    if (w*.alive) {
+        printfmt("alive\n");
+    } else {
+        printfmt("dead\n");
+    }
+}
+
+// The invariant, after every step: the drone is dead exactly when its health
+// has run out.
+verify: proc(w: *world) -> void = {
+    if ((w*.alive != 0) == (w*.health <= 0)) {
+        if (w*.alive) {
+            printfmt("    verify: the drone has health {} and is still alive\n", w*.health);
+        } else {
+            printfmt("    verify: the drone is dead with health {}\n", w*.health);
+        }
+    }
+}
+
+frame: proc(s: *schedule, w: *world, n: u32) -> void = {
+    printfmt("frame {}\n", n);
+    schedule_run(s, w);
+    show(w);
+    verify(w);
+}
+
+main: proc() -> i32 = {
+    s: schedule = {};
+    w: world = { .distance = 8, .health = 100, .alive = 1 };
+    printfmt("a drone 8 from a turret, with health 100: it flies 2 closer a frame,\n");
+    printfmt("and the turret hits it for 40 a frame once it's within 4\n");
+    show(w&);
+
+    printfmt("add move, shoot and die\n");
+    schedule_add(s&, "move", move_system);
+    schedule_add(s&, "shoot", shoot_system);
+    schedule_add(s&, "die", die_system);
+    schedule_show(s&);
+    verify(w&);
+
+    if (in_order) {
+        printfmt("insert damage before die: die reads the health that damage writes\n");
+        _ = schedule_insert_before(s&, "die", "damage", damage_system);
+    } else {
+        printfmt("add damage at the end, after die\n");
+        schedule_add(s&, "damage", damage_system);
+    }
+    schedule_show(s&);
+    verify(w&);
+
+    frame(s&, w&, 1);
+    frame(s&, w&, 2);
+
+    printfmt("switch shoot off: the turret is reloading\n");
+    _ = schedule_set_enabled(s&, "shoot", 0);
+    schedule_show(s&);
+    verify(w&);
+
+    frame(s&, w&, 3);
+
+    printfmt("switch shoot back on\n");
+    _ = schedule_set_enabled(s&, "shoot", 1);
+    schedule_show(s&);
+    verify(w&);
+
+    frame(s&, w&, 4);
+    frame(s&, w&, 5);
+    frame(s&, w&, 6);
+
+    printfmt("remove shoot: the turret is gone\n");
+    _ = schedule_remove(s&, "shoot");
+    schedule_show(s&);
+    verify(w&);
+    return 0;
+}

@@ -1,0 +1,273 @@
+// Dojo 9, the playground: interning.
+//
+// An interner gives each distinct key a small id, the first time it sees the
+// key, and the same id every time after: find it, or make it. The ECS does
+// this with signatures, to find the table for a set of components. Behind it
+// is a hash table: a row of slots, each empty or holding an id. A key's hash
+// says which slot to look in first; if that one holds another key, look in the
+// next, and the next, until the key or an empty slot turns up. A table more
+// than 3/4 full makes those runs long, so it doubles before that, and every id
+// is put back where its key's hash says in the bigger table.
+//
+// Here the table has 8 slots, then 16, small enough to see whole in a
+// debugger's watch window. The keys are the signatures of a few kinds of
+// thing in a game: a bit per component, with the common components first.
+//
+// verify() runs after every step: every id must be reachable from its key's
+// hash without crossing an empty slot, and the table at most 3/4 full. Put a
+// breakpoint on `broken` to stop where it finds something wrong.
+//
+// The switch: mix_hash. Break on the first intern, set it to 0 in the watch
+// window, and continue. The hash is then the key itself, and the slot its
+// lowest bits: the components every kind of thing has. Watch the runs get
+// long, and the count of slots looked at at the end. Flip it later instead,
+// with ids already in the table, and verify says why a table's hash can't
+// change under it.
+
+import "std/print.rin"
+
+mix_hash: b32 = 1;
+
+// The kinds of thing, and their signatures, which main fills in.
+kind_names: [7]^const char = { "player", "drone", "turret", "rock", "chest", "tank", "bird" };
+kind_keys: [7]u64 = {};
+
+name: proc(key: u64) -> ^const char = {
+    for (i: u32 = 0; i < 7; i += 1) {
+        if (kind_keys[i] == key) {
+            return kind_names[i];
+        }
+    }
+    return "?";
+}
+
+// splitmix64's finisher, or, with the switch off, the key as it is.
+hash: proc(key: u64) -> u64 = {
+    if (!mix_hash) {
+        return key;
+    }
+    x: u64 = key;
+    x ^= x shr 30;
+    x *= 0xbf58476d1ce4e5b9'u64;
+    x ^= x shr 27;
+    x *= 0x94d049bb133111eb'u64;
+    return x ^ (x shr 31);
+}
+
+interner: struct = {
+    // slots[0..capacity] is the table: 0 is empty, anything else an id + 1.
+    slots: [16]u32;
+    capacity: u32;
+    keys: [12]u64;
+    length: u32;
+    // Slots looked at, in all.
+    probes: u32;
+}
+
+// Where `key` is, or the empty slot where it would go, printing the slots it
+// looks at on the way.
+interner_slot_of: proc(t: *interner, key: u64) -> u32 = {
+    mask: u32 = t*.capacity - 1;
+    at: u32 = cast(hash(key), u32) & mask;
+    printfmt("    slots looked at:");
+    while (1) {
+        printfmt(" {}", at);
+        t*.probes += 1;
+        s: u32 = t*.slots[at];
+        if (s == 0 || t*.keys[s - 1] == key) {
+            return at;
+        }
+        at = (at + 1) & mask;
+    }
+    return at;
+}
+
+// The key's id + 1, or 0 if it isn't there.
+interner_find: proc(t: *interner, key: u64) -> u32 = {
+    return t*.slots[interner_slot_of(t, key)];
+}
+
+interner_intern: proc(t: *interner, key: u64) -> u32 = {
+    at: u32 = interner_slot_of(t, key);
+    if (t*.slots[at] != 0) {
+        printfmt("; found: id {}\n", t*.slots[at] - 1);
+        return t*.slots[at] - 1;
+    }
+    if ((t*.length + 1) * 4 > t*.capacity * 3) {
+        printfmt("; not there\n");
+        printfmt("    {} ids would fill more than 3/4 of {} slots: the table grows to {}, and every id\n",
+            t*.length + 1, t*.capacity, t*.capacity * 2);
+        printfmt("    goes where its key's hash says now\n");
+        t*.capacity *= 2;
+        for (i: u32 = 0; i < 16; i += 1) {
+            t*.slots[i] = 0;
+        }
+        mask: u32 = t*.capacity - 1;
+        for (id: u32 = 0; id < t*.length; id += 1) {
+            i: u32 = cast(hash(t*.keys[id]), u32) & mask;
+            while (t*.slots[i] != 0) {
+                i = (i + 1) & mask;
+            }
+            t*.slots[i] = id + 1;
+        }
+        at = interner_slot_of(t, key);
+    }
+    id: u32 = t*.length;
+    t*.keys[t*.length] = key;
+    t*.length += 1;
+    t*.slots[at] = id + 1;
+    printfmt("; new: id {}, in slot {}\n", id, at);
+    return id;
+}
+
+draw: proc(t: *interner) -> void = {
+    printfmt("    table    ");
+    first: b32 = 1;
+    for (i: u32 = 0; i < t*.capacity; i += 1) {
+        if (t*.slots[i] != 0) {
+            if (!first) {
+                printfmt(" ");
+            }
+            printfmt("{}:{}", i, name(t*.keys[t*.slots[i] - 1]));
+            first = 0;
+        }
+    }
+    printfmt(", {} of {} slots used\n", t*.length, t*.capacity);
+}
+
+// verify calls this when it finds something wrong, then says what.
+broken: proc() -> void = {
+    printfmt("    verify: ");
+}
+
+// The table's invariant: each id is in one slot, reachable from its key's
+// hash without crossing an empty slot, and the table is at most 3/4 full.
+verify: proc(t: *interner) -> void = {
+    mask: u32 = t*.capacity - 1;
+    used: u32 = 0;
+    for (i: u32 = 0; i < t*.capacity; i += 1) {
+        if (t*.slots[i] != 0) {
+            used += 1;
+        }
+    }
+    if (used != t*.length) {
+        broken();
+        printfmt("{} slots are used, but there are {} ids\n", used, t*.length);
+    }
+    if (t*.length * 4 > t*.capacity * 3) {
+        broken();
+        printfmt("{} ids in {} slots is more than 3/4 full\n", t*.length, t*.capacity);
+    }
+    for (id: u32 = 0; id < t*.length; id += 1) {
+        key: u64 = t*.keys[id];
+        start: u32 = cast(hash(key), u32) & mask;
+        at: u32 = start;
+        found: b32 = 0;
+        for (step: u32 = 0; step < t*.capacity; step += 1) {
+            if (t*.slots[at] == id + 1) {
+                found = 1;
+                break;
+            }
+            if (t*.slots[at] == 0) {
+                break;
+            }
+            at = (at + 1) & mask;
+        }
+        if (!found) {
+            broken();
+            printfmt("id {}, {}, can't be found: its run from slot {} meets the empty slot {} first\n",
+                id, name(key), start, at);
+        }
+    }
+}
+
+main: proc() -> i32 = {
+    // Components, a bit each. The ones nearly everything has were made first,
+    // so they have the lowest bits.
+    position: u64 = 1'u64 shl 0;
+    sprite: u64 = 1'u64 shl 1;
+    health: u64 = 1'u64 shl 2;
+    velocity: u64 = 1'u64 shl 3;
+    player_tag: u64 = 1'u64 shl 4;
+    ai: u64 = 1'u64 shl 5;
+    damage: u64 = 1'u64 shl 6;
+    loot: u64 = 1'u64 shl 7;
+    player: u64 = position | sprite | health | velocity | player_tag;
+    drone: u64 = position | sprite | health | velocity | ai;
+    turret: u64 = position | sprite | health | ai | damage;
+    rock: u64 = position | sprite | health;
+    chest: u64 = position | sprite | health | loot;
+    tank: u64 = position | sprite | health | velocity | ai | damage;
+    bird: u64 = position | sprite | health | velocity;
+    kind_keys[0] = player;
+    kind_keys[1] = drone;
+    kind_keys[2] = turret;
+    kind_keys[3] = rock;
+    kind_keys[4] = chest;
+    kind_keys[5] = tank;
+    kind_keys[6] = bird;
+
+    t: interner = {};
+    t.capacity = 8;
+    printfmt("an interner with 8 slots; a slot holds an id + 1, or 0 when it's empty\n");
+
+    printfmt("intern player, signature {}\n", player);
+    _ = interner_intern(t&, player);
+    draw(t&);
+    verify(t&);
+
+    printfmt("intern drone, signature {}\n", drone);
+    _ = interner_intern(t&, drone);
+    draw(t&);
+    verify(t&);
+
+    printfmt("intern turret, signature {}\n", turret);
+    _ = interner_intern(t&, turret);
+    draw(t&);
+    verify(t&);
+
+    printfmt("intern drone again\n");
+    _ = interner_intern(t&, drone);
+    verify(t&);
+
+    printfmt("intern rock, signature {}\n", rock);
+    _ = interner_intern(t&, rock);
+    draw(t&);
+    verify(t&);
+
+    printfmt("intern chest, signature {}\n", chest);
+    _ = interner_intern(t&, chest);
+    draw(t&);
+    verify(t&);
+
+    printfmt("find tank, signature {}\n", tank);
+    found: u32 = interner_find(t&, tank);
+    if (found != 0) {
+        printfmt("; found: id {}\n", found - 1);
+    } else {
+        printfmt("; not there\n");
+    }
+    verify(t&);
+
+    printfmt("intern tank\n");
+    _ = interner_intern(t&, tank);
+    draw(t&);
+    verify(t&);
+
+    printfmt("intern bird, signature {}\n", bird);
+    _ = interner_intern(t&, bird);
+    draw(t&);
+    verify(t&);
+
+    printfmt("find turret\n");
+    found = interner_find(t&, turret);
+    if (found != 0) {
+        printfmt("; found: id {}, and id {}'s key is {}\n", found - 1, found - 1, t.keys[found - 1]);
+    } else {
+        printfmt("; not there\n");
+    }
+    verify(t&);
+
+    printfmt("slots looked at, in all: {}\n", t.probes);
+    return 0;
+}

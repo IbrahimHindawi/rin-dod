@@ -1,0 +1,393 @@
+// The harness for dojo 6, bitsets. It is fixed. Your work is kata.rin, beside
+// it: kata.rin imports this file, which has main, so the two are one program.
+// The reference, solution.rin, and each level file do the same, so each of
+// them builds on its own, and this file never does. Build and run yours with
+//
+//   python tools/dojo.py bitset
+//
+// First a short scenario, the playground's kinds and queries, each step
+// printed as it passes. Then a fuzz run: a set changed and asked about
+// thousands of times from a seed, against a model that keeps a b32 per id and
+// answers every question one id at a time. Ids go up to 63, so a shift done
+// in 32 bits shows.
+
+import "../dojo.rin"
+
+// The model: a set as a b32 per id.
+bools: struct = {
+    at: [64]b32;
+}
+
+to_set: proc(b: *bools) -> u64 = {
+    set: u64 = 0;
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (b*.at[i]) {
+            set = set | (1'u64 shl i);
+        }
+    }
+    return set;
+}
+
+// A set as its ids, {1 5 40}.
+fmt_set: proc(f: *fmt, set: u64) -> void = {
+    fmt_char(f, '{');
+    first: b32 = 1;
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (((set shr i) & 1) == 1) {
+            if (!first) {
+                fmt_char(f, ' ');
+            }
+            fmt_u64(f, i);
+            first = 0;
+        }
+    }
+    fmt_char(f, '}');
+}
+
+print_set: proc(set: u64) -> void = {
+    text: [256]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_set(f&, set);
+    printfmt("{}", f.data);
+}
+
+fmt_ids: proc(f: *fmt, ids: []u32, n: u32) -> void = {
+    for (k: u32 = 0; k < n; k += 1) {
+        if (k > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, cast(ids[k], u64));
+    }
+}
+
+of: proc(ids: []u32) -> u64 = {
+    set: u64 = 0;
+    for (i: u64 = 0; i < ids.length; i += 1) {
+        set = bitset_with(set, ids[i]);
+    }
+    return set;
+}
+
+same_u64: proc(what: ^const char, got: u64, want: ^const char) -> void = {
+    text: [32]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_u64(f&, got);
+    dojo_same(what, f.data, want);
+}
+
+same_ids: proc(what: ^const char, set: u64, want: ^const char) -> void = {
+    ids: [64]u32 = {};
+    n: u32 = bitset_ids(set, ids[0..64]);
+    text: [256]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_ids(f&, ids[0..64], n);
+    dojo_same(what, f.data, want);
+}
+
+scenario: proc() -> void = {
+    printfmt("scenario\n");
+    position: u32 = 0;
+    velocity: u32 = 1;
+    health: u32 = 2;
+    sprite: u32 = 3;
+    player: u32 = 4;
+    turret: u32 = 5;
+    frozen: u32 = 6;
+    hero_ids: [5]u32 = { position, velocity, health, sprite, player };
+    hero: u64 = of(hero_ids[0..5]);
+    same_u64("with 0, 1, 2, 3 and 4, from 0: the player", hero, "31");
+    same_u64("bit(3)", bitset_bit(3), "8");
+    dojo_same("has(player, sprite)", dojo_bool_name(bitset_has(hero, sprite)), "true");
+    dojo_same("has(player, turret)", dojo_bool_name(bitset_has(hero, turret)), "false");
+    gun_ids: [4]u32 = { position, health, sprite, turret };
+    gun: u64 = of(gun_ids[0..4]);
+    same_u64("the turret", gun, "45");
+    moving: u64 = bitset_with(bitset_bit(position), velocity);
+    dojo_same("contains_all(player, {position velocity})",
+        dojo_bool_name(bitset_contains_all(hero, moving)), "true");
+    dojo_same("contains_all(turret, {position velocity}): no velocity",
+        dojo_bool_name(bitset_contains_all(gun, moving)), "false");
+    dojo_same("intersects(turret, {velocity frozen})",
+        dojo_bool_name(bitset_intersects(gun, bitset_with(bitset_bit(velocity), frozen))), "false");
+    dojo_same("intersects(turret, {position frozen})",
+        dojo_bool_name(bitset_intersects(gun, bitset_with(bitset_bit(position), frozen))), "true");
+    ghost_ids: [4]u32 = { position, velocity, sprite, frozen };
+    ghost: u64 = of(ghost_ids[0..4]);
+    dojo_same("matches(ghost, move): it is frozen",
+        dojo_bool_name(bitset_matches(ghost, moving, bitset_bit(frozen))), "false");
+    thawed: u64 = bitset_without(ghost, frozen);
+    same_u64("without(ghost, frozen)", thawed, "11");
+    dojo_same("matches(that, move)", dojo_bool_name(bitset_matches(thawed, moving, bitset_bit(frozen))), "true");
+    thinking: u64 = bitset_with(bitset_bit(velocity), health);
+    dojo_same("matches(player, think): it is the player",
+        dojo_bool_name(bitset_matches(hero, thinking, bitset_bit(player))), "false");
+    dojo_same("matches(turret, think): no velocity",
+        dojo_bool_name(bitset_matches(gun, thinking, bitset_bit(player))), "false");
+    rock: u64 = bitset_with(bitset_bit(position), sprite);
+    dojo_same("matches(rock, all {}, none {}): no conditions", dojo_bool_name(bitset_matches(rock, 0, 0)), "true");
+    same_u64("count(player)", cast(bitset_count(hero), u64), "5");
+    same_ids("ids(player)", hero, "0 1 2 3 4");
+    same_u64("with(0, 63)", bitset_with(0, 63), "9223372036854775808");
+    edges: [4]u32 = { 0, 31, 32, 63 };
+    same_ids("ids of {0 31 32 63}", of(edges[0..4]), "0 31 32 63");
+    same_u64("count(every bit)", cast(bitset_count(~0'u64), u64), "64");
+}
+
+// A random set: sparse, about half, dense, or empty or full.
+random: proc(rng: *dojo_rng) -> bools = {
+    b: bools = {};
+    kind: u64 = dojo_rng_below(rng, 4);
+    full: b32 = kind == 3 && dojo_rng_below(rng, 2) == 0;
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (kind == 0) {
+            b.at[i] = dojo_rng_below(rng, 16) == 0;
+        } else if (kind == 1) {
+            b.at[i] = dojo_rng_below(rng, 2) == 0;
+        } else if (kind == 2) {
+            b.at[i] = dojo_rng_below(rng, 16) != 0;
+        } else {
+            b.at[i] = full;
+        }
+    }
+    return b;
+}
+
+// What a query asks for: some of the set's ids, the same plus one more that
+// may not be in it, or anything.
+wanted: proc(rng: *dojo_rng, set: *bools) -> bools = {
+    kind: u64 = dojo_rng_below(rng, 3);
+    if (kind == 2) {
+        return random(rng);
+    }
+    b: bools = {};
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (set*.at[i]) {
+            b.at[i] = dojo_rng_below(rng, 2) == 0;
+        }
+    }
+    if (kind == 1) {
+        b.at[dojo_rng_below(rng, 64)] = 1;
+    }
+    return b;
+}
+
+// What a query bars: some of the ids the set doesn't have, or anything.
+barred: proc(rng: *dojo_rng, set: *bools) -> bools = {
+    if (dojo_rng_below(rng, 2) == 1) {
+        return random(rng);
+    }
+    b: bools = {};
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (!set*.at[i]) {
+            b.at[i] = dojo_rng_below(rng, 4) == 0;
+        }
+    }
+    return b;
+}
+
+// The slow answers, one id at a time.
+all_of: proc(set: *bools, w: *bools) -> b32 = {
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (w*.at[i] && !set*.at[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+any_of: proc(set: *bools, b: *bools) -> b32 = {
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (b*.at[i] && set*.at[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+fuzz: proc(run: *dojo_run) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    model: bools = {};
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        set: u64 = to_set(model&);
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 5) {
+            model = random(rng&);
+            if (dojo_before(run, op)) {
+                printfmt("a new set, ");
+                print_set(to_set(model&));
+                printfmt("\n");
+            }
+        } else if (roll < 40) {
+            id: u32 = cast(dojo_rng_below(rng&, 64), u32);
+            adding: b32 = roll < 25;
+            name: ^const char = adding ? "with" : "without";
+            if (dojo_before(run, op)) {
+                printfmt("{}(", name);
+                print_set(set);
+                printfmt(", {})\n", id);
+            }
+            got: u64 = 0;
+            if (adding) {
+                got = bitset_with(set, id);
+            } else {
+                got = bitset_without(set, id);
+            }
+            model.at[id] = adding;
+            want: u64 = to_set(model&);
+            if (got != want) {
+                dojo_fail(run, op);
+                printfmt("{}(", name);
+                print_set(set);
+                printfmt(", {}) gave ", id);
+                print_set(got);
+                printfmt(", it should give ");
+                print_set(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 52) {
+            id: u32 = cast(dojo_rng_below(rng&, 64), u32);
+            if (dojo_before(run, op)) {
+                printfmt("bit({}) and has(", id);
+                print_set(set);
+                printfmt(", {})\n", id);
+            }
+            one: u64 = 1'u64 shl cast(id, u64);
+            if (bitset_bit(id) != one) {
+                dojo_fail(run, op);
+                printfmt("bit({}) is {}, it should be {}\n", id, bitset_bit(id), one);
+                dojo_failed(run, op);
+            }
+            got: b32 = bitset_has(set, id);
+            if ((got != 0) != (model.at[id] != 0)) {
+                dojo_fail(run, op);
+                printfmt("has(");
+                print_set(set);
+                if (model.at[id]) {
+                    printfmt(", {}) is false, but {} is in the set\n", id, id);
+                } else {
+                    printfmt(", {}) is true, but {} is not in the set\n", id, id);
+                }
+                dojo_failed(run, op);
+            }
+        } else if (roll < 67) {
+            w: bools = wanted(rng&, model&);
+            want_set: u64 = to_set(w&);
+            if (dojo_before(run, op)) {
+                printfmt("contains_all(");
+                print_set(set);
+                printfmt(", ");
+                print_set(want_set);
+                printfmt(")\n");
+            }
+            got: b32 = bitset_contains_all(set, want_set);
+            want: b32 = all_of(model&, w&);
+            if ((got != 0) != want) {
+                dojo_fail(run, op);
+                printfmt("contains_all(");
+                print_set(set);
+                printfmt(", ");
+                print_set(want_set);
+                printfmt(") is {}, it should be {}\n", dojo_bool_name(got), dojo_bool_name(want));
+                dojo_failed(run, op);
+            }
+        } else if (roll < 77) {
+            b: bools = barred(rng&, model&);
+            other: u64 = to_set(b&);
+            if (dojo_before(run, op)) {
+                printfmt("intersects(");
+                print_set(set);
+                printfmt(", ");
+                print_set(other);
+                printfmt(")\n");
+            }
+            got: b32 = bitset_intersects(set, other);
+            want: b32 = any_of(model&, b&);
+            if ((got != 0) != want) {
+                dojo_fail(run, op);
+                printfmt("intersects(");
+                print_set(set);
+                printfmt(", ");
+                print_set(other);
+                printfmt(") is {}, it should be {}\n", dojo_bool_name(got), dojo_bool_name(want));
+                dojo_failed(run, op);
+            }
+        } else if (roll < 92) {
+            w: bools = wanted(rng&, model&);
+            b: bools = barred(rng&, model&);
+            all: u64 = to_set(w&);
+            none: u64 = to_set(b&);
+            if (dojo_before(run, op)) {
+                printfmt("matches(");
+                print_set(set);
+                printfmt(", all ");
+                print_set(all);
+                printfmt(", none ");
+                print_set(none);
+                printfmt(")\n");
+            }
+            got: b32 = bitset_matches(set, all, none);
+            want: b32 = all_of(model&, w&) && !any_of(model&, b&);
+            if ((got != 0) != want) {
+                dojo_fail(run, op);
+                printfmt("matches(");
+                print_set(set);
+                printfmt(", all ");
+                print_set(all);
+                printfmt(", none ");
+                print_set(none);
+                printfmt(") is {}, it should be {}\n", dojo_bool_name(got), dojo_bool_name(want));
+                dojo_failed(run, op);
+            }
+        } else {
+            if (dojo_before(run, op)) {
+                printfmt("count and ids of ");
+                print_set(set);
+                printfmt("\n");
+            }
+            want_ids: [64]u32 = {};
+            want_n: u32 = 0;
+            for (i: u32 = 0; i < 64; i += 1) {
+                if (model.at[i]) {
+                    want_ids[want_n] = i;
+                    want_n += 1;
+                }
+            }
+            count: u32 = bitset_count(set);
+            if (count != want_n) {
+                dojo_fail(run, op);
+                printfmt("count(");
+                print_set(set);
+                printfmt(") is {}, it should be {}\n", count, want_n);
+                dojo_failed(run, op);
+            }
+            got_ids: [64]u32 = {};
+            got_n: u32 = bitset_ids(set, got_ids[0..64]);
+            same: b32 = got_n == want_n;
+            for (k: u32 = 0; same && k < got_n; k += 1) {
+                same = got_ids[k] == want_ids[k];
+            }
+            if (!same) {
+                text: [512]c8 = {};
+                f: fmt = fmt_to(text);
+                fmt_ids(f&, got_ids[0..64], got_n <= 64 ? got_n : 64);
+                fmt_cstr(f&, ", it should give ");
+                fmt_ids(f&, want_ids[0..64], want_n);
+                dojo_fail(run, op);
+                printfmt("ids(");
+                print_set(set);
+                printfmt(") gave {}\n", f.data);
+                dojo_failed(run, op);
+            }
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    run: dojo_run = dojo_run_init(argc, argv, "bitset", "6. bitsets");
+    scenario();
+    fuzz(run&);
+    return 0;
+}

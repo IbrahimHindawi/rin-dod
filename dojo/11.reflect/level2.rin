@@ -1,0 +1,66 @@
+// Level 2: every proc. The types and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start reflect 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "std/fmt.rin"
+import "std/cstd.rin"
+import "std/reflect.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A field's path, "light.at.x", as text that ends in a zero.
+walk_path: struct = {
+    text: [48]c8;
+}
+
+// A field a tool shows: its path, and where its bytes are in the outermost
+// value.
+walk_leaf: struct = {
+    path: walk_path;
+    offset: u64;
+    size: u64;
+}
+
+// Every field a tool shows, depth first in the record's order, onto `out`. A
+// struct field is walked into rather than listed; a hidden one is left out,
+// with everything inside it.
+walk_leaves: proc(arena: *memops_arena, type: *const reflect, prefix: ^const char, base: u64,
+                  out: *vec<walk_leaf>) -> void = {
+}
+
+// The paths of the fields a tool shows: "at.x", "at.y".
+walk_paths: proc(arena: *memops_arena, type: *const reflect) -> vec<walk_path> = {
+    out: vec<walk_path> = {};
+    return out;
+}
+
+// The paths, of those, whose bytes differ between two values of the type.
+walk_diff: proc(arena: *memops_arena, type: *const reflect, a: []const u8, b: []const u8) -> vec<walk_path> = {
+    out: vec<walk_path> = {};
+    return out;
+}
+
+// The field a path names, hidden or not, and where its bytes start in the
+// outermost value: look each name up in the record of the field before it,
+// adding offsets. Null if no field has that path.
+walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> *const reflect_field = {
+    return null;
+}
+
+// The f32 a path names, or none if it names something else, or nothing.
+walk_get_f32: proc(type: *const reflect, bytes: []const u8, path: ^const char) -> option<f32> = {
+    return option<f32>none();
+}
+
+// Write the f32 a path names. 0, and nothing written, if it names something
+// else, or nothing.
+walk_set_f32: proc(type: *const reflect, bytes: []u8, path: ^const char, value: f32) -> b32 = {
+    return 0;
+}

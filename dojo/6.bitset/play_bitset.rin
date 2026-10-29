@@ -1,0 +1,252 @@
+// Dojo 6, the playground: bitsets.
+//
+// A set of component ids fits in a u64: bit `id` is set when `id` is in the
+// set. In an ECS that set is a signature, what a kind of entity is made of,
+// and a query is two sets: the ids an entity must have, and the ids it must
+// not. A query against a signature is then two ANDs and two compares,
+// however many components there are:
+//
+//   (signature & all) == all  &&  (signature & none) == 0
+//
+// This program gives five kinds of thing a signature each, draws them as rows
+// of bits, runs queries over them, and changes two of them. Each kind keeps
+// its ids twice: the fast way, a signature, and the slow way, a b32 per id.
+// After every step, verify checks the fast way against the slow way and says
+// what disagrees; break inside its `if`s to stop on the first.
+//
+// The switch: set all_not_any to 0 and run it again. contains_all then asks
+// whether the signature has any of the ids, not all of them, and the turret,
+// which can't move, matches the movement query. It's a global, read each time
+// it's used, so a debugger can flip it mid-run too: stop on the first `query`
+// in main, set it to 0 in the watch window, and continue.
+
+import "std/print.rin"
+
+all_not_any: b32 = 1;
+
+names: [8]^const char = { "position", "velocity", "health", "sprite", "player", "turret", "frozen", "loot" };
+position: u32 = 0;
+velocity: u32 = 1;
+health: u32 = 2;
+sprite: u32 = 3;
+player: u32 = 4;
+turret: u32 = 5;
+frozen: u32 = 6;
+
+bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+with: proc(set: u64, id: u32) -> u64 = {
+    return set | bit(id);
+}
+
+without: proc(set: u64, id: u32) -> u64 = {
+    return set & ~bit(id);
+}
+
+has: proc(set: u64, id: u32) -> b32 = {
+    return (set & bit(id)) != 0;
+}
+
+contains_all: proc(set: u64, wanted: u64) -> b32 = {
+    if (all_not_any) {
+        return (set & wanted) == wanted;
+    }
+    return (set & wanted) != 0;
+}
+
+matches: proc(set: u64, all: u64, none: u64) -> b32 = {
+    return contains_all(set, all) && (set & none) == 0;
+}
+
+// Eight bits, highest id first, the way a number is written.
+print_bits: proc(set: u64) -> void = {
+    for (id: u32 = 8; id > 0; id -= 1) {
+        if (has(set, id - 1)) {
+            printf("1");
+        } else {
+            printf("0");
+        }
+    }
+}
+
+print_names: proc(set: u64) -> void = {
+    printf("{");
+    first: b32 = 1;
+    for (id: u32 = 0; id < 8; id += 1) {
+        if (has(set, id)) {
+            if (!first) {
+                printf(" ");
+            }
+            printf("%s", names[id]);
+            first = 0;
+        }
+    }
+    printf("}");
+}
+
+// A kind of thing: its signature and, the slow way, a b32 per id.
+kind: struct = {
+    name: ^const char;
+    signature: u64;
+    parts: [8]b32;
+}
+
+// Up to eight kinds.
+kinds: struct = {
+    all: [8]kind;
+    count: u32;
+}
+
+// What a system asks for: all of these ids, and none of those.
+query: struct = {
+    all: u64;
+    none: u64;
+}
+
+add_kind: proc(k: *kinds, name: ^const char, ids: []u32) -> u32 = {
+    at: u32 = k*.count;
+    k*.all[at].name = name;
+    for (i: u64 = 0; i < ids.length; i += 1) {
+        k*.all[at].signature = with(k*.all[at].signature, ids[i]);
+        k*.all[at].parts[ids[i]] = 1;
+    }
+    k*.count += 1;
+    return at;
+}
+
+draw_kind: proc(it: *kind) -> void = {
+    printf("    %-8s", it*.name);
+    print_bits(it*.signature);
+    printf("  ");
+    print_names(it*.signature);
+    printf("\n");
+}
+
+set_part: proc(k: *kinds, at: u32, id: u32, on: b32) -> void = {
+    if (on) {
+        k*.all[at].signature = with(k*.all[at].signature, id);
+    } else {
+        k*.all[at].signature = without(k*.all[at].signature, id);
+    }
+    k*.all[at].parts[id] = on;
+    draw_kind(k*.all[at]&);
+}
+
+run_query: proc(k: *kinds, q: query) -> void = {
+    printf("    all     ");
+    print_bits(q.all);
+    printf("\n    none    ");
+    print_bits(q.none);
+    printf("\n");
+    for (i: u32 = 0; i < k*.count; i += 1) {
+        printf("    %-8s", k*.all[i].name);
+        print_bits(k*.all[i].signature);
+        if (matches(k*.all[i].signature, q.all, q.none)) {
+            printf("  matches\n");
+        } else {
+            printf("  no\n");
+        }
+    }
+}
+
+// The fast way against the slow way, for every kind: the signature's bits
+// against its b32s, and the query's answer, if there is one, against one id
+// at a time.
+verify: proc(k: *kinds, q: *query) -> void = {
+    for (i: u32 = 0; i < k*.count; i += 1) {
+        it: *kind = k*.all[i]&;
+        for (id: u32 = 0; id < 8; id += 1) {
+            if (has(it*.signature, id) != it*.parts[id]) {
+                printf("    verify: %s's signature and its parts disagree about %s\n", it*.name, names[id]);
+            }
+        }
+        if (q == null) {
+            continue;
+        }
+        missing: i32 = -1;
+        barred: i32 = -1;
+        for (id: u32 = 0; id < 8; id += 1) {
+            if (missing < 0 && has(q*.all, id) && !it*.parts[id]) {
+                missing = cast(id, i32);
+            }
+            if (barred < 0 && has(q*.none, id) && it*.parts[id]) {
+                barred = cast(id, i32);
+            }
+        }
+        slow: b32 = missing < 0 && barred < 0;
+        if (matches(it*.signature, q*.all, q*.none) != slow) {
+            if (missing >= 0) {
+                printf("    verify: %s matches, but it has no %s\n", it*.name, names[missing]);
+            } else if (barred >= 0) {
+                printf("    verify: %s matches, but it has %s\n", it*.name, names[barred]);
+            } else {
+                printf("    verify: %s should match, and doesn't\n", it*.name);
+            }
+        }
+    }
+}
+
+main: proc() -> i32 = {
+    k: kinds = {};
+    move_query: query = { .all = bit(position) | bit(velocity), .none = bit(frozen) };
+    draw_query: query = { .all = bit(position) | bit(sprite), .none = 0 };
+    think_query: query = { .all = bit(velocity) | bit(health), .none = bit(player) };
+    player_ids: [5]u32 = { position, velocity, health, sprite, player };
+    drone_ids: [4]u32 = { position, velocity, health, sprite };
+    turret_ids: [4]u32 = { position, health, sprite, turret };
+    rock_ids: [2]u32 = { position, sprite };
+    ghost_ids: [4]u32 = { position, velocity, sprite, frozen };
+
+    printf("five kinds of thing, one bit per component, highest id first\n");
+    add_kind(k&, "player", player_ids[0..5]);
+    drone: u32 = add_kind(k&, "drone", drone_ids[0..4]);
+    add_kind(k&, "turret", turret_ids[0..4]);
+    add_kind(k&, "rock", rock_ids[0..2]);
+    ghost: u32 = add_kind(k&, "ghost", ghost_ids[0..4]);
+    for (i: u32 = 0; i < k.count; i += 1) {
+        draw_kind(k.all[i]&);
+    }
+    verify(k&, null);
+
+    printf("query move: all {position velocity}, none {frozen}\n");
+    run_query(k&, move_query);
+    verify(k&, move_query&);
+
+    printf("query draw: all {position sprite}, none {}\n");
+    run_query(k&, draw_query);
+    verify(k&, draw_query&);
+
+    printf("query think: all {velocity health}, none {player}\n");
+    run_query(k&, think_query);
+    verify(k&, think_query&);
+
+    printf("the drone is frozen: with(drone, frozen)\n");
+    set_part(k&, drone, frozen, 1);
+    verify(k&, null);
+
+    printf("the ghost thaws: without(ghost, frozen)\n");
+    set_part(k&, ghost, frozen, 0);
+    verify(k&, null);
+
+    printf("query move again: the drone stops, the ghost starts\n");
+    run_query(k&, move_query);
+    verify(k&, move_query&);
+
+    hero: u64 = k.all[0].signature;
+    count: u32 = 0;
+    for (id: u32 = 0; id < 64; id += 1) {
+        if (has(hero, id)) {
+            count += 1;
+        }
+    }
+    printfmt("the player's signature is the number {}: {} ids,", hero, count);
+    for (id: u32 = 0; id < 64; id += 1) {
+        if (has(hero, id)) {
+            printfmt(" {}", id);
+        }
+    }
+    printfmt("\n");
+    return 0;
+}

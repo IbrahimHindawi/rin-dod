@@ -1,0 +1,30 @@
+// Level 3: a blank page. Write the query from memory.
+//
+// Start it with: python tools/dojo.py start watermark 3
+//
+// The harness needs exactly this, and checks what each does. A table is its
+// signature, a u64 with a bit per component, and the world's tables are a
+// slice of them that only ever grows at the end. vec<T> and memops_arena are
+// given.
+//
+//   query: struct
+//   query_init: proc(q: *query, arena: *memops_arena, all: u64, none: u64) -> void
+//                                                       has looked at nothing yet
+//   query_update: proc(q: *query, signatures: []u64) -> void
+//                                                       finds the matching tables among the
+//                                                       ones it hasn't looked at
+//   query_tables: proc(q: *query) -> []u32              the matching tables, in increasing order
+//   query_checked: proc(q: *query) -> u64               how many tables it has been updated over
+//   query_scanned: proc(q: *query) -> u64               how many query_update has looked at, in
+//                                                       all; each table once
+//
+// A table matches when its signature has every bit of `all` and no bit of
+// `none`.
+
+import "std/memops.rin"
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

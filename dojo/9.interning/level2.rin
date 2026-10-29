@@ -1,0 +1,76 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start interning 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// splitmix64's finisher: every bit of the key moves every bit of the hash, so
+// keys that differ only in their high bits still land far apart. u64
+// arithmetic wraps, as it wants.
+interner_hash: proc(key: u64) -> u64 = {
+    x: u64 = key;
+    x ^= x shr 30;
+    x *= 0xbf58476d1ce4e5b9'u64;
+    x ^= x shr 27;
+    x *= 0x94d049bb133111eb'u64;
+    return x ^ (x shr 31);
+}
+
+interner: struct = {
+    arena: *memops_arena;
+    // The table: a power of two long, never more than 3/4 full. 0 is an
+    // empty slot, and anything else is an id + 1.
+    slots: vec<u32>;
+    // keys[id] is the key interned as id.
+    keys: vec<u64>;
+}
+
+// `count` empty slots.
+interner_empty: proc(arena: *memops_arena, count: u64) -> vec<u32> = {
+    slots: vec<u32> = {};
+    return slots;
+}
+
+// An empty interner, with a table of 8 slots, from `arena`.
+interner_init: proc(t: *interner, arena: *memops_arena) -> void = {
+    t* = {};
+}
+
+// Where `key` is in the table, or the empty slot where it would go: start at
+// its hash, and step to the next slot, wrapping.
+interner_slot_of: proc(t: *interner, key: u64) -> u64 = {
+    return 0;
+}
+
+// The key's id, or none if it was never interned.
+interner_find: proc(t: *interner, key: u64) -> option<u32> = {
+    return option<u32>none();
+}
+
+// The key's id: the one it was given before, or, for a new key, the next
+// one. The table grows before it would be more than 3/4 full.
+interner_intern: proc(t: *interner, key: u64) -> u32 = {
+    return 0;
+}
+
+// Twice the slots, and every id put back where its key's hash says.
+interner_grow: proc(t: *interner) -> void = {
+}
+
+// The key interned as id.
+interner_key: proc(t: *interner, id: u32) -> u64 = {
+    return 0;
+}
+
+// How many keys.
+interner_len: proc(t: *interner) -> u64 = {
+    return 0;
+}

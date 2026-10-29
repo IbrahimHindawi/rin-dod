@@ -2,6 +2,8 @@
 
 `src/3.many_archetypes/many_archetypes.rin`
 
+**In the dojo:** [4. a type-erased column](../dojo/4.column/README.md), [6. bitsets](../dojo/6.bitset/README.md), each on its own, to watch and to practise.
+
 Four archetypes (rock, ship, bullet, turret) and four components (position,
 velocity, health, damage). One `table` type holds all four archetypes, and two
 queries decide which tables each system visits.

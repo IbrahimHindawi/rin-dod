@@ -18,7 +18,9 @@
 // break on `slot_map_remove` and watch `slots`, `handles` and `values`.
 //
 // The switch: set check_generation to 0 and run it again. A removed handle
-// still finds a slot, and reads whatever value is in that slot's row now.
+// still finds a slot, and reads whatever value is in that slot's row now. It's
+// a global, read each time it's used, so a debugger can flip it mid-run too:
+// stop on slot_map_remove, set it to 0 in the watch window, and continue.
 
 import "std/print.rin"
 

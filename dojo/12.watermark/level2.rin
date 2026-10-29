@@ -1,0 +1,55 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start watermark 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Every bit of `all`, and none of `none`.
+query_matches: proc(signature: u64, all: u64, none: u64) -> b32 = {
+    return 0;
+}
+
+query: struct = {
+    arena: *memops_arena;
+    all: u64;
+    none: u64;
+    // The tables that match, by index, in the order they were found.
+    tables: vec<u32>;
+    // The watermark: tables 0 to checked - 1 have been looked at.
+    checked: u64;
+    // How many tables query_update has looked at, ever. With the watermark,
+    // each table once.
+    scanned: u64;
+}
+
+query_init: proc(q: *query, arena: *memops_arena, all: u64, none: u64) -> void = {
+    // A query that has looked at nothing yet.
+}
+
+// Tables are only ever added, at the end, so the ones past the watermark are
+// the only ones this query hasn't seen.
+query_update: proc(q: *query, signatures: []u64) -> void = {
+    // Look at the tables past the watermark, and only those.
+}
+
+// The matching tables, in increasing order.
+query_tables: proc(q: *query) -> []u32 = {
+    return vec<u32>items(q*.tables&);
+}
+
+// How many tables the query has been updated over: the watermark.
+query_checked: proc(q: *query) -> u64 = {
+    return 0;
+}
+
+// How many tables query_update has looked at, in all.
+query_scanned: proc(q: *query) -> u64 = {
+    return 0;
+}

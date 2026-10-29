@@ -1,0 +1,236 @@
+// The harness for dojo 10, memoized edges. It is fixed. Your work is kata.rin,
+// beside it: kata.rin imports this file, which has main, so the two are one
+// program. The reference, solution.rin, and each level file do the same, so
+// each of them builds on its own, and this file never does. Build and run
+// yours with
+//
+//   python tools/dojo.py edges
+//
+// First a short scenario, the playground's moves, each printed as it passes.
+// Then a fuzz run: thousands of random moves from a seed, from random nodes,
+// with ids up to 63, against a model that knows each node's signature and
+// which edges a graph that remembers both directions knows by now. After every
+// move it checks the node the move gave, its signature, and the two counters:
+// a move along a known edge is a hit, any other move that changes the
+// signature is one lookup, and a move that changes nothing is neither.
+
+import "../dojo.rin"
+
+bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+// A signature as its ids: {0 2 3}.
+fmt_ids: proc(f: *fmt, signature: u64) -> void = {
+    fmt_char(f, '{');
+    first: b32 = 1;
+    for (id: u32 = 0; id < 64; id += 1) {
+        if ((signature & bit(id)) != 0) {
+            if (!first) {
+                fmt_char(f, ' ');
+            }
+            fmt_u64(f, cast(id, u64));
+            first = 0;
+        }
+    }
+    fmt_char(f, '}');
+}
+
+print_ids: proc(signature: u64) -> void = {
+    text: [256]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_ids(f&, signature);
+    printfmt("{}", f.data);
+}
+
+same_u64: proc(what: ^const char, got: u64, want: ^const char) -> void = {
+    text: [32]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_u64(f&, got);
+    dojo_same(what, f.data, want);
+}
+
+same_ids: proc(what: ^const char, signature: u64, want: ^const char) -> void = {
+    text: [256]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_ids(f&, signature);
+    dojo_same(what, f.data, want);
+}
+
+same_counts: proc(what: ^const char, g: *graph, want: ^const char) -> void = {
+    text: [64]c8 = {};
+    f: fmt = fmt_to(text);
+    fmt_u64(f&, graph_lookups(g));
+    fmt_char(f&, ' ');
+    fmt_u64(f&, graph_hits(g));
+    dojo_same(what, f.data, want);
+}
+
+scenario: proc(arena: *memops_arena) -> void = {
+    printfmt("scenario\n");
+    g: graph = {};
+    graph_init(g&, arena);
+    same_u64("new: how many nodes", graph_len(g&), "1");
+    same_ids("node 0's signature", graph_signature(g&, 0), "{}");
+    a: u32 = graph_with(g&, 0, 0);
+    same_u64("with(0, 0), position: a new node", cast(a, u64), "1");
+    same_ids("its signature", graph_signature(g&, a), "{0}");
+    b: u32 = graph_with(g&, a, 1);
+    same_u64("with(1, 1), velocity", cast(b, u64), "2");
+    c: u32 = graph_with(g&, b, 2);
+    same_u64("with(2, 2), health", cast(c, u64), "3");
+    d: u32 = graph_with(g&, c, 3);
+    same_u64("with(3, 3), burning", cast(d, u64), "4");
+    same_ids("its signature", graph_signature(g&, d), "{0 1 2 3}");
+    same_counts("lookups and hits", g&, "4 0");
+    same_u64("without(4, 3): the fire goes out, by the edge back", cast(graph_without(g&, d, 3), u64), "3");
+    same_u64("with(3, 3): it catches fire again, by the edge", cast(graph_with(g&, c, 3), u64), "4");
+    same_counts("lookups and hits", g&, "4 2");
+    same_u64("with(4, 3): it has 3 already, so it stays", cast(graph_with(g&, d, 3), u64), "4");
+    same_u64("without(0, 3): it has no 3 to lose", cast(graph_without(g&, 0, 3), u64), "0");
+    same_counts("lookups and hits: nothing moved", g&, "4 2");
+    e: u32 = graph_without(g&, c, 1);
+    same_u64("without(3, 1): it stops", cast(e, u64), "5");
+    same_ids("its signature", graph_signature(g&, e), "{0 2}");
+    f: u32 = graph_with(g&, e, 3);
+    same_u64("with(5, 3)", cast(f, u64), "6");
+    same_u64("with(6, 1): node 4 is known, the edge to it isn't", cast(graph_with(g&, f, 1), u64), "4");
+    same_counts("lookups and hits", g&, "7 2");
+    same_u64("without(4, 1): the edge back", cast(graph_without(g&, d, 1), u64), "6");
+    same_counts("lookups and hits", g&, "7 3");
+    same_u64("len", graph_len(g&), "7");
+}
+
+// The ids the fuzz run uses: 31, 32 and 63 catch a bit made in 32 bits.
+ids: [8]u32 = { 0, 1, 2, 3, 5, 31, 32, 63 };
+
+// The model: each node's signature, in the order the graph made them, and the
+// edges a graph that remembers both directions knows by now: known[node * 128
+// + id * 2 + adding] is 1 for a known edge. Eight ids make 256 signatures at
+// most, so a search through `signatures` is quick.
+model: struct = {
+    signatures: vec<u64>;
+    known: vec<u8>;
+    lookups: u64;
+    hits: u64;
+}
+
+model_add: proc(arena: *memops_arena, m: *model, signature: u64) -> void = {
+    _ = vec<u64>append(arena, m*.signatures&, signature);
+    for (i: u32 = 0; i < 128; i += 1) {
+        _ = vec<u8>append(arena, m*.known&, 0);
+    }
+}
+
+model_find: proc(m: *model, signature: u64) -> i64 = {
+    for (i: u64 = 0; i < m*.signatures.length; i += 1) {
+        if (vec<u64>at(m*.signatures&, i)* == signature) {
+            return cast(i, i64);
+        }
+    }
+    return -1;
+}
+
+known_at: proc(m: *model, node: u32, id: u32, adding: b32) -> *u8 = {
+    return vec<u8>at(m*.known&, cast(node, u64) * 128 + cast(id, u64) * 2 + (adding ? 1 : 0));
+}
+
+print_call: proc(adding: b32, node: u32, id: u32) -> void = {
+    if (adding) {
+        printfmt("with({}, {})", node, id);
+    } else {
+        printfmt("without({}, {})", node, id);
+    }
+}
+
+fuzz: proc(run: *dojo_run, arena: *memops_arena) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    g: graph = {};
+    graph_init(g&, arena);
+    m: model = {};
+    model_add(arena, m&, 0);
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        node: u32 = cast(dojo_rng_below(rng&, m.signatures.length), u32);
+        id: u32 = ids[dojo_rng_below(rng&, 8)];
+        signature: u64 = vec<u64>at(m.signatures&, cast(node, u64))*;
+        has: b32 = (signature & bit(id)) != 0;
+        // Mostly the move that changes the signature; now and then the one
+        // that doesn't.
+        adding: b32 = dojo_rng_below(rng&, 5) == 0 ? has : !has;
+        want: u64 = adding ? signature | bit(id) : signature & ~bit(id);
+        if (dojo_before(run, op)) {
+            print_call(adding, node, id);
+            printfmt("\n");
+        }
+        got: u32 = adding ? graph_with(g&, node, id) : graph_without(g&, node, id);
+        if (cast(got, u64) >= graph_len(g&)) {
+            dojo_fail(run, op);
+            print_call(adding, node, id);
+            printfmt(" gave node {}, but there are {} nodes\n", got, graph_len(g&));
+            dojo_failed(run, op);
+        }
+        if (graph_signature(g&, got) != want) {
+            dojo_fail(run, op);
+            print_call(adding, node, id);
+            printfmt(" gave node {}, which is ", got);
+            print_ids(graph_signature(g&, got));
+            printfmt("; from ");
+            print_ids(signature);
+            printfmt(" it should be ");
+            print_ids(want);
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+        known: i64 = model_find(m&, want);
+        if (known >= 0 && cast(got, i64) != known) {
+            dojo_fail(run, op);
+            print_call(adding, node, id);
+            printfmt(" gave node {}, but node {} is ", got, known);
+            print_ids(want);
+            printfmt(" already\n");
+            dojo_failed(run, op);
+        }
+        if (known < 0) {
+            if (cast(got, u64) != m.signatures.length) {
+                dojo_fail(run, op);
+                print_call(adding, node, id);
+                printfmt(" made node {}; the next new node is {}\n", got, m.signatures.length);
+                dojo_failed(run, op);
+            }
+            model_add(arena, m&, want);
+        }
+        if (want != signature) {
+            if (known_at(m&, node, id, adding)* != 0) {
+                m.hits += 1;
+            } else {
+                m.lookups += 1;
+                known_at(m&, node, id, adding)* = 1;
+                known_at(m&, got, id, !adding)* = 1;
+            }
+        }
+        if (graph_lookups(g&) != m.lookups || graph_hits(g&) != m.hits) {
+            dojo_fail(run, op);
+            printfmt("after ");
+            print_call(adding, node, id);
+            printfmt(", lookups and hits are {} and {}; the model says {} and {} (a known edge is a hit, an unknown one a lookup)\n",
+                graph_lookups(g&), graph_hits(g&), m.lookups, m.hits);
+            dojo_failed(run, op);
+        }
+        if (graph_len(g&) != m.signatures.length) {
+            dojo_fail(run, op);
+            printfmt("len() is {}, the model has {}\n", graph_len(g&), m.signatures.length);
+            dojo_failed(run, op);
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    arena: memops_arena = {};
+    memops_arena_initialize(arena&);
+    run: dojo_run = dojo_run_init(argc, argv, "edges", "10. memoized edges");
+    scenario(arena&);
+    fuzz(run&, arena&);
+    return 0;
+}

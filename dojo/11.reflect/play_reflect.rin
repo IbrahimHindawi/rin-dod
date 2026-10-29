@@ -1,0 +1,244 @@
+// Dojo 11, the playground: a reflection walk.
+//
+// A reflect record lists a struct's fields: each one's name, where its bytes
+// start in the struct, how many there are, and its type, with the type's own
+// record if it's a struct too. With records, one piece of code can list,
+// read, write and compare the fields of any type it's handed, by name, the way
+// an inspector, an editor, a save file or a network diff does. It never names
+// the type: it walks the bytes by the record.
+//
+// rin's compiler writes a record for every struct: lamp<> is lamp's. The walk
+// below reads the lamp through its bytes, and verify runs after every step:
+// every f32 the walk reads by path must be what the lamp holds, read as
+// l.power and so on. Put a breakpoint inside its failure branch to stop where
+// they differ.
+//
+// The switch: set use_record_offsets to 0 and run it again. The walk adds up
+// the sizes of the fields before each one instead, as if structs had no
+// padding. That's right for `x` and `y`, and wrong from `power` on: it starts
+// at 4, after 3 bytes of padding, not at 1. It's a global, read on every step,
+// so a debugger can flip it mid-run too: stop on the first `set` in main, set
+// it to 0 in the watch window, and continue.
+
+import "std/print.rin"
+import "std/fmt.rin"
+import "std/reflect.rin"
+
+use_record_offsets: b32 = 1;
+
+vec2: struct = { x: f32; y: f32; }
+lamp: struct = { on: u8; power: f32; at: vec2; flicker: f32 @ "hidden"; }
+
+// Where field i starts in its struct: what the record says or, with the
+// switch off, the sizes of the fields before it added up.
+offset_in: proc(type: *const reflect, i: u64) -> u64 = {
+    fields: ^const reflect_field = reflect_fields(type);
+    if (use_record_offsets) {
+        return fields[i].offset;
+    }
+    sum: u64 = 0;
+    for (k: u64 = 0; k < i; k += 1) {
+        sum += fields[k].size;
+    }
+    return sum;
+}
+
+read_f32: proc(row: []u8, at: u64) -> f32 = {
+    field: []u8 = row[at..at + 4];
+    return cast(field[0]&, *f32)*;
+}
+
+// Every field a tool shows, depth first, printed with its value. Struct
+// fields are walked into, and hidden ones left out.
+show: proc(type: *const reflect, row: []u8, prefix: ^const char, base: u64) -> void = {
+    fields: ^const reflect_field = reflect_fields(type);
+    for (i: u64 = 0; i < type*.count; i += 1) {
+        f: *const reflect_field = fields[i]&;
+        if (reflect_field_has_attr(f, "hidden")) {
+            continue;
+        }
+        text: [48]c8 = {};
+        path: fmt = fmt_to(text);
+        fmt_cstr(path&, prefix);
+        fmt_cstr(path&, f*.name);
+        at: u64 = base + offset_in(type, i);
+        if (reflect_is_struct(f*.info)) {
+            fmt_char(path&, '.');
+            show(f*.info, row, path.data, at);
+        } else if (reflect_cstr_equal(f*.type, "f32")) {
+            printf("    %s: %.2f\n", path.data, cast(read_f32(row, at), f64));
+        } else {
+            printfmt("    {}: {}\n", path.data, row[at]);
+        }
+    }
+}
+
+// The paths of the fields a tool shows whose bytes differ, each after a space.
+diff: proc(type: *const reflect, a: []u8, b: []u8, prefix: ^const char, base: u64) -> void = {
+    fields: ^const reflect_field = reflect_fields(type);
+    for (i: u64 = 0; i < type*.count; i += 1) {
+        f: *const reflect_field = fields[i]&;
+        if (reflect_field_has_attr(f, "hidden")) {
+            continue;
+        }
+        text: [48]c8 = {};
+        path: fmt = fmt_to(text);
+        fmt_cstr(path&, prefix);
+        fmt_cstr(path&, f*.name);
+        at: u64 = base + offset_in(type, i);
+        if (reflect_is_struct(f*.info)) {
+            fmt_char(path&, '.');
+            diff(f*.info, a, b, path.data, at);
+        } else {
+            for (k: u64 = at; k < at + f*.size; k += 1) {
+                if (a[k] != b[k]) {
+                    printfmt(" {}", path.data);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// Is `name` exactly path[start..end]?
+name_is: proc(name: ^const char, path: ^const char, start: u64, end: u64) -> b32 = {
+    i: u64 = 0;
+    while (start + i < end) {
+        if (name[i] != path[start + i]) {
+            return 0;
+        }
+        i += 1;
+    }
+    return name[i] == 0;
+}
+
+// The field a path names, and where its bytes start; null if none has it.
+find: proc(type: *const reflect, path: ^const char, offset: *u64) -> *const reflect_field = {
+    found: *const reflect_field = null;
+    record: *const reflect = type;
+    start: u64 = 0;
+    more: b32 = 1;
+    offset* = 0;
+    while (more) {
+        end: u64 = start;
+        while (path[end] != 0 && path[end] != '.') {
+            end += 1;
+        }
+        found = null;
+        for (i: u64 = 0; i < reflect_field_count(record); i += 1) {
+            if (found == null && name_is(reflect_fields(record)[i].name, path, start, end)) {
+                found = reflect_fields(record)[i]&;
+                offset* += offset_in(record, i);
+            }
+        }
+        if (found == null) {
+            return null;
+        }
+        record = found*.info;
+        more = path[end] != 0;
+        start = end + 1;
+    }
+    return found;
+}
+
+get_f32: proc(type: *const reflect, row: []u8, path: ^const char, value: *f32) -> b32 = {
+    at: u64 = 0;
+    f: *const reflect_field = find(type, path, at&);
+    if (f == null || !reflect_cstr_equal(f*.type, "f32")) {
+        return 0;
+    }
+    value* = read_f32(row, at);
+    return 1;
+}
+
+set_f32: proc(type: *const reflect, row: []u8, path: ^const char, value: f32) -> b32 = {
+    at: u64 = 0;
+    f: *const reflect_field = find(type, path, at&);
+    if (f == null || !reflect_cstr_equal(f*.type, "f32")) {
+        return 0;
+    }
+    field: []u8 = row[at..at + 4];
+    cast(field[0]&, *f32)* = value;
+    return 1;
+}
+
+bytes_of: proc(l: *lamp) -> []u8 = {
+    return cast(l, ^u8)[0..lamp<>.size];
+}
+
+// Every f32 of the lamp read by path, against the same field read directly.
+// The first that differs is printed, and how many do.
+verify: proc(l: *lamp) -> void = {
+    paths: [4]^const char = { "power", "at.x", "at.y", "flicker" };
+    held: [4]f32 = { l*.power, l*.at.x, l*.at.y, l*.flicker };
+    wrong: u32 = 0;
+    first: u64 = 0;
+    for (i: u64 = 0; i < 4; i += 1) {
+        walked: f32 = 0.0;
+        if (!get_f32(lamp<>&, bytes_of(l), paths[i], walked&) || walked != held[i]) {
+            if (wrong == 0) {
+                first = i;
+            }
+            wrong += 1;
+        }
+    }
+    if (wrong > 0) {
+        walked: f32 = 0.0;
+        printf("verify: the walk reads %s as ", paths[first]);
+        if (get_f32(lamp<>&, bytes_of(l), paths[first], walked&)) {
+            printf("%.2f", cast(walked, f64));
+        } else {
+            printf("nothing");
+        }
+        printf(", the lamp holds %.2f; %u of 4 f32s are wrong\n", cast(held[first], f64), wrong);
+    }
+}
+
+set: proc(l: *lamp, path: ^const char, value: f32) -> void = {
+    done: b32 = set_f32(lamp<>&, bytes_of(l), path, value);
+    printf("set %s to %.2f: %s\n", path, cast(value, f64), done ? "true" : "false");
+    verify(l);
+}
+
+main: proc() -> i32 = {
+    info: *const reflect = lamp<>&;
+    printfmt("a lamp's record: {} bytes\n", info*.size);
+    for (i: u64 = 0; i < info*.count; i += 1) {
+        f: *const reflect_field = reflect_fields(info)[i]&;
+        printfmt("    {}: offset {}, size {}, ", f*.name, f*.offset, f*.size);
+        if (reflect_is_struct(f*.info)) {
+            printfmt("a struct");
+        } else {
+            printfmt("{}", f*.type);
+        }
+        if (reflect_field_has_attr(f, "hidden")) {
+            printfmt(", hidden");
+        }
+        printfmt("\n");
+    }
+    l: lamp = {};
+    memset(l&, 0, cast(lamp<>.size, usize));
+    l.on = 1;
+    l.power = 60.0;
+    l.at = { .x = 3.0, .y = 4.0 };
+    l.flicker = 0.25;
+    printfmt("the lamp, walked by its record:\n");
+    show(lamp<>&, bytes_of(l&), "", 0);
+    verify(l&);
+    before: lamp = l;
+    set(l&, "power", 75.0);
+    set(l&, "at.x", 5.0);
+    printfmt("diff with the lamp before:");
+    diff(lamp<>&, bytes_of(before&), bytes_of(l&), "", 0);
+    printfmt("\n");
+    set(l&, "flicker", 0.5);
+    printfmt("diff with the lamp before:");
+    diff(lamp<>&, bytes_of(before&), bytes_of(l&), "", 0);
+    printfmt("\n");
+    set(l&, "on", 0.0);
+    set(l&, "at", 1.0);
+    set(l&, "at.z", 1.0);
+    printfmt("the lamp, walked by its record:\n");
+    show(lamp<>&, bytes_of(l&), "", 0);
+    return 0;
+}

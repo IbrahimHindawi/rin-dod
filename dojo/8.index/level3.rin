@@ -1,0 +1,30 @@
+// Level 3: a blank page. Write the list from memory.
+//
+// Start it with: python tools/dojo.py start index 3
+//
+// The harness needs exactly this, and checks what each does. A node is named
+// by its index in the list's vec, a u32. vec<T>, option<T> and memops_arena
+// are given, from std.
+//
+//   list_none: u32                                          no node: 0xffffffff'u32
+//   list: struct
+//   list_init: proc(l: *list, arena: *memops_arena) -> void
+//   list_push_back: proc(l: *list, value: u64) -> u32                    the new node; a freed one first
+//   list_push_front: proc(l: *list, value: u64) -> u32
+//   list_insert_after: proc(l: *list, node: u32, value: u64) -> u32      list_none if node isn't in the list
+//   list_remove: proc(l: *list, node: u32) -> option<u64>                its index can be handed out again
+//   list_get: proc(l: *list, node: u32) -> *u64                          null if node isn't in the list
+//   list_head: proc(l: *list) -> u32
+//   list_tail: proc(l: *list) -> u32
+//   list_next: proc(l: *list, node: u32) -> u32                          list_none after the tail, or for a free node
+//   list_prev: proc(l: *list, node: u32) -> u32                          list_none before the head, or for a free node
+//   list_len: proc(l: *list) -> u64
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

@@ -1,0 +1,56 @@
+// Level 2: every proc. The signatures are given; write the bodies. Each proc
+// says what it must do; the harness checks how. The bodies here only return
+// something, so the file compiles and the harness can tell you what is
+// missing.
+//
+// Start it with: python tools/dojo.py start bitset 2
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// The set holding only `id`, for ids 0 to 63.
+bitset_bit: proc(id: u32) -> u64 = {
+    return 0;
+}
+
+// The set, and id.
+bitset_with: proc(set: u64, id: u32) -> u64 = {
+    return set;
+}
+
+// The set, but not id.
+bitset_without: proc(set: u64, id: u32) -> u64 = {
+    return set;
+}
+
+// Is id in the set?
+bitset_has: proc(set: u64, id: u32) -> b32 = {
+    return 0;
+}
+
+// Every id of `wanted` is in `set`. An empty `wanted` is in every set.
+bitset_contains_all: proc(set: u64, wanted: u64) -> b32 = {
+    return 0;
+}
+
+// An id in both?
+bitset_intersects: proc(a: u64, b: u64) -> b32 = {
+    return 0;
+}
+
+// A query: all of `all`, and none of `none`.
+bitset_matches: proc(set: u64, all: u64, none: u64) -> b32 = {
+    return 0;
+}
+
+// How many ids.
+bitset_count: proc(set: u64) -> u32 = {
+    return 0;
+}
+
+// The ids in the set, smallest first, written into `out`, which has room for
+// 64. Returns how many.
+bitset_ids: proc(set: u64, out: []u32) -> u32 = {
+    return 0;
+}

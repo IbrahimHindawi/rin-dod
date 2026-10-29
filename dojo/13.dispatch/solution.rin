@@ -1,0 +1,118 @@
+// The reference: a schedule. Systems as data, a name and a proc pointer each,
+// run in the order of a list.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "std/cstd.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A system is a plain pointer to a proc.
+system_proc: alias = *proc(c: *ctx) -> void;
+
+schedule_system: struct = {
+    name: ^const char;
+    run: system_proc;
+    enabled: b32;
+    // How many times schedule_run has called it.
+    calls: u32;
+}
+
+schedule: struct = {
+    arena: *memops_arena;
+    // In the order they run.
+    systems: vec<schedule_system>;
+}
+
+schedule_init: proc(s: *schedule, arena: *memops_arena) -> void = {
+    s* = {};
+    s*.arena = arena;
+}
+
+// Where the system called `name` is in the list, if it's there.
+schedule_find: proc(s: *schedule, name: ^const char) -> option<u64> = {
+    for (i: u64 = 0; i < s*.systems.length; i += 1) {
+        if (strcmp(vec<schedule_system>at(s*.systems&, i)*.name, name) == 0) {
+            return option<u64>some(i);
+        }
+    }
+    return option<u64>none();
+}
+
+// At the end: it runs after every system already there.
+schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void = {
+    _ = vec<schedule_system>append(s*.arena, s*.systems&, { .name = name, .run = run, .enabled = 1 });
+}
+
+// Just before `before`, so it runs first. 0, and nothing added, if there is
+// no `before`.
+schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char, run: system_proc) -> b32 = {
+    at: option<u64> = schedule_find(s, before);
+    if (!at.has_value) {
+        return 0;
+    }
+    _ = vec<schedule_system>append(s*.arena, s*.systems&, {});
+    systems: []schedule_system = vec<schedule_system>items(s*.systems&);
+    for (i: u64 = systems.length - 1; i > at.value; i -= 1) {
+        systems[i] = systems[i - 1];
+    }
+    systems[at.value] = { .name = name, .run = run, .enabled = 1 };
+    return 1;
+}
+
+// The others keep their order.
+schedule_remove: proc(s: *schedule, name: ^const char) -> b32 = {
+    at: option<u64> = schedule_find(s, name);
+    if (!at.has_value) {
+        return 0;
+    }
+    systems: []schedule_system = vec<schedule_system>items(s*.systems&);
+    for (i: u64 = at.value; i + 1 < systems.length; i += 1) {
+        systems[i] = systems[i + 1];
+    }
+    _ = vec<schedule_system>pop(s*.systems&);
+    return 1;
+}
+
+// A disabled system keeps its place, and is skipped.
+schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
+    at: option<u64> = schedule_find(s, name);
+    if (!at.has_value) {
+        return 0;
+    }
+    vec<schedule_system>at(s*.systems&, at.value)*.enabled = on;
+    return 1;
+}
+
+// One frame: every enabled system, once, in order.
+schedule_run: proc(s: *schedule, c: *ctx) -> void = {
+    for (i: u64 = 0; i < s*.systems.length; i += 1) {
+        sys: *schedule_system = vec<schedule_system>at(s*.systems&, i);
+        if (sys*.enabled) {
+            sys*.run(c);
+            sys*.calls += 1;
+        }
+    }
+}
+
+// How many systems, enabled or not.
+schedule_len: proc(s: *schedule) -> u64 = {
+    return s*.systems.length;
+}
+
+// The name of the i-th system to run.
+schedule_name: proc(s: *schedule, i: u64) -> ^const char = {
+    return vec<schedule_system>at(s*.systems&, i)*.name;
+}
+
+// How many times schedule_run has called the system; 0 if there's none by
+// that name.
+schedule_calls: proc(s: *schedule, name: ^const char) -> u32 = {
+    at: option<u64> = schedule_find(s, name);
+    if (!at.has_value) {
+        return 0;
+    }
+    return vec<schedule_system>at(s*.systems&, at.value)*.calls;
+}

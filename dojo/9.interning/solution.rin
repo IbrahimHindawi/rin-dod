@@ -1,0 +1,103 @@
+// The reference: an interner. Each distinct key gets a small dense id, the
+// first time it's seen, and the same id every time after. The lookup is an
+// open-addressing hash table of ids, kept by hand.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// splitmix64's finisher: every bit of the key moves every bit of the hash, so
+// keys that differ only in their high bits still land far apart. u64
+// arithmetic wraps, as it wants.
+interner_hash: proc(key: u64) -> u64 = {
+    x: u64 = key;
+    x ^= x shr 30;
+    x *= 0xbf58476d1ce4e5b9'u64;
+    x ^= x shr 27;
+    x *= 0x94d049bb133111eb'u64;
+    return x ^ (x shr 31);
+}
+
+interner: struct = {
+    arena: *memops_arena;
+    // The table: a power of two long, never more than 3/4 full. 0 is an
+    // empty slot, and anything else is an id + 1.
+    slots: vec<u32>;
+    // keys[id] is the key interned as id.
+    keys: vec<u64>;
+}
+
+// `count` empty slots.
+interner_empty: proc(arena: *memops_arena, count: u64) -> vec<u32> = {
+    slots: vec<u32> = {};
+    for (i: u64 = 0; i < count; i += 1) {
+        _ = vec<u32>append(arena, slots&, 0);
+    }
+    return slots;
+}
+
+interner_init: proc(t: *interner, arena: *memops_arena) -> void = {
+    t* = {};
+    t*.arena = arena;
+    t*.slots = interner_empty(arena, 8);
+}
+
+// Where `key` is in the table, or the empty slot where it would go: start at
+// its hash, and step to the next slot, wrapping, until one is either.
+interner_slot_of: proc(t: *interner, key: u64) -> u64 = {
+    mask: u64 = t*.slots.length - 1;
+    at: u64 = interner_hash(key) & mask;
+    s: u32 = vec<u32>at(t*.slots&, at)*;
+    while (s != 0 && vec<u64>at(t*.keys&, cast(s - 1, u64))* != key) {
+        at = (at + 1) & mask;
+        s = vec<u32>at(t*.slots&, at)*;
+    }
+    return at;
+}
+
+// The key's id, or none if it was never interned.
+interner_find: proc(t: *interner, key: u64) -> option<u32> = {
+    s: u32 = vec<u32>at(t*.slots&, interner_slot_of(t, key))*;
+    if (s == 0) {
+        return option<u32>none();
+    }
+    return option<u32>some(s - 1);
+}
+
+// Found, or made: a new key gets the next id, and the table grows before it
+// would be more than 3/4 full.
+interner_intern: proc(t: *interner, key: u64) -> u32 = {
+    at: u64 = interner_slot_of(t, key);
+    if (vec<u32>at(t*.slots&, at)* != 0) {
+        return vec<u32>at(t*.slots&, at)* - 1;
+    }
+    if ((t*.keys.length + 1) * 4 > t*.slots.length * 3) {
+        interner_grow(t);
+        at = interner_slot_of(t, key);
+    }
+    id: u32 = cast(t*.keys.length, u32);
+    _ = vec<u64>append(t*.arena, t*.keys&, key);
+    vec<u32>at(t*.slots&, at)* = id + 1;
+    return id;
+}
+
+// Twice the slots, and every id put back where its key's hash says, which in
+// a bigger table is somewhere else.
+interner_grow: proc(t: *interner) -> void = {
+    t*.slots = interner_empty(t*.arena, t*.slots.length * 2);
+    for (id: u64 = 0; id < t*.keys.length; id += 1) {
+        at: u64 = interner_slot_of(t, vec<u64>at(t*.keys&, id)*);
+        vec<u32>at(t*.slots&, at)* = cast(id + 1, u32);
+    }
+}
+
+interner_key: proc(t: *interner, id: u32) -> u64 = {
+    return vec<u64>at(t*.keys&, cast(id, u64))*;
+}
+
+interner_len: proc(t: *interner) -> u64 = {
+    return t*.keys.length;
+}

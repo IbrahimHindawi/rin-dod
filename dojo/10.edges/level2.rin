@@ -1,0 +1,81 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start edges 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Component `id`'s bit in a signature, in 64 bits.
+graph_bit: proc(id: u32) -> u64 = {
+    return 0;
+}
+
+graph_node: struct = {
+    signature: u64;
+    // add[id] is one more than the node with component id added, once a move
+    // has looked it up, so 0 means not known yet; remove[id] is the same, with
+    // it removed.
+    add: [64]u32;
+    remove: [64]u32;
+}
+
+graph: struct = {
+    arena: *memops_arena;
+    nodes: vec<graph_node>;
+    lookups: u64;
+    hits: u64;
+}
+
+// A new node, with no edges known; its number.
+graph_make: proc(g: *graph, signature: u64) -> u32 = {
+    return 0;
+}
+
+// Node 0 is the empty signature, where every entity starts.
+graph_init: proc(g: *graph, arena: *memops_arena) -> void = {
+    g* = {};
+    g*.arena = arena;
+}
+
+// The slow path, a lookup: the node with this signature, made if there is
+// none yet.
+graph_find_or_make: proc(g: *graph, signature: u64) -> u32 = {
+    return 0;
+}
+
+graph_signature: proc(g: *graph, node: u32) -> u64 = {
+    return 0;
+}
+
+// The node with component `id` added: follow the add edge, or look it up once
+// and write the edge both ways. A node that has id already is its own answer,
+// and nothing is counted.
+graph_with: proc(g: *graph, node: u32, id: u32) -> u32 = {
+    return node;
+}
+
+// The node with component `id` removed: graph_with's mirror.
+graph_without: proc(g: *graph, node: u32, id: u32) -> u32 = {
+    return node;
+}
+
+// How many nodes.
+graph_len: proc(g: *graph) -> u64 = {
+    return 0;
+}
+
+// How many moves took the slow path.
+graph_lookups: proc(g: *graph) -> u64 = {
+    return 0;
+}
+
+// How many moves followed an edge.
+graph_hits: proc(g: *graph) -> u64 = {
+    return 0;
+}
