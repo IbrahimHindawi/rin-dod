@@ -1,0 +1,165 @@
+// 1.2 Despawning, and reusing numbers
+//
+// Games destroy things all the time: a bullet hits, a drone dies. 1.1 could
+// only add. Here an entity can be despawned, and its number goes on a free
+// list, so the next spawn takes it instead of growing the world. Without that,
+// a game that fires a bullet a frame would run out of numbers in seconds.
+//
+// Reuse has a cost, and this program walks straight into it. Something that
+// kept an entity's number, the turret's target, still holds it after the
+// entity is gone. When the number is handed to a new entity, the old
+// reference silently names the new one. 1.3 fixes that.
+
+import "std/print.rin"
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+kayan_entity: struct = {
+    index: u32;
+}
+
+// `alive` says which numbers are in use. `free` holds the numbers of despawned
+// entities, `free_count` of them, ready to be handed out again.
+kayan_world: struct = {
+    count: u32;
+    alive: [8]b32;
+    free: [8]u32;
+    free_count: u32;
+    positions: [8]vec2;
+    has_position: [8]b32;
+    velocities: [8]vec2;
+    has_velocity: [8]b32;
+    healths: [8]f32;
+    has_health: [8]b32;
+}
+
+// A free number is reused before a new one is made. A reused number must start
+// with no components: whatever the last entity at this number had was cleared
+// when it was despawned.
+kayan_spawn: proc(w: *kayan_world) -> kayan_entity = {
+    e: kayan_entity = {};
+    if (w*.free_count > 0) {
+        w*.free_count -= 1;
+        e.index = w*.free[w*.free_count];
+    } else {
+        if (w*.count == 8) {
+            printfmt("the world is full\n");
+            exit(1);
+        }
+        e.index = w*.count;
+        w*.count += 1;
+    }
+    w*.alive[e.index] = true;
+    return e;
+}
+
+// The entity's components are dropped by lowering their flags, and its number
+// goes on the free list. The values stay in the arrays, unread.
+kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> void = {
+    w*.alive[e.index] = false;
+    w*.has_position[e.index] = false;
+    w*.has_velocity[e.index] = false;
+    w*.has_health[e.index] = false;
+    w*.free[w*.free_count] = e.index;
+    w*.free_count += 1;
+}
+
+set_position: proc(w: *kayan_world, e: kayan_entity, p: vec2) -> void = {
+    w*.positions[e.index] = p;
+    w*.has_position[e.index] = true;
+}
+
+set_velocity: proc(w: *kayan_world, e: kayan_entity, v: vec2) -> void = {
+    w*.velocities[e.index] = v;
+    w*.has_velocity[e.index] = true;
+}
+
+set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
+    w*.healths[e.index] = points;
+    w*.has_health[e.index] = true;
+}
+
+// Despawned entities have no flags left, so the system skips them without
+// knowing anything about despawning.
+movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
+    moved: u32 = 0;
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (w*.has_position[i] && w*.has_velocity[i]) {
+            w*.positions[i].x += w*.velocities[i].x * dt;
+            w*.positions[i].y += w*.velocities[i].y * dt;
+            moved += 1;
+        }
+    }
+    return moved;
+}
+
+print_world: proc(w: *kayan_world) -> void = {
+    for (i: u32 = 0; i < w*.count; i += 1) {
+        if (!w*.alive[i]) {
+            printfmt("    entity {}  (free)\n", i);
+            continue;
+        }
+        printfmt("    entity {}", i);
+        if (w*.has_position[i]) {
+            printfmt("  position ({:5.2}, {:5.2})", cast(w*.positions[i].x, f64), cast(w*.positions[i].y, f64));
+        } else {
+            printfmt("  position -              ");
+        }
+        if (w*.has_velocity[i]) {
+            printfmt("  velocity ({:5.2}, {:5.2})", cast(w*.velocities[i].x, f64), cast(w*.velocities[i].y, f64));
+        } else {
+            printfmt("  velocity -              ");
+        }
+        if (w*.has_health[i]) {
+            printfmt("  health {:.0}", cast(w*.healths[i], f64));
+        } else {
+            printfmt("  health -");
+        }
+        printfmt("\n");
+    }
+}
+
+main: proc() -> i32 = {
+    w: kayan_world = {};
+
+    turret: kayan_entity = kayan_spawn(w&);
+    set_position(w&, turret, { .x = 0.0, .y = 0.0 });
+    set_health(w&, turret, 500.0);
+
+    drone_a: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_a, { .x = 10.0, .y = 0.0 });
+    set_velocity(w&, drone_a, { .x = -1.0, .y = 0.5 });
+    set_health(w&, drone_a, 100.0);
+
+    drone_b: kayan_entity = kayan_spawn(w&);
+    set_position(w&, drone_b, { .x = 0.0, .y = 10.0 });
+    set_velocity(w&, drone_b, { .x = 0.5, .y = -1.0 });
+    set_health(w&, drone_b, 100.0);
+
+    // The turret remembers what it is aiming at, by number.
+    target: kayan_entity = drone_a;
+    printfmt("the turret targets entity {}, a drone\n", target.index);
+    print_world(w&);
+
+    printfmt("entity {} is destroyed and despawned\n", drone_a.index);
+    kayan_despawn(w&, drone_a);
+    print_world(w&);
+
+    // The turret fires. The bullet takes the first free number.
+    bullet: kayan_entity = kayan_spawn(w&);
+    set_position(w&, bullet, { .x = 0.0, .y = 0.0 });
+    set_velocity(w&, bullet, { .x = 4.0, .y = 4.0 });
+    printfmt("the turret fires: the bullet is entity {}\n", bullet.index);
+    _ = movement_system(w&, 0.5);
+    print_world(w&);
+
+    // Nothing told the turret its target died. Its number now names the bullet.
+    printfmt("the turret aims at entity {}, at ({:.2}, {:.2}), moving ({:.2}, {:.2})\n", target.index,
+        cast(w.positions[target.index].x, f64), cast(w.positions[target.index].y, f64),
+        cast(w.velocities[target.index].x, f64), cast(w.velocities[target.index].y, f64));
+    printfmt("    that is the turret's own bullet, not the drone: the number was reused\n");
+    return 0;
+}
