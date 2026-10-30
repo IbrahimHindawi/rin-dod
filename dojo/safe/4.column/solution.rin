@@ -1,0 +1,108 @@
+// The reference: one component's rows, kept as bytes, viewed as any type with
+// the same size and alignment.
+//
+// Safe subset: a column is type erasure, so the five procs that touch its
+// bytes are [trusted]: column_make, column_push_zeroed, column_swap_remove,
+// column_row and column_slice. Their signatures are the promise safe code
+// relies on: a row's slice has the row's length, the typed view has the
+// column's count, and a wrong type or row stops the program. column_len and
+// column_capacity only read, and are checked.
+
+import "std/cstd.rin"
+import "std/print.rin"
+import "std/memops.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+column: struct = {
+    // `count` rows of `size` bytes each, packed from the start, in a block
+    // from the region aligned to `align`, with room for `capacity` rows.
+    data: ^u8;
+    size: u64;
+    align: u64;
+    count: u64;
+    capacity: u64;
+    // The region's arena, where the blocks come from.
+    arena: ^memops_arena;
+}
+
+// An empty column of rows `size` bytes long, aligned to `align`, in region r.
+// A column holds alignments 1 to 16 that are powers of two; anything else
+// stops the program.
+column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level = {
+    if (align == 0 || align > 16 || (align & (align - 1)) != 0) {
+        printfmt("column: a column holds alignments 1 to 16 that are powers of two, not {}\n", align);
+        exit(1);
+    }
+    c: *column in level = new<column>(r);
+    c*.arena = r;
+    c*.size = size;
+    c*.align = align;
+    return c;
+}
+
+column_len: proc(c: *const column) -> u64 = {
+    return c*.count;
+}
+
+// How many rows fit before the column has to grow.
+column_capacity: proc(c: *const column) -> u64 = {
+    return c*.capacity;
+}
+
+// A new row at the end, zeroed; returns its row number. A full column doubles
+// first: a new block from the region, the rows copied into it. The old block
+// stays in the region, unused, and a slice taken before still points into it.
+column_push_zeroed: proc[trusted](c: *column) -> u64 = {
+    if (c*.count == c*.capacity) {
+        capacity: u64 = c*.capacity == 0 ? 4 : c*.capacity * 2;
+        data: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+        if (c*.count > 0) {
+            memcpy(data, c*.data, c*.size * c*.count);
+        }
+        c*.data = data;
+        c*.capacity = capacity;
+    }
+    row: u64 = c*.count;
+    c*.count += 1;
+    memset(c*.data[row * c*.size]&, 0, c*.size);
+    return row;
+}
+
+// The last row's bytes move into `row`, and the column is one row shorter.
+column_swap_remove: proc[trusted](c: *column, row: u64) -> void = {
+    if (row >= c*.count) {
+        printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
+        exit(1);
+    }
+    last: u64 = c*.count - 1;
+    if (row != last) {
+        memcpy(c*.data[row * c*.size]&, c*.data[last * c*.size]&, c*.size);
+    }
+    c*.count = last;
+}
+
+// One row's bytes. A row past the rows in use stops the program.
+column_row: proc[trusted](c: *const column, row: u64) -> []u8 = {
+    if (row >= c*.count) {
+        printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
+        exit(1);
+    }
+    return c*.data[row * c*.size..(row + 1) * c*.size];
+}
+
+// The rows in use as T's. Only a T of the column's size and alignment: the
+// column can't know the type, but it can refuse every type that can't be the
+// one it was made for.
+column_slice: proc[trusted]<T>(c: *const column) -> []T = {
+    size: u64 = sizeof(T);
+    align: u64 = alignof(T);
+    if (size != c*.size || align != c*.align) {
+        printfmt("column: a column of {}-byte rows aligned to {} read as a type of {} bytes aligned to {}\n",
+            c*.size, c*.align, size, align);
+        exit(1);
+    }
+    raw: ^T = cast(c*.data, ^T);
+    return raw[0..c*.count];
+}

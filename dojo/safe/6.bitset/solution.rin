@@ -1,0 +1,61 @@
+// The reference: a set of ids, 0 to 63, as the bits of a u64. Each proc is
+// one or two bit operations; the block is knowing which.
+
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// The set holding only `id`. The 1 is a u64, so ids 32 to 63 have a bit too.
+bitset_bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+bitset_with: proc(set: u64, id: u32) -> u64 = {
+    return set | bitset_bit(id);
+}
+
+bitset_without: proc(set: u64, id: u32) -> u64 = {
+    return set & ~bitset_bit(id);
+}
+
+bitset_has: proc(set: u64, id: u32) -> b32 = {
+    return (set & bitset_bit(id)) != 0;
+}
+
+// Every id of `wanted` is in `set`: masking `set` with `wanted` leaves all of
+// `wanted`. An empty `wanted` is in every set.
+bitset_contains_all: proc(set: u64, wanted: u64) -> b32 = {
+    return (set & wanted) == wanted;
+}
+
+bitset_intersects: proc(a: u64, b: u64) -> b32 = {
+    return (a & b) != 0;
+}
+
+// A query: all of `all`, and none of `none`.
+bitset_matches: proc(set: u64, all: u64, none: u64) -> b32 = {
+    return bitset_contains_all(set, all) && !bitset_intersects(set, none);
+}
+
+bitset_count: proc(set: u64) -> u32 = {
+    n: u32 = 0;
+    for (id: u32 = 0; id < 64; id += 1) {
+        if (bitset_has(set, id)) {
+            n += 1;
+        }
+    }
+    return n;
+}
+
+// The ids in the set, smallest first, written into `out`, which has room for
+// 64. Returns how many.
+bitset_ids: proc(set: u64, out: []u32) -> u32 = {
+    n: u32 = 0;
+    for (id: u32 = 0; id < 64; id += 1) {
+        if (bitset_has(set, id)) {
+            out[n] = id;
+            n += 1;
+        }
+    }
+    return n;
+}

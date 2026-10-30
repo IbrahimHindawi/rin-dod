@@ -1,0 +1,246 @@
+// Dojo 12, the playground: a watermark.
+//
+// A query keeps the list of tables it matches, so a system doesn't search for
+// them every frame. Tables are only ever added, at the end, and never removed.
+// So the query remembers how many it has looked at, its watermark, and an
+// update looks only at the tables past it:
+//
+//   tables   0 P   1 PV   2 PVH  |  3 PVHB   4 H
+//                                ^ movers has checked 3: an update looks at 3 and 4
+//
+// A frame with no new tables costs one comparison, and each query looks at
+// each table once, ever. This is the course's query (3.1), with the world's
+// tables reduced to their signatures.
+//
+// This program makes tables a few at a time and updates two queries. After
+// each step it draws the tables, and under them what each query has looked
+// at, with a | at its watermark. Then verify checks each query and says what
+// is wrong, if anything; break inside its `if` to stop there. To see an
+// update in a debugger, break on `query_update` and watch `from`, `checked`
+// and `found`.
+//
+// The switch: set use_watermark to 0 and run it again. Every update looks at
+// every table, from 0, so a query lists its tables again each time. It's a
+// global, read on every update, so a debugger can flip it mid-run too: stop
+// on `query_update`, set it to 0 in the watch window, and continue.
+//
+// Safe subset: a query is named by its place in `query_names`, since a struct
+// holding a C string is not a value safe code may write to, and the two
+// queries are shown one after the other instead of through an array of
+// pointers.
+
+import "std/print.rin"
+
+use_watermark: b32 = 1;
+
+// Four components, a bit each.
+position: u64 = 1;
+velocity: u64 = 2;
+health: u64 = 4;
+burning: u64 = 8;
+
+// The two queries' names; a query holds its place here.
+query_names: [2]^const char = { "movers", "healthy" };
+
+// The world's tables, as far as a query cares: a signature each, added at the
+// end and never removed.
+tables: struct = {
+    signatures: [8]u64;
+    count: u64;
+}
+
+tables_make: proc(t: *tables, signature: u64) -> void = {
+    t*.signatures[t*.count] = signature;
+    t*.count += 1;
+}
+
+query: struct = {
+    name: u32;
+    all: u64;
+    none: u64;
+    // The matching tables, by index.
+    found: [8]u32;
+    found_count: u64;
+    // The watermark: tables 0 to checked - 1 have been looked at.
+    checked: u64;
+    // How many times an update has looked at a table.
+    scanned: u64;
+}
+
+matches: proc(signature: u64, all: u64, none: u64) -> b32 = {
+    return (signature & all) == all && (signature & none) == 0;
+}
+
+query_make: proc(name: u32, all: u64, none: u64) -> query = {
+    q: query = {};
+    q.name = name;
+    q.all = all;
+    q.none = none;
+    return q;
+}
+
+query_update: proc(q: *query, t: *tables) -> void = {
+    from: u64 = 0;
+    if (use_watermark) {
+        from = q*.checked;
+    }
+    for (ti: u64 = from; ti < t*.count; ti += 1) {
+        q*.scanned += 1;
+        if (matches(t*.signatures[ti], q*.all, q*.none)) {
+            q*.found[q*.found_count] = cast(ti, u32);
+            q*.found_count += 1;
+        }
+    }
+    q*.checked = t*.count;
+}
+
+query_found: proc(q: *query) -> []u32 = {
+    return q*.found[0..q*.found_count];
+}
+
+print_list: proc(items: []u32) -> void = {
+    if (items.length == 0) {
+        printfmt("none");
+    }
+    for (i: u64 = 0; i < items.length; i += 1) {
+        if (i > 0) {
+            printfmt(" ");
+        }
+        printfmt("{}", items[i]);
+    }
+}
+
+// The invariant: a query lists the tables below its watermark that match,
+// each once, in order, and it has looked at each of those tables once.
+verify: proc(t: *tables, q: *query) -> void = {
+    want: [8]u32 = {};
+    want_count: u64 = 0;
+    for (ti: u64 = 0; ti < q*.checked; ti += 1) {
+        if (matches(t*.signatures[ti], q*.all, q*.none)) {
+            want[want_count] = cast(ti, u32);
+            want_count += 1;
+        }
+    }
+    same: b32 = want_count == q*.found_count;
+    for (i: u64 = 0; same && i < want_count; i += 1) {
+        same = want[i] == q*.found[i];
+    }
+    if (!same) {
+        printfmt("    verify: {} lists tables ", query_names[q*.name]);
+        print_list(query_found(q));
+        printfmt("; it should list ");
+        print_list(want[0..want_count]);
+        printfmt("\n");
+    }
+    if (q*.scanned != q*.checked) {
+        printfmt("    verify: {} has looked at {} tables to check {}; each should be looked at once\n",
+            query_names[q*.name], q*.scanned, q*.checked);
+    }
+}
+
+// The components in a signature, a letter each, padded to `width` columns.
+print_letters: proc(signature: u64, width: u64) -> void = {
+    names: [4]c8 = { 'P', 'V', 'H', 'B' };
+    n: u64 = 0;
+    for (i: u64 = 0; i < 4; i += 1) {
+        if (((signature shr i) & 1) == 1) {
+            printfmt("{}", names[i]);
+            n += 1;
+        }
+    }
+    for (k: u64 = n; k < width; k += 1) {
+        printfmt(" ");
+    }
+}
+
+has_found: proc(q: *query, table: u64) -> b32 = {
+    for (i: u64 = 0; i < q*.found_count; i += 1) {
+        if (cast(q*.found[i], u64) == table) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The tables, then a row per query: yes or - for each table it has looked at,
+// and a | at its watermark.
+// A query's row: yes or - for each table it has looked at, and a | at its
+// watermark.
+show_query: proc(t: *tables, q: *query) -> void = {
+    printfmt("    {:-10}", query_names[q*.name]);
+    for (ti: u64 = 0; ti < q*.checked; ti += 1) {
+        printfmt("{}", has_found(q, ti) ? "yes  " : "-    ");
+    }
+    printfmt("|    ");
+    for (ti: u64 = q*.checked; ti < t*.count; ti += 1) {
+        printfmt("     ");
+    }
+    printfmt("checked {}, scanned {}, tables ", q*.checked, q*.scanned);
+    print_list(query_found(q));
+    printfmt("\n");
+}
+
+// The tables, then a row per query.
+show: proc(t: *tables, a: *query, b: *query) -> void = {
+    printfmt("    table");
+    for (ti: u64 = 0; ti < t*.count; ti += 1) {
+        if (ti == 0) {
+            printfmt("     {}", ti);
+        } else {
+            printfmt("    {}", ti);
+        }
+    }
+    printfmt("\n    has       ");
+    for (ti: u64 = 0; ti < t*.count; ti += 1) {
+        print_letters(t*.signatures[ti], ti + 1 < t*.count ? 5 : 0);
+    }
+    printfmt("\n");
+    show_query(t, a);
+    show_query(t, b);
+    verify(t, a);
+    verify(t, b);
+}
+
+main: proc() -> i32 = {
+    t: tables = {};
+    movers: query = query_make(0, position | velocity, 0);
+    healthy: query = query_make(1, health, burning);
+    printfmt("components: P position, V velocity, H health, B burning\n");
+    printfmt("movers: all {}, none {}; healthy: all {}, none {}\n", "{P V}", "{}", "{H}", "{B}");
+
+    printfmt("make tables 0 to 2\n");
+    tables_make(t&, position);
+    tables_make(t&, position | velocity);
+    tables_make(t&, position | velocity | health);
+    show(t&, movers&, healthy&);
+
+    printfmt("update movers: it looks at tables 0 to 2\n");
+    query_update(movers&, t&);
+    show(t&, movers&, healthy&);
+
+    printfmt("update movers again: no new tables, so it looks at nothing\n");
+    query_update(movers&, t&);
+    show(t&, movers&, healthy&);
+
+    printfmt("make tables 3 and 4\n");
+    tables_make(t&, position | velocity | health | burning);
+    tables_make(t&, health);
+    show(t&, movers&, healthy&);
+
+    printfmt("update movers: it looks at tables 3 and 4 only\n");
+    query_update(movers&, t&);
+    show(t&, movers&, healthy&);
+
+    printfmt("update healthy, for the first time: it looks at all five\n");
+    query_update(healthy&, t&);
+    show(t&, movers&, healthy&);
+
+    printfmt("make table 5\n");
+    tables_make(t&, velocity | health);
+    show(t&, movers&, healthy&);
+
+    printfmt("update healthy: it looks at table 5 only\n");
+    query_update(healthy&, t&);
+    show(t&, movers&, healthy&);
+    return 0;
+}

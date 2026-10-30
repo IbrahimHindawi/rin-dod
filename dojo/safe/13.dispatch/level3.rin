@@ -1,0 +1,45 @@
+// Level 3: a blank page. Write the schedule from memory.
+//
+// Start it with: python tools/dojo.py start dispatch 3
+//
+// The harness needs exactly this, and checks what each does. It provides ctx,
+// what a system is given when it runs, and vec<T>, option<T> and the region
+// `level` are given:
+//
+//   system_proc: alias = *proc(c: *ctx) -> void           a system: a proc pointer
+//   schedule: struct
+//   schedule_make: proc(r: region level) -> *schedule in level
+//   schedule_add: proc(s: *schedule, r: region level, name: ^const char, run: system_proc) -> void
+//                                              at the end, enabled
+//   schedule_insert_before: proc(s: *schedule, r: region level, before: ^const char,
+//                                name: ^const char, run: system_proc) -> b32
+//                                              just before `before`, enabled; 0, and
+//                                              nothing added, if it isn't there
+//   schedule_remove: proc(s: *schedule, name: ^const char) -> b32
+//                                              0 if it isn't there
+//   schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32
+//                                              a disabled system keeps its place
+//   schedule_run: proc(s: *schedule, c: *ctx) -> void
+//                                              every enabled system, once, in order
+//   schedule_len: proc(s: *schedule) -> u64    how many systems, enabled or not
+//   schedule_name: proc(s: *schedule, i: u64) -> ^const char
+//                                              the name of the i-th to run
+//   schedule_calls: proc(s: *schedule, name: ^const char) -> u32
+//                                              times schedule_run has called it since
+//                                              it was added; 0 if it isn't there
+//
+// Names are C strings: compare them with dojo_cstr_equal. A C string and a
+// proc pointer are pointers without a region, so a struct holding them is a
+// carrier: safe code holds it only through a pointer into the region, made
+// by a proc marked [trusted], with memops_arena_push_zero(r, sizeof(T),
+// alignof(T)) cast to '*T in level', and never writes its fields. Keep what
+// changes, enabled and the count, beside that pointer.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

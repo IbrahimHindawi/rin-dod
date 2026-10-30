@@ -1,0 +1,184 @@
+// The harness for dojo 1, the free list and generations. It is fixed. Your
+// work is kata.rin, beside it: kata.rin imports this file, which has main, so
+// the two are one program. The reference, solution.rin, and each level file do
+// the same, so each of them builds on its own, and this file never does. Build
+// and run yours with
+//
+//   python tools/dojo.py free_list
+//
+// First a short scenario, the same steps as the playground, each printed as
+// it passes. Then a fuzz run: thousands of random allocs and frees from a
+// seed, each checked against a model that remembers, per index, the last
+// generation handed out and whether the index is free. The model doesn't care
+// how kata.rin works inside, only that what it does is right, so any correct
+// design passes, including the level 4 variations.
+//
+// Safe subset: the arena is the region `level`, opened in main; the kata is
+// made in it with handles_make, and the model and the formatter live in it.
+
+import "../dojo.rin"
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    h: *handles in level = handles_make(r);
+    f: *fmt in level = fmt_make(r, 64);
+
+    a: dojo_handle = handles_alloc(h);
+    b: dojo_handle = handles_alloc(h);
+    c: dojo_handle = handles_alloc(h);
+    fmt_reset(f);
+    dojo_fmt_handle(f, a);
+    fmt_char(f, ' ');
+    dojo_fmt_handle(f, b);
+    fmt_char(f, ' ');
+    dojo_fmt_handle(f, c);
+    dojo_same("alloc a, b, c", fmt_text(f), "0:1 1:1 2:1");
+    dojo_same("free b", dojo_status_name(handles_free(h, b)), "ok");
+    dojo_same("b is alive", dojo_bool_name(handles_alive(h, b)), "false");
+    dojo_same("free b again", dojo_status_name(handles_free(h, b)), "dead");
+    d: dojo_handle = handles_alloc(h);
+    fmt_reset(f);
+    dojo_fmt_handle(f, d);
+    dojo_same("alloc d, b's index in its next life", fmt_text(f), "1:2");
+    dojo_same("b is alive", dojo_bool_name(handles_alive(h, b)), "false");
+    dojo_same("d is alive", dojo_bool_name(handles_alive(h, d)), "true");
+    nobody: dojo_handle = {};
+    dojo_same("a zeroed handle is alive", dojo_bool_name(handles_alive(h, nobody)), "false");
+    fmt_reset(f);
+    fmt_u64(f, handles_live(h));
+    fmt_char(f, ' ');
+    fmt_u64(f, handles_slots(h));
+    dojo_same("live, slots", fmt_text(f), "3 3");
+    e: dojo_handle = handles_alloc(h);
+    fmt_reset(f);
+    dojo_fmt_handle(f, e);
+    dojo_same("alloc e, nothing free: a new index", fmt_text(f), "3:1");
+}
+
+// What a correct allocator must do, kept the simple way: per index, the last
+// generation handed out and whether it is free; and lists of the handles alive
+// and dead.
+model: struct = {
+    last: *vec<u32> in level;
+    is_free: *vec<b32> in level;
+    free_count: u64;
+    alive: *vec<dojo_handle> in level;
+    dead: *vec<dojo_handle> in level;
+}
+
+model_make: proc(r: region level) -> *model in level = {
+    return new<model>(r, {
+        .last = vec<u32>make(r, 0),
+        .is_free = vec<b32>make(r, 0),
+        .alive = vec<dojo_handle>make(r, 0),
+        .dead = vec<dojo_handle>make(r, 0),
+    });
+}
+
+fail_handle: proc(run: *dojo_run, op: u64, what: ^const char, h: dojo_handle) -> void = {
+    dojo_fail(run, op);
+    printfmt("{} {}:{}\n", what, h.index, h.generation);
+    dojo_failed(run, op);
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    h: *handles in level = handles_make(r);
+    m: *model in level = model_make(r);
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 50 || m*.alive*.length == 0) {
+            if (dojo_before(run, op)) {
+                printfmt("alloc()\n");
+            }
+            got: dojo_handle = handles_alloc(h);
+            i: u64 = cast(got.index, u64);
+            if (m*.free_count == 0) {
+                if (i != m*.last*.length) {
+                    dojo_fail(run, op);
+                    printfmt("alloc returned {}:{} with nothing free; the next new index is {}\n",
+                        got.index, got.generation, m*.last*.length);
+                    dojo_failed(run, op);
+                }
+                _ = vec<u32>push(m*.last, 0);
+                _ = vec<b32>push(m*.is_free, 0);
+            } else {
+                if (i >= m*.last*.length || !vec<b32>at(m*.is_free, i)*) {
+                    dojo_fail(run, op);
+                    printfmt("alloc returned {}:{}, but index {} is not free, and {} freed indices wait\n",
+                        got.index, got.generation, got.index, m*.free_count);
+                    dojo_failed(run, op);
+                }
+                vec<b32>at(m*.is_free, i)* = 0;
+                m*.free_count -= 1;
+            }
+            if (got.generation <= vec<u32>at(m*.last, i)*) {
+                fail_handle(run, op, "alloc handed out a generation it has handed out before:", got);
+            }
+            vec<u32>at(m*.last, i)* = got.generation;
+            if (!handles_alive(h, got)) {
+                fail_handle(run, op, "alloc returned a handle that alive() says is dead:", got);
+            }
+            _ = vec<dojo_handle>push(m*.alive, got);
+        } else if (roll < 90) {
+            at: u64 = dojo_rng_below(rng&, m*.alive*.length);
+            victim: dojo_handle = vec<dojo_handle>at(m*.alive, at)*;
+            last: dojo_handle = vec<dojo_handle>pop(m*.alive);
+            if (at < m*.alive*.length) {
+                vec<dojo_handle>at(m*.alive, at)* = last;
+            }
+            if (dojo_before(run, op)) {
+                printfmt("free({}:{})\n", victim.index, victim.generation);
+            }
+            if (handles_free(h, victim) != dojo_status.ok) {
+                fail_handle(run, op, "free returned dead for a live handle,", victim);
+            }
+            if (handles_alive(h, victim)) {
+                fail_handle(run, op, "after free, alive() is still true for", victim);
+            }
+            vec<b32>at(m*.is_free, cast(victim.index, u64))* = 1;
+            m*.free_count += 1;
+            _ = vec<dojo_handle>push(m*.dead, victim);
+        } else if (m*.dead*.length > 0) {
+            stale: dojo_handle = vec<dojo_handle>at(m*.dead, dojo_rng_below(rng&, m*.dead*.length))*;
+            if (dojo_before(run, op)) {
+                printfmt("free({}:{}), a dead handle\n", stale.index, stale.generation);
+            }
+            live: u64 = handles_live(h);
+            if (handles_free(h, stale) != dojo_status.dead || handles_live(h) != live) {
+                fail_handle(run, op, "free of a dead handle should return dead and change nothing:", stale);
+            }
+        }
+        if (handles_live(h) != m*.alive*.length || handles_slots(h) != m*.last*.length) {
+            dojo_fail(run, op);
+            printfmt("live() and slots() are {} and {}, the model says {} and {}\n",
+                handles_live(h), handles_slots(h), m*.alive*.length, m*.last*.length);
+            dojo_failed(run, op);
+        }
+        if (op % 256 == 0) {
+            for (k: u64 = 0; k < m*.alive*.length; k += 1) {
+                x: dojo_handle = vec<dojo_handle>at(m*.alive, k)*;
+                if (!handles_alive(h, x)) {
+                    fail_handle(run, op, "this handle should be alive:", x);
+                }
+            }
+            for (k: u64 = 0; k < m*.dead*.length; k += 1) {
+                x: dojo_handle = vec<dojo_handle>at(m*.dead, k)*;
+                if (handles_alive(h, x)) {
+                    fail_handle(run, op, "this handle should be dead:", x);
+                }
+            }
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "free_list", "1. free list and generations");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

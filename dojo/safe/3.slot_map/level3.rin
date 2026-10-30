@@ -1,0 +1,27 @@
+// Level 3: a blank page. Write the slot map from memory.
+//
+// Start it with: python tools/dojo.py start slot_map 3
+//
+// The harness needs exactly this, and checks what each does. dojo_handle
+// ({ index: u32; generation: u32; }) is given, in dojo/dojo.rin, as are
+// vec<T>, option<T> and the region `level`.
+//
+//   slot_map: struct
+//   slot_map_make: proc(r: region level) -> *slot_map in level
+//   slot_map_insert: proc(m: *slot_map, value: u64) -> dojo_handle      reuses a freed index first
+//   slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64>  keeps the rows packed
+//   slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32
+//   slot_map_get: proc(m: *slot_map, h: dojo_handle) -> ?*u64            null if h is dead
+//   slot_map_len: proc(m: *slot_map) -> u64
+//   slot_map_values: proc(m: *slot_map) -> []u64                        packed, in row order
+//   slot_map_handles: proc(m: *slot_map) -> []dojo_handle               handles[row] owns values[row]
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

@@ -1,0 +1,23 @@
+// Level 3: a blank page. Write the interner from memory, its hash table too.
+//
+// Start it with: python tools/dojo.py start interning 3
+//
+// The harness needs exactly this, and checks what each does. Write the table
+// yourself, without std's hashmap: a power-of-two vec of slots, linear
+// probing, grown before it's 3/4 full. vec<T>, option<T> and the region
+// `level` are given.
+//
+//   interner: struct
+//   interner_make: proc(r: region level) -> *interner in level
+//   interner_intern: proc(t: *interner, key: u64) -> u32           its id; a new key gets the next one, from 0
+//   interner_find: proc(t: *interner, key: u64) -> option<u32>     none if it was never interned
+//   interner_key: proc(t: *interner, id: u32) -> u64               the key interned as id
+//   interner_len: proc(t: *interner) -> u64                        how many keys
+
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

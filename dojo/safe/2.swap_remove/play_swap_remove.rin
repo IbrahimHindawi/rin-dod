@@ -1,0 +1,144 @@
+// Dojo 2, the playground: swap-remove and the back-reference.
+//
+// Systems loop over values, so values are kept packed: one after another, no
+// holes, nothing to skip. Removing one from the middle would leave a hole, so
+// the last value moves into it instead. That's swap-remove: one copy, however
+// many values there are. The price is that values move, so an id can't be the
+// position of its value. Two arrays keep track:
+//
+//   * sparse, by id: rows[id] is the row id's value is in now;
+//   * packed, by row: ids[row] is the id that owns the row, the
+//     back-reference. When the last row moves, it says whose entry in `rows`
+//     to fix.
+//
+// This is what EnTT calls a sparse set, and what the ECS course's tables do
+// in 1.4 and 2.3.
+//
+// This program inserts four values, removes one from the middle, and draws
+// both sides after each step. To see it in a debugger, break on
+// `sparse_set_remove` and watch `ids` and `rows` as the last row moves.
+//
+// The switch: set fix_back_reference to 0 and run it again. The moved id's row
+// still points where its value used to be, and the next insert writes another
+// id's value there. It's a global, read each time it's used, so a debugger can
+// flip it mid-run too: stop on sparse_set_remove, set it to 0 in the watch
+// window, and continue.
+
+import "std/print.rin"
+
+fix_back_reference: b32 = 1;
+
+sparse_set: struct = {
+    values: [8]u64;
+    ids: [8]u32;
+    count: u32;
+    // rows[id] is one more than id's row, so 0 means id has no value.
+    rows: [16]u32;
+}
+
+sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> void = {
+    s*.rows[id] = s*.count + 1;
+    s*.values[s*.count] = value;
+    s*.ids[s*.count] = id;
+    s*.count += 1;
+}
+
+sparse_set_remove: proc(s: *sparse_set, id: u32) -> void = {
+    if (s*.rows[id] == 0) {
+        return;
+    }
+    row: u32 = s*.rows[id] - 1;
+    s*.rows[id] = 0;
+    last: u32 = s*.count - 1;
+    s*.values[row] = s*.values[last];
+    s*.ids[row] = s*.ids[last];
+    s*.count = last;
+    if (row < last && fix_back_reference) {
+        s*.rows[s*.ids[row]] = row + 1;
+    }
+}
+
+// id's value through its row, or 0 for nothing. A row past the end reads
+// nothing; a row that is wrong but in range reads someone else's value.
+sparse_set_get: proc(s: *sparse_set, id: u32) -> u64 = {
+    if (s*.rows[id] == 0 || s*.rows[id] - 1 >= s*.count) {
+        return 0;
+    }
+    return s*.values[s*.rows[id] - 1];
+}
+
+draw: proc(s: *sparse_set) -> void = {
+    printfmt("    row     ");
+    for (r: u32 = 0; r < s*.count; r += 1) {
+        printfmt("{:5}", r);
+    }
+    printfmt("\n    ids     ");
+    for (r: u32 = 0; r < s*.count; r += 1) {
+        printfmt("{:5}", s*.ids[r]);
+    }
+    printfmt("\n    values  ");
+    for (r: u32 = 0; r < s*.count; r += 1) {
+        printfmt("{:5}", cast(s*.values[r], u32));
+    }
+    printfmt("\n    rows    ");
+    first: b32 = 1;
+    for (id: u32 = 0; id < 16; id += 1) {
+        if (s*.rows[id] != 0) {
+            if (!first) {
+                printfmt("  ");
+            }
+            printfmt("{}->{}", id, s*.rows[id] - 1);
+            first = 0;
+        }
+    }
+    printfmt("  (id -> row)\n");
+}
+
+read: proc(s: *sparse_set, id: u32) -> void = {
+    value: u64 = sparse_set_get(s, id);
+    if (value == 0) {
+        printfmt("nothing");
+    } else {
+        printfmt("{}", value);
+    }
+}
+
+main: proc() -> i32 = {
+    s: sparse_set = {};
+    printfmt("insert 3, 7, 1, 5, each with a value of ten times its id\n");
+    ids: [4]u32 = { 3, 7, 1, 5 };
+    for (i: u32 = 0; i < 4; i += 1) {
+        sparse_set_insert(s&, ids[i], cast(ids[i], u64) * 10);
+    }
+    draw(s&);
+
+    printfmt("remove 7, in row 1: the last row, 5's, moves into the hole\n");
+    sparse_set_remove(s&, 7);
+    draw(s&);
+    printfmt("    get 5: ");
+    read(s&, 5);
+    printfmt("\n    get 7: ");
+    read(s&, 7);
+    printfmt("\n");
+
+    printfmt("insert 9: a new row at the end\n");
+    sparse_set_insert(s&, 9, 90);
+    draw(s&);
+    printfmt("    get 5: ");
+    read(s&, 5);
+    printfmt("\n    get 9: ");
+    read(s&, 9);
+    printfmt("\n");
+
+    printfmt("remove 3, in row 0: the last row, 9's, moves into it\n");
+    sparse_set_remove(s&, 3);
+    draw(s&);
+    printfmt("    get 9: ");
+    read(s&, 9);
+    printfmt("  get 5: ");
+    read(s&, 5);
+    printfmt("  get 1: ");
+    read(s&, 1);
+    printfmt("\n");
+    return 0;
+}

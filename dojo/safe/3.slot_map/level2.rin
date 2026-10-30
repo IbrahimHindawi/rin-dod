@@ -1,0 +1,72 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start slot_map 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// One slot per index: the life it is in now (or next, if it is free), and the
+// row its value is in while it is alive.
+slot_map_slot: struct = {
+    generation: u32;
+    row: u32;
+}
+
+slot_map: struct = {
+    slots: *vec<slot_map_slot> in level;
+    free: *vec<u32> in level;
+    // Packed: values[row] belongs to handles[row].
+    values: *vec<u64> in level;
+    handles: *vec<dojo_handle> in level;
+}
+
+slot_map_make: proc(r: region level) -> *slot_map in level = {
+    return new<slot_map>(r, { .slots = vec<slot_map_slot>make(r, 0), .free = vec<u32>make(r, 0), .values = vec<u64>make(r, 0), .handles = vec<dojo_handle>make(r, 0) });
+}
+
+// The value goes in a new row at the end; its handle reuses a freed index
+// before making a new one.
+slot_map_insert: proc(m: *slot_map, value: u64) -> dojo_handle = {
+    h: dojo_handle = {};
+    return h;
+}
+
+// Is h alive?
+slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32 = {
+    return 0;
+}
+
+// Handle, slot, row, value: the value to read or to change, or null if h is
+// dead.
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> ?*u64 = {
+    return null;
+}
+
+// A live handle's value comes back, and no handle to it is alive again. The
+// rows stay packed. A dead handle gives none and changes nothing.
+slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64> = {
+    return option<u64>none();
+}
+
+// How many values.
+slot_map_len: proc(m: *slot_map) -> u64 = {
+    return 0;
+}
+
+// The values, packed, in row order.
+slot_map_values: proc(m: *slot_map) -> []u64 = {
+    return vec<u64>items(m*.values);
+}
+
+// handles[row] is the handle that owns values[row].
+slot_map_handles: proc(m: *slot_map) -> []dojo_handle = {
+    return vec<dojo_handle>items(m*.handles);
+}

@@ -1,9 +1,37 @@
-# The entity lessons, in rin's safe subset
+# The ECS course, in rin's safe subset
 
-The four programs here are `ecs/src/1.entities/*` checked by rin with its
-safety rules on (the default on the `regions` branch of the compiler; the rest
-of the course still needs `--unsafe`). They print the same `.expected` files as
-the originals, so `tools/check.py` runs them beside the originals.
+The fifteen programs here are `ecs/src/*` checked by rin with its safety
+rules on, the default on the `regions` branch of the compiler. They print the
+same `.expected` files as the originals, so `tools/check.py` runs them beside
+the originals, and they run clean under AddressSanitizer and
+UndefinedBehaviorSanitizer.
+
+**Part 1, entities.** No regions at all: the world stays a value on `main`'s
+stack and procs take `*kayan_world`. What changed is below.
+
+**Part 2, components.** The world moves into a region, `level: region;`, and
+is made whole by `kayan_world_make(r: region level)`: its vecs are
+`*vec<T> in level`, its tables are level pointers in a vec so a table pointer
+never moves, and every allocating proc takes the region. The type-erased
+column, bytes addressed by a size and an alignment, is the one thing that is
+unsafe by nature; it is two `[trusted]` procs, the aligned grow and the typed
+`[]T` view over the bytes, and 2.7 adds a third that prints a builtin by its
+type name. Everything above them is checked: `kayan_get<T>` returns `?*T`,
+row copies are bounds-checked byte loops, the registry is
+`[64]?*const reflect in permanent`.
+
+**Part 3, systems.** The frame arena becomes `frame: region in level;`, opened
+once per frame by `run_frame`; the command buffer is made inside it, so no
+command can outlive its frame by construction and the old
+`memops_arena_clear` is gone. A system is split into its immutable half, a
+name and a proc pointer, and its scheduled half with the query and counters;
+the `*void` context became a typed `?*game in level`. Ten or eleven trusted
+procs per lesson, all in the byte core; the whole game in 3.4 is checked.
+
+The header comment of each file lists its trusted procs and says what each
+does.
+
+## Part 1, in detail
 
 What changed, which is the whole annotation cost of this part of the course:
 

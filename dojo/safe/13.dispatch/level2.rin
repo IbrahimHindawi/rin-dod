@@ -1,0 +1,103 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start dispatch 2
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A system is a plain pointer to a proc.
+system_proc: alias = *proc(c: *ctx) -> void;
+
+// A system as it was given: its name and its proc. A C string and a proc
+// pointer are pointers without a region, so safe code holds this only through
+// a pointer into the region, made by the trusted proc below, and never writes
+// its fields.
+schedule_system: struct = {
+    name: ^const char;
+    run: system_proc;
+}
+
+schedule_system_make: proc[trusted](r: region level, name: ^const char, run: system_proc) -> *schedule_system in level = {
+    s: *schedule_system in level = cast(memops_arena_push_zero(r, sizeof(schedule_system), alignof(schedule_system)),
+        *schedule_system in level);
+    s*.name = name;
+    s*.run = run;
+    return s;
+}
+
+// A system in the schedule: which, whether it runs, and how many times
+// schedule_run has called it.
+schedule_entry: struct = {
+    system: *schedule_system in level;
+    enabled: b32;
+    calls: u32;
+}
+
+schedule: struct = {
+    // In the order they run.
+    systems: *vec<schedule_entry> in level;
+}
+
+// An empty schedule in the region, its vec made there too.
+schedule_make: proc(r: region level) -> *schedule in level = {
+    return new<schedule>(r, { .systems = vec<schedule_entry>make(r, 0) });
+}
+
+// Where the system called `name` is in the list, if it's there. Names are C
+// strings: compare them with dojo_cstr_equal.
+schedule_find: proc(s: *schedule, name: ^const char) -> option<u64> = {
+    return option<u64>none();
+}
+
+// At the end: it runs after every system already there.
+schedule_add: proc(s: *schedule, r: region level, name: ^const char, run: system_proc) -> void = {
+    // A new system, enabled, at the end.
+}
+
+// Just before `before`, so it runs first. 0, and nothing added, if there is
+// no `before`.
+schedule_insert_before: proc(s: *schedule, r: region level, before: ^const char, name: ^const char,
+                             run: system_proc) -> b32 = {
+    // A new system, enabled, just before the one called `before`.
+    return 0;
+}
+
+// The others keep their order.
+schedule_remove: proc(s: *schedule, name: ^const char) -> b32 = {
+    // Take it out of the list.
+    return 0;
+}
+
+// A disabled system keeps its place, and is skipped.
+schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
+    // Switch it on or off, in its place.
+    return 0;
+}
+
+// One frame: every enabled system, once, in order.
+schedule_run: proc(s: *schedule, c: *ctx) -> void = {
+    // Call every enabled system, once, in order, and count it.
+}
+
+// How many systems, enabled or not.
+schedule_len: proc(s: *schedule) -> u64 = {
+    return 0;
+}
+
+// The name of the i-th system to run.
+schedule_name: proc(s: *schedule, i: u64) -> ^const char = {
+    return "";
+}
+
+// How many times schedule_run has called the system; 0 if there's none by
+// that name.
+schedule_calls: proc(s: *schedule, name: ^const char) -> u32 = {
+    return 0;
+}

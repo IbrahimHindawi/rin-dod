@@ -1,0 +1,317 @@
+// Dojo 5, the playground: a command buffer.
+//
+// Systems walk tables, and while they walk they decide to change which things
+// exist: a bullet's time is up, a turret fires. Doing it on the spot breaks the
+// walk. A despawn swap-removes, so the last row moves into the hole, behind the
+// loop, and is never looked at. So a system records the change instead, a
+// command, and the frame applies every command, in order, once no one is
+// walking anything:
+//
+//   * a spawn has no handle until it is applied, so the buffer hands back a
+//     pending number, and later commands can name the spawn by it;
+//   * a command whose target died earlier in the same buffer is skipped, which
+//     generations make one comparison;
+//   * the buffer is cleared after it is applied, and keeps its memory for the
+//     next frame: a frame arena.
+//
+// This program builds a small packed world, runs one frame of three systems,
+// and prints every command, then the buffer being applied. Break on
+// `commands_apply` in a debugger and step through the list.
+//
+// The switch: set defer to 0, so the systems change the world on the spot, and
+// run it again. Look at which things are left with no life. It's a global, so
+// a debugger can flip it too: the frame reads it once, at its start, so it's
+// all one way or the other; stop on that line, set it to 0 in the watch window,
+// and continue.
+//
+// Safe subset: the world and the buffer live in the region `level`, opened in
+// main, where the original had an arena.
+
+import "std/print.rin"
+import "std/memops.rin"
+import "std/vec.rin"
+
+level: region;
+
+defer: b32 = 1;
+
+handle: struct = {
+    index: u32;
+    generation: u32;
+}
+
+slot: struct = {
+    generation: u32;
+    row: u64;
+}
+
+// A packed world, like the course's tables: things in rows 0 to count - 1,
+// each with a life in frames, and a slot per index that says which row it is
+// in.
+world: struct = {
+    slots: *vec<slot> in level;
+    free: *vec<u32> in level;
+    owners: *vec<handle> in level;
+    lives: *vec<u32> in level;
+}
+
+world_make: proc(r: region level) -> *world in level = {
+    return new<world>(r, {
+        .slots = vec<slot>make(r, 0), .free = vec<u32>make(r, 0),
+        .owners = vec<handle>make(r, 0), .lives = vec<u32>make(r, 0) });
+}
+
+world_alive: proc(w: *world, h: handle) -> b32 = {
+    return cast(h.index, u64) < w*.slots*.length
+        && vec<slot>at(w*.slots, cast(h.index, u64))*.generation == h.generation;
+}
+
+world_spawn: proc(w: *world, life: u32) -> handle = {
+    index: u32 = 0;
+    if (!vec<u32>is_empty(w*.free)) {
+        index = vec<u32>pop(w*.free);
+    } else {
+        index = cast(w*.slots*.length, u32);
+        _ = vec<slot>push(w*.slots, { .generation = 1 });
+    }
+    s: *slot = vec<slot>at(w*.slots, cast(index, u64));
+    s*.row = w*.owners*.length;
+    h: handle = { .index = index, .generation = s*.generation };
+    _ = vec<handle>push(w*.owners, h);
+    _ = vec<u32>push(w*.lives, life);
+    return h;
+}
+
+// What a despawn did: 0 refused, the target was dead; 1 the last row moved
+// into the hole, into `moved`; 2 the target was the last row.
+despawn_result: struct = {
+    what: u32;
+    moved: handle;
+}
+
+world_despawn: proc(w: *world, h: handle) -> despawn_result = {
+    result: despawn_result = {};
+    if (!world_alive(w, h)) {
+        return result;
+    }
+    s: *slot = vec<slot>at(w*.slots, cast(h.index, u64));
+    row: u64 = s*.row;
+    s*.generation += 1;
+    _ = vec<u32>push(w*.free, h.index);
+    last_owner: handle = vec<handle>pop(w*.owners);
+    last_life: u32 = vec<u32>pop(w*.lives);
+    if (row == w*.owners*.length) {
+        result.what = 2;
+        return result;
+    }
+    vec<handle>at(w*.owners, row)* = last_owner;
+    vec<u32>at(w*.lives, row)* = last_life;
+    vec<slot>at(w*.slots, cast(last_owner.index, u64))*.row = row;
+    result.what = 1;
+    result.moved = last_owner;
+    return result;
+}
+
+world_set_life: proc(w: *world, h: handle, life: u32) -> b32 = {
+    if (!world_alive(w, h)) {
+        return 0;
+    }
+    row: u64 = vec<slot>at(w*.slots, cast(h.index, u64))*.row;
+    vec<u32>at(w*.lives, row)* = life;
+    return 1;
+}
+
+draw: proc(w: *world) -> void = {
+    for (row: u64 = 0; row < w*.owners*.length; row += 1) {
+        h: handle = vec<handle>at(w*.owners, row)*;
+        printfmt("    row {}  {}:{}  life {}\n", row, h.index, h.generation, vec<u32>at(w*.lives, row)*);
+    }
+}
+
+print_despawned: proc(r: despawn_result, h: handle) -> void = {
+    if (r.what == 1) {
+        printfmt("ok, {}:{} moves into {}:{}'s row\n", r.moved.index, r.moved.generation, h.index, h.generation);
+    } else if (r.what == 2) {
+        printfmt("ok, it was the last row\n");
+    } else {
+        printfmt("skipped, {}:{} is dead\n", h.index, h.generation);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The buffer
+// ---------------------------------------------------------------------------
+
+command_kind: enum = {
+    spawn,
+    set_life,
+    despawn,
+}
+
+// A command, and who it is for: a handle, or the `spawn`-th spawn of this
+// buffer if `to_pending` is set.
+command: struct = {
+    kind: command_kind;
+    to_pending: b32;
+    entity: handle;
+    spawn: u64;
+    life: u32;
+}
+
+commands: struct = {
+    list: *vec<command> in level;
+    spawns: u64;
+    spawned: *vec<handle> in level;
+}
+
+commands_make: proc(r: region level) -> *commands in level = {
+    return new<commands>(r, { .list = vec<command>make(r, 0), .spawned = vec<handle>make(r, 0) });
+}
+
+print_target: proc(c: command) -> void = {
+    if (c.to_pending) {
+        printfmt("pending {}", c.spawn);
+    } else {
+        printfmt("{}:{}", c.entity.index, c.entity.generation);
+    }
+}
+
+print_command: proc(c: command) -> void = {
+    if (c.kind == command_kind.spawn) {
+        printfmt("spawn with life {}", c.life);
+    } else if (c.kind == command_kind.set_life) {
+        printfmt("set ");
+        print_target(c);
+        printfmt(" life {}", c.life);
+    } else {
+        printfmt("despawn ");
+        print_target(c);
+    }
+}
+
+commands_record: proc(b: *commands, c: command) -> void = {
+    printfmt("    record: ");
+    print_command(c);
+    printfmt("\n");
+    _ = vec<command>push(b*.list, c);
+}
+
+commands_spawn: proc(b: *commands, life: u32) -> u64 = {
+    commands_record(b, { .kind = command_kind.spawn, .life = life });
+    b*.spawns += 1;
+    return b*.spawns - 1;
+}
+
+commands_resolve: proc(b: *commands, c: command) -> handle = {
+    if (c.to_pending) {
+        return vec<handle>at(b*.spawned, c.spawn)*;
+    }
+    return c.entity;
+}
+
+// Every command in order, then an empty buffer that keeps its memory.
+commands_apply: proc(b: *commands, w: *world) -> void = {
+    for (i: u64 = 0; i < b*.list*.length; i += 1) {
+        c: command = vec<command>at(b*.list, i)*;
+        printfmt("    ");
+        print_command(c);
+        printfmt(": ");
+        if (c.kind == command_kind.spawn) {
+            h: handle = world_spawn(w, c.life);
+            _ = vec<handle>push(b*.spawned, h);
+            printfmt("pending {} is {}:{}\n", b*.spawned*.length - 1, h.index, h.generation);
+        } else if (c.kind == command_kind.set_life) {
+            h: handle = commands_resolve(b, c);
+            if (world_set_life(w, h, c.life)) {
+                printfmt("ok, {}:{} has life {}\n", h.index, h.generation, c.life);
+            } else {
+                printfmt("skipped, {}:{} is dead\n", h.index, h.generation);
+            }
+        } else {
+            h: handle = commands_resolve(b, c);
+            print_despawned(world_despawn(w, h), h);
+        }
+    }
+    vec<command>clear(b*.list);
+    vec<handle>clear(b*.spawned);
+    b*.spawns = 0;
+}
+
+main: proc() -> i32 = {
+    level: region = {
+        w: *world in level = world_make(level);
+        lives: [5]u32 = { 0, 3, 0, 0, 2 };
+        for (i: u64 = 0; i < 5; i += 1) {
+            _ = world_spawn(w, lives[i]);
+        }
+        cmds: *commands in level = commands_make(level);
+        printfmt("a world of 5 things, packed in rows; a life of 0 means its time is up\n");
+        draw(w);
+
+        deferring: b32 = defer;
+        if (deferring) {
+            printfmt("the expire system walks the rows, and records a despawn for each life of 0\n");
+        } else {
+            printfmt("the expire system walks the rows, and despawns each life of 0 on the spot\n");
+        }
+        row: u64 = 0;
+        while (row < w*.owners*.length) {
+            h: handle = vec<handle>at(w*.owners, row)*;
+            if (vec<u32>at(w*.lives, row)* == 0) {
+                if (deferring) {
+                    commands_record(cmds, { .kind = command_kind.despawn, .entity = h });
+                } else {
+                    printfmt("    row {}: despawn {}:{}: ", row, h.index, h.generation);
+                    print_despawned(world_despawn(w, h), h);
+                }
+            }
+            row += 1;
+        }
+
+        printfmt("the spawner makes a replacement, and gives it a life through its pending number\n");
+        if (deferring) {
+            p: u64 = commands_spawn(cmds, 1);
+            commands_record(cmds, { .kind = command_kind.set_life, .to_pending = 1, .spawn = p, .life = 5 });
+        } else {
+            h: handle = world_spawn(w, 1);
+            printfmt("    spawn: {}:{}\n", h.index, h.generation);
+            if (world_set_life(w, h, 5)) {
+                printfmt("    set {}:{} life 5: ok\n", h.index, h.generation);
+            } else {
+                printfmt("    set {}:{} life 5: dead\n", h.index, h.generation);
+            }
+        }
+
+        doomed: handle = { .index = 2, .generation = 1 };
+        printfmt("a second system despawns {}:{} too: it doesn't know the first one did\n", doomed.index, doomed.generation);
+        if (deferring) {
+            commands_record(cmds, { .kind = command_kind.despawn, .entity = doomed });
+            printfmt("the buffer holds {} commands, and the world has not changed:\n", cmds*.list*.length);
+            draw(w);
+            printfmt("apply the buffer, in the order it was recorded\n");
+            commands_apply(cmds, w);
+        } else {
+            printfmt("    despawn {}:{}: ", doomed.index, doomed.generation);
+            print_despawned(world_despawn(w, doomed), doomed);
+        }
+
+        printfmt("the world after the frame\n");
+        draw(w);
+        printfmt("things left with no life:");
+        left: u64 = 0;
+        for (r: u64 = 0; r < w*.owners*.length; r += 1) {
+            if (vec<u32>at(w*.lives, r)* == 0) {
+                h: handle = vec<handle>at(w*.owners, r)*;
+                printfmt(" {}:{}", h.index, h.generation);
+                left += 1;
+            }
+        }
+        if (left == 0) {
+            printfmt(" none\n");
+        } else {
+            printfmt(", moved behind the loop and never looked at\n");
+        }
+        printfmt("commands left in the buffer: {}\n", cmds*.list*.length);
+    }
+    return 0;
+}

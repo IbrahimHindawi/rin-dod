@@ -1,0 +1,70 @@
+// Level 2: every proc. The fields and the signatures are given; write the
+// bodies. Each proc says what it must do; the harness checks how. The bodies
+// here only return something, so the file compiles and the harness can tell
+// you what is missing.
+//
+// Start it with: python tools/dojo.py start column 2
+//
+// Safe subset: the five procs that touch the column's bytes are [trusted];
+// see solution.rin's note. In them you may cast, index a `^u8`, and call
+// memcpy and memset.
+
+import "std/cstd.rin"
+import "std/print.rin"
+import "std/memops.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+column: struct = {
+    // `count` rows of `size` bytes each, packed from the start, in a block
+    // from the region aligned to `align`, with room for `capacity` rows.
+    data: ^u8;
+    size: u64;
+    align: u64;
+    count: u64;
+    capacity: u64;
+    // The region's arena, where the blocks come from: `c*.arena[0]&` is the
+    // `*memops_arena` the arena procs take.
+    arena: ^memops_arena;
+}
+
+// An empty column of rows `size` bytes long, aligned to `align`, in region r.
+// Stops the program unless align is a power of two from 1 to 16.
+column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level = {
+    c: *column in level = new<column>(r);
+    c*.arena = r;
+    return c;
+}
+
+column_len: proc(c: *const column) -> u64 = {
+    return 0;
+}
+
+// How many rows fit before the column has to grow.
+column_capacity: proc(c: *const column) -> u64 = {
+    return 0;
+}
+
+// A new zeroed row at the end; returns its row number. A full column grows
+// first, by at least half.
+column_push_zeroed: proc[trusted](c: *column) -> u64 = {
+    return 0;
+}
+
+// The last row's bytes move into `row`, and the column is one row shorter.
+column_swap_remove: proc[trusted](c: *column, row: u64) -> void = {
+}
+
+// One row's bytes. Stops the program past the rows in use.
+column_row: proc[trusted](c: *const column, row: u64) -> []u8 = {
+    none: []u8 = {};
+    return none;
+}
+
+// The rows in use as T's. Stops the program unless T has the column's size
+// and alignment.
+column_slice: proc[trusted]<T>(c: *const column) -> []T = {
+    none: []T = {};
+    return none;
+}

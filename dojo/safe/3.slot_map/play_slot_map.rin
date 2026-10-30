@@ -1,0 +1,187 @@
+// Dojo 3, the playground: a slot map.
+//
+// Dojos 1 and 2, put together. Values live packed in rows, so a loop over them
+// has no holes (dojo 2). The rest of the program keeps handles, which survive
+// rows moving and say when their value is gone (dojo 1). In between is a slot
+// per index:
+//
+//   handle 1:2  ->  slots[1] { generation 2, row 0 }  ->  values[0]
+//
+// A lookup is two steps: the handle's generation must be the slot's, and the
+// slot says the row. A remove is both dojos' work: bump the generation and
+// free the index, then swap-remove the row and fix the slot of whoever moved.
+// This is the ECS course's entity index (1.4), with one value per entity, and
+// what game engines use for textures, meshes and sounds.
+//
+// This program inserts three values, removes one, reuses its index, and
+// draws the slots and the rows after each step. To see it in a debugger,
+// break on `slot_map_remove` and watch `slots`, `handles` and `values`.
+//
+// The switch: set check_generation to 0 and run it again. A removed handle
+// still finds a slot, and reads whatever value is in that slot's row now. It's
+// a global, read each time it's used, so a debugger can flip it mid-run too:
+// stop on slot_map_remove, set it to 0 in the watch window, and continue.
+//
+// Safe subset: a value is a texture, named by its place in `textures`, since
+// a struct holding C strings is not a value safe code may write to.
+
+import "std/print.rin"
+import "std/option.rin"
+
+check_generation: b32 = 1;
+
+// The values: a texture is its place here.
+textures: [4]^const char = { "grass", "stone", "water", "lava" };
+
+handle: struct = {
+    index: u32;
+    generation: u32;
+}
+
+slot: struct = {
+    generation: u32;
+    row: u32;
+}
+
+slot_map: struct = {
+    slots: [8]slot;
+    slot_count: u32;
+    free: [8]u32;
+    free_count: u32;
+    values: [8]u32;
+    handles: [8]handle;
+    count: u32;
+}
+
+slot_map_insert: proc(m: *slot_map, value: u32) -> handle = {
+    index: u32 = 0;
+    if (m*.free_count > 0) {
+        m*.free_count -= 1;
+        index = m*.free[m*.free_count];
+    } else {
+        index = m*.slot_count;
+        m*.slots[index].generation = 1;
+        m*.slot_count += 1;
+    }
+    m*.slots[index].row = m*.count;
+    h: handle = { .index = index, .generation = m*.slots[index].generation };
+    m*.values[m*.count] = value;
+    m*.handles[m*.count] = h;
+    m*.count += 1;
+    return h;
+}
+
+slot_map_contains: proc(m: *slot_map, h: handle) -> b32 = {
+    if (h.index >= m*.slot_count) {
+        return 0;
+    }
+    return !check_generation || m*.slots[h.index].generation == h.generation;
+}
+
+// The value through the handle's slot, or none. A row past the end reads
+// nothing.
+slot_map_get: proc(m: *slot_map, h: handle) -> option<u32> = {
+    if (!slot_map_contains(m, h) || m*.slots[h.index].row >= m*.count) {
+        return option<u32>none();
+    }
+    return option<u32>some(m*.values[m*.slots[h.index].row]);
+}
+
+slot_map_remove: proc(m: *slot_map, h: handle) -> void = {
+    if (!slot_map_contains(m, h)) {
+        return;
+    }
+    row: u32 = m*.slots[h.index].row;
+    m*.slots[h.index].generation += 1;
+    m*.free[m*.free_count] = h.index;
+    m*.free_count += 1;
+    last: u32 = m*.count - 1;
+    m*.values[row] = m*.values[last];
+    m*.handles[row] = m*.handles[last];
+    m*.count = last;
+    if (row < last) {
+        m*.slots[m*.handles[row].index].row = row;
+    }
+}
+
+is_free: proc(m: *slot_map, index: u32) -> b32 = {
+    for (i: u32 = 0; i < m*.free_count; i += 1) {
+        if (m*.free[i] == index) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+draw: proc(m: *slot_map) -> void = {
+    printfmt("    slots    ");
+    for (i: u32 = 0; i < m*.slot_count; i += 1) {
+        if (i > 0) {
+            printfmt(" | ");
+        }
+        if (is_free(m, i)) {
+            printfmt("{}: generation {}, free", i, m*.slots[i].generation);
+        } else {
+            printfmt("{}: generation {}, row {}", i, m*.slots[i].generation, m*.slots[i].row);
+        }
+    }
+    printfmt("\n    rows     ");
+    for (r: u32 = 0; r < m*.count; r += 1) {
+        if (r > 0) {
+            printfmt(" | ");
+        }
+        printfmt("{}:{} {}", m*.handles[r].index, m*.handles[r].generation, textures[m*.values[r]]);
+    }
+    printfmt("\n");
+}
+
+read: proc(m: *slot_map, name: ^const char, h: handle) -> void = {
+    value: option<u32> = slot_map_get(m, h);
+    if (value.has_value) {
+        printfmt("{} {}:{}: {}", name, h.index, h.generation, textures[value.value]);
+    } else {
+        printfmt("{} {}:{}: nothing: it is gone", name, h.index, h.generation);
+    }
+}
+
+main: proc() -> i32 = {
+    m: slot_map = {};
+    printfmt("insert three textures\n");
+    grass: handle = slot_map_insert(m&, 0);
+    stone: handle = slot_map_insert(m&, 1);
+    water: handle = slot_map_insert(m&, 2);
+    printfmt("    grass {}:{}  stone {}:{}  water {}:{}\n", grass.index, grass.generation,
+        stone.index, stone.generation, water.index, water.generation);
+    draw(m&);
+
+    printfmt("remove stone: free index 1 in its next life, and water moves into row 1\n");
+    slot_map_remove(m&, stone);
+    draw(m&);
+    printfmt("    ");
+    read(m&, "water", water);
+    printfmt("\n    ");
+    read(m&, "stone", stone);
+    printfmt("\n");
+
+    printfmt("insert lava: index 1 again, generation 2, in a new row at the end\n");
+    lava: handle = slot_map_insert(m&, 3);
+    printfmt("    lava {}:{}\n", lava.index, lava.generation);
+    draw(m&);
+    printfmt("    ");
+    read(m&, "stone", stone);
+    printfmt("\n    ");
+    read(m&, "lava", lava);
+    printfmt("\n");
+
+    printfmt("remove grass: lava, in the last row, moves into row 0\n");
+    slot_map_remove(m&, grass);
+    draw(m&);
+    printfmt("    ");
+    read(m&, "lava", lava);
+    printfmt("  ");
+    read(m&, "water", water);
+    printfmt("  ");
+    read(m&, "grass", grass);
+    printfmt("\n");
+    return 0;
+}

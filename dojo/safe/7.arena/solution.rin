@@ -1,0 +1,63 @@
+// The reference: a bump arena over bytes from the region. One number, `used`,
+// is all it keeps: a push rounds it up and moves it on, a rewind or a clear
+// moves it back. It's called bump, since the arena every lesson uses already
+// has the name: memops_arena.
+//
+// Safe subset: the bytes are a slice made in the region `level`, and a push
+// hands out an offset into them, which the caller writes through
+// bump_bytes(b)[offset]. The original handed out an address; see README.md.
+
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+bump: struct = {
+    bytes: []u8 in level;
+    // Bytes before `used` are handed out; bytes after it are free.
+    used: u64;
+}
+
+// An arena over `capacity` fresh bytes from the region.
+bump_make: proc(r: region level, capacity: u64) -> *bump in level = {
+    return new<bump>(r, { .bytes = new_slice<u8>(r, capacity) });
+}
+
+// `size` bytes at the first multiple of `align`, a power of two, at or after
+// `used`: their offset. None, and nothing changes, if they would end past the
+// last byte.
+bump_push: proc(b: *bump, size: u64, align: u64) -> option<u64> = {
+    offset: u64 = (b*.used + align - 1) & ~(align - 1);
+    if (offset + size > b*.bytes.length) {
+        return option<u64>none();
+    }
+    b*.used = offset + size;
+    return option<u64>some(offset);
+}
+
+// The arena's bytes, to write and read a push through at its offset.
+bump_bytes: proc(b: *bump) -> []u8 = {
+    return b*.bytes;
+}
+
+bump_used: proc(b: *bump) -> u64 = {
+    return b*.used;
+}
+
+bump_capacity: proc(b: *bump) -> u64 = {
+    return b*.bytes.length;
+}
+
+// Where the arena is now, to come back to.
+bump_mark: proc(b: *bump) -> u64 = {
+    return b*.used;
+}
+
+// Let go of everything pushed since `mark`.
+bump_rewind: proc(b: *bump, mark: u64) -> void = {
+    b*.used = mark;
+}
+
+bump_clear: proc(b: *bump) -> void = {
+    b*.used = 0;
+}

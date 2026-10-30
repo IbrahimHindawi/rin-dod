@@ -1,0 +1,236 @@
+// Dojo 7, the playground: an arena.
+//
+// An arena is one buffer and one number: how much of the buffer is used. A
+// push rounds that number up to the alignment asked for, hands out the
+// offset there, and moves the number past the new bytes. Nothing is freed on
+// its own. A mark remembers the number, a rewind goes back to it, and a clear
+// goes back to 0, and everything pushed since is gone at once, for the cost
+// of one store. That is all the memory a frame of a game needs.
+//
+// This program pushes things of different sizes and alignments into a 64-byte
+// buffer, rewinds, fills it to the last byte, and clears it. After each step it
+// draws the buffer, 16 bytes to a group: a letter for each byte of a push, -
+// for padding, . for free. Each push is filled with its letter, and verify
+// checks the arena's invariant and that every push still holds its letter;
+// break inside its `if`s to stop on the first thing wrong.
+//
+// The switch: set align_offsets to 0 and run it again. A push then hands out
+// the used count as it is, without rounding it up, and the u32, the u64 and
+// the 16-byte vector land at offsets they can't be read from as what they
+// are. It's a global, read each time it's used, so a debugger can flip it
+// mid-run too: stop on bump_push, set it to 0 in the watch window, and
+// continue.
+//
+// Safe subset: a push hands out an offset into the arena's bytes, not an
+// address, and the program writes its letters through `b*.bytes[offset]`,
+// which is bounds-checked. The original handed out an address and wrote
+// through it with memset; see README.md.
+
+import "std/print.rin"
+import "std/option.rin"
+
+align_offsets: b32 = 1;
+
+bump: struct = {
+    // 64 bytes. An offset that is a multiple of 16, or of anything less, is
+    // where a thing of that alignment can go.
+    bytes: [64]u8;
+    // Bytes before `used` are handed out; bytes after it are free.
+    used: u64;
+}
+
+// The offset of `size` bytes at a multiple of `align`, a power of two, or
+// none if they don't fit before the end.
+bump_push: proc(b: *bump, size: u64, align: u64) -> option<u64> = {
+    offset: u64 = b*.used;
+    if (align_offsets) {
+        offset = (b*.used + align - 1) & ~(align - 1);
+    }
+    if (offset + size > 64) {
+        return option<u64>none();
+    }
+    b*.used = offset + size;
+    return option<u64>some(offset);
+}
+
+bump_mark: proc(b: *bump) -> u64 = {
+    return b*.used;
+}
+
+bump_rewind: proc(b: *bump, mark: u64) -> void = {
+    b*.used = mark;
+}
+
+bump_clear: proc(b: *bump) -> void = {
+    b*.used = 0;
+}
+
+// What the program has pushed and not yet let go of, to draw and to check:
+// up to eight pushes, each a letter, an offset, a size and an alignment.
+push_record: struct = {
+    letter: u8;
+    offset: u64;
+    size: u64;
+    align: u64;
+}
+
+pushes: struct = {
+    live: [8]push_record;
+    count: u32;
+}
+
+push: proc(b: *bump, ps: *pushes, letter: u8, size: u64, align: u64) -> void = {
+    before: u64 = b*.used;
+    p: option<u64> = bump_push(b, size, align);
+    if (option<u64>is_none(p)) {
+        if (size == 1) {
+            printfmt("    no room for 1 byte after {} of 64\n", before);
+        } else {
+            printfmt("    no room for {} bytes after {} of 64\n", size, before);
+        }
+        return;
+    }
+    offset: u64 = option<u64>unwrap(p);
+    for (i: u64 = 0; i < size; i += 1) {
+        b*.bytes[offset + i] = letter;
+    }
+    ps*.live[ps*.count] = { .letter = letter, .offset = offset, .size = size, .align = align };
+    ps*.count += 1;
+    padding: u64 = offset - before;
+    printfmt("    offset {}, used {} of 64", offset, b*.used);
+    if (padding == 0 && b*.used == 64) {
+        printfmt(": the last byte");
+    } else if (padding == 1) {
+        printfmt(": 1 byte of padding first");
+    } else if (padding > 1) {
+        printfmt(": {} bytes of padding first", padding);
+    }
+    printfmt("\n");
+}
+
+// Rewinding or clearing lets go of every push from after the mark.
+let_go: proc(b: *bump, ps: *pushes) -> void = {
+    while (ps*.count > 0 && ps*.live[ps*.count - 1].offset >= b*.used) {
+        ps*.count -= 1;
+    }
+}
+
+draw: proc(b: *bump, ps: *pushes) -> void = {
+    cells: [64]u8 = {};
+    for (i: u64 = 0; i < 64; i += 1) {
+        cells[i] = i < b*.used ? '-' : '.';
+    }
+    for (k: u32 = 0; k < ps*.count; k += 1) {
+        for (i: u64 = 0; i < ps*.live[k].size; i += 1) {
+            cells[ps*.live[k].offset + i] = ps*.live[k].letter;
+        }
+    }
+    printfmt("    ");
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (i > 0 && i % 16 == 0) {
+            printfmt("|");
+        }
+        printfmt("{}", cast(cells[i], c8));
+    }
+    printfmt("\n");
+}
+
+// The invariant: every push is aligned, inside the used bytes, clear of the
+// one after it, and still holds its letter.
+verify: proc(b: *bump, ps: *pushes) -> void = {
+    if (b*.used > 64) {
+        printfmt("    verify: used is {}, past the end of the buffer\n", b*.used);
+    }
+    for (k: u32 = 0; k < ps*.count; k += 1) {
+        p: push_record = ps*.live[k];
+        name: c8 = cast(p.letter, c8);
+        if (p.offset % p.align != 0) {
+            printfmt("    verify: {} is at offset {}, not a multiple of {}: a {}-byte thing can't be read from there\n", name,
+                p.offset, p.align, p.align);
+        }
+        if (p.offset + p.size > b*.used) {
+            printfmt("    verify: {} ends at {}, past the used count, {}\n", name, p.offset + p.size, b*.used);
+        }
+        if (k + 1 < ps*.count && p.offset + p.size > ps*.live[k + 1].offset) {
+            printfmt("    verify: {} runs into {}\n", name, cast(ps*.live[k + 1].letter, c8));
+        }
+        for (i: u64 = 0; i < p.size; i += 1) {
+            if (b*.bytes[p.offset + i] != p.letter) {
+                printfmt("    verify: {}'s bytes have been written over\n", name);
+                break;
+            }
+        }
+    }
+}
+
+main: proc() -> i32 = {
+    b: bump = {};
+    ps: pushes = {};
+    printfmt("a 64-byte buffer, 16 bytes to a group: a letter per byte pushed, - for padding, . for free\n");
+
+    printfmt("push a: a u8 flag, 1 byte, align 1\n");
+    push(b&, ps&, 'a', 1, 1);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push b: a u32 count, 4 bytes, align 4\n");
+    push(b&, ps&, 'b', 4, 4);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push c: a u64 id, 8 bytes, align 8\n");
+    push(b&, ps&, 'c', 8, 8);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push d: four f32s for SIMD, 16 bytes, align 16\n");
+    push(b&, ps&, 'd', 16, 16);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    mark: u64 = bump_mark(b&);
+    printfmt("mark: remember used, {}\n", mark);
+
+    printfmt("push e: a name, 3 bytes, align 1\n");
+    push(b&, ps&, 'e', 3, 1);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push f: a u64 time, 8 bytes, align 8\n");
+    push(b&, ps&, 'f', 8, 8);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("rewind to the mark: e and f are gone at once\n");
+    bump_rewind(b&, mark);
+    let_go(b&, ps&);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push g: a path, 40 bytes, align 8\n");
+    push(b&, ps&, 'g', 40, 8);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push h: a 2x4 matrix of f32s, 32 bytes, align 16\n");
+    push(b&, ps&, 'h', 32, 16);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push i: one more byte\n");
+    push(b&, ps&, 'i', 1, 1);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("clear: the frame is over, and everything goes at once\n");
+    bump_clear(b&);
+    let_go(b&, ps&);
+    draw(b&, ps&);
+    verify(b&, ps&);
+
+    printfmt("push j: the next frame's first u64, over a's old bytes\n");
+    push(b&, ps&, 'j', 8, 8);
+    draw(b&, ps&);
+    verify(b&, ps&);
+    return 0;
+}

@@ -1,0 +1,27 @@
+// Level 3: a blank page. Write the arena from memory.
+//
+// Start it with: python tools/dojo.py start arena 3
+//
+// The harness needs exactly this, and checks what each does. The bytes come
+// from the region `level`, new_slice<u8>(r, capacity), and a push hands out
+// an offset into them.
+//
+//   bump: struct
+//   bump_make: proc(r: region level, capacity: u64) -> *bump in level
+//   bump_push: proc(b: *bump, size: u64, align: u64) -> option<u64>
+//                                                              the offset of size bytes, a
+//                                                              multiple of align; none, and no
+//                                                              change, when full
+//   bump_bytes: proc(b: *bump) -> []u8                         the bytes, to write a push at its offset
+//   bump_used: proc(b: *bump) -> u64                           padding included
+//   bump_capacity: proc(b: *bump) -> u64
+//   bump_mark: proc(b: *bump) -> u64
+//   bump_rewind: proc(b: *bump, mark: u64) -> void             let go of what came after mark
+//   bump_clear: proc(b: *bump) -> void
+
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

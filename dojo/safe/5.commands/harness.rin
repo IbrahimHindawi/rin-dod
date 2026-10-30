@@ -1,0 +1,421 @@
+// The harness for dojo 5, a command buffer. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build and
+// run yours with
+//
+//   python tools/dojo.py commands
+//
+// The buffer changes a world, and the world is here, in the harness: a plain
+// generational store of numbers, so the kata is only the buffer. First a
+// short scenario: a set, a despawn, a spawn that reuses the despawned index,
+// a set through the spawn's pending number, and two commands that find their
+// target already dead. Then a fuzz run, frame after frame: random commands
+// recorded against live handles, dead handles and this frame's own spawns,
+// then applied. The model runs the same commands straight away, in order, on
+// a copy of the world from before the frame, and the two worlds must match.
+//
+// Safe subset: the world and the buffer live in the region `level`; each
+// frame of the fuzz run opens the region `frame` for what lasts one frame,
+// where the original cleared an arena. The two copies of the world a frame
+// makes hold pointers typed `in level`, so they are made in level and stay
+// there until the run ends: a few hundred kilobytes over a whole run.
+
+import "../dojo.rin"
+
+// ---------------------------------------------------------------------------
+// The world the commands change
+// ---------------------------------------------------------------------------
+
+// For each index, its generation, and its value if it is alive; and a free
+// list. Exactly the free list of dojo 1.
+world_slot: struct = {
+    generation: u32;
+    alive: b32;
+    value: u32;
+}
+
+world: struct = {
+    slots: *vec<world_slot> in level;
+    free: *vec<u32> in level;
+}
+
+// What commands_apply did: commands that changed something, and commands whose
+// target was already dead.
+applied: struct = {
+    applied: u32;
+    skipped: u32;
+}
+
+world_make: proc(r: region level) -> *world in level = {
+    return new<world>(r, { .slots = vec<world_slot>make(r, 0), .free = vec<u32>make(r, 0) });
+}
+
+world_spawn: proc(w: *world, value: u32) -> dojo_handle = {
+    index: u32 = 0;
+    if (!vec<u32>is_empty(w*.free)) {
+        index = vec<u32>pop(w*.free);
+    } else {
+        index = cast(w*.slots*.length, u32);
+        _ = vec<world_slot>push(w*.slots, { .generation = 1 });
+    }
+    slot: *world_slot = vec<world_slot>at(w*.slots, cast(index, u64));
+    slot*.alive = 1;
+    slot*.value = value;
+    return { .index = index, .generation = slot*.generation };
+}
+
+world_alive: proc(w: *world, h: dojo_handle) -> b32 = {
+    if (cast(h.index, u64) >= w*.slots*.length) {
+        return 0;
+    }
+    slot: *world_slot = vec<world_slot>at(w*.slots, cast(h.index, u64));
+    return slot*.alive && slot*.generation == h.generation;
+}
+
+world_despawn: proc(w: *world, h: dojo_handle) -> dojo_status = {
+    if (!world_alive(w, h)) {
+        return dojo_status.dead;
+    }
+    slot: *world_slot = vec<world_slot>at(w*.slots, cast(h.index, u64));
+    slot*.generation += 1;
+    slot*.alive = 0;
+    slot*.value = 0;
+    _ = vec<u32>push(w*.free, h.index);
+    return dojo_status.ok;
+}
+
+world_set: proc(w: *world, h: dojo_handle, value: u32) -> dojo_status = {
+    if (!world_alive(w, h)) {
+        return dojo_status.dead;
+    }
+    vec<world_slot>at(w*.slots, cast(h.index, u64))*.value = value;
+    return dojo_status.ok;
+}
+
+// A copy of `src`, in level.
+world_copy: proc(r: region level, src: *world) -> *world in level = {
+    w: *world in level = world_make(r);
+    for (i: u64 = 0; i < src*.slots*.length; i += 1) {
+        _ = vec<world_slot>push(w*.slots, vec<world_slot>at(src*.slots, i)*);
+    }
+    for (i: u64 = 0; i < src*.free*.length; i += 1) {
+        _ = vec<u32>push(w*.free, vec<u32>at(src*.free, i)*);
+    }
+    return w;
+}
+
+same_slot: proc(a: world_slot, b: world_slot) -> b32 = {
+    return a.generation == b.generation && a.alive == b.alive && a.value == b.value;
+}
+
+same_world: proc(a: *world, b: *world) -> b32 = {
+    if (a*.slots*.length != b*.slots*.length || a*.free*.length != b*.free*.length) {
+        return 0;
+    }
+    for (i: u64 = 0; i < a*.slots*.length; i += 1) {
+        if (!same_slot(vec<world_slot>at(a*.slots, i)*, vec<world_slot>at(b*.slots, i)*)) {
+            return 0;
+        }
+    }
+    for (i: u64 = 0; i < a*.free*.length; i += 1) {
+        if (vec<u32>at(a*.free, i)* != vec<u32>at(b*.free, i)*) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Every live handle, in index order, with its value: `0:1=10 1:2=41`.
+fmt_world: proc(f: *fmt, w: *world) -> void = {
+    first: b32 = 1;
+    for (i: u64 = 0; i < w*.slots*.length; i += 1) {
+        slot: world_slot = vec<world_slot>at(w*.slots, i)*;
+        if (slot.alive) {
+            if (!first) {
+                fmt_char(f, ' ');
+            }
+            first = 0;
+            dojo_fmt_handle(f, { .index = cast(i, u32), .generation = slot.generation });
+            fmt_char(f, '=');
+            fmt_u64(f, cast(slot.value, u64));
+        }
+    }
+}
+
+fmt_applied: proc(f: *fmt, a: applied) -> void = {
+    fmt_cstr(f, "applied ");
+    fmt_u64(f, cast(a.applied, u64));
+    fmt_cstr(f, ", skipped ");
+    fmt_u64(f, cast(a.skipped, u64));
+}
+
+// Where two worlds first differ, in words.
+print_difference: proc(got: *world, want: *world) -> void = {
+    count: u64 = got*.slots*.length > want*.slots*.length ? got*.slots*.length : want*.slots*.length;
+    for (i: u64 = 0; i < count; i += 1) {
+        has_got: b32 = i < got*.slots*.length;
+        has_want: b32 = i < want*.slots*.length;
+        if (has_got && has_want && same_slot(vec<world_slot>at(got*.slots, i)*, vec<world_slot>at(want*.slots, i)*)) {
+            continue;
+        }
+        printfmt("the world has ");
+        print_slot(got, i);
+        printfmt(", the model has ");
+        print_slot(want, i);
+        printfmt("\n");
+        return;
+    }
+    printfmt("the free lists differ\n");
+}
+
+print_slot: proc(w: *world, i: u64) -> void = {
+    if (i >= w*.slots*.length) {
+        printfmt("no index {}", i);
+        return;
+    }
+    slot: world_slot = vec<world_slot>at(w*.slots, i)*;
+    if (slot.alive) {
+        printfmt("{}:{} = {}", i, slot.generation, slot.value);
+    } else {
+        printfmt("index {} free, next generation {}", i, slot.generation);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The scenario
+// ---------------------------------------------------------------------------
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    f: *fmt in level = fmt_make(r, 128);
+    w: *world in level = world_make(r);
+    a: dojo_handle = world_spawn(w, 1);
+    b: dojo_handle = world_spawn(w, 2);
+    c: dojo_handle = world_spawn(w, 3);
+    fmt_reset(f);
+    fmt_world(f, w);
+    dojo_same("a world of three", fmt_text(f), "0:1=1 1:1=2 2:1=3");
+
+    cmds: *commands in level = commands_make(r);
+    commands_set(cmds, target_entity(a), 10);
+    commands_despawn(cmds, target_entity(b));
+    p: pending = commands_spawn(cmds, 40);
+    commands_set(cmds, target_pending(p), 41);
+    commands_despawn(cmds, target_entity(b));
+    commands_set(cmds, target_entity(b), 20);
+    fmt_reset(f);
+    fmt_u64(f, commands_len(cmds));
+    dojo_same("record: set a 10, despawn b, spawn 40, set it 41, despawn b, set b 20", fmt_text(f), "6");
+    fmt_reset(f);
+    fmt_world(f, w);
+    dojo_same("the world before apply, unchanged", fmt_text(f), "0:1=1 1:1=2 2:1=3");
+    fmt_reset(f);
+    fmt_applied(f, commands_apply(cmds, w));
+    dojo_same("apply", fmt_text(f), "applied 4, skipped 2");
+    fmt_reset(f);
+    fmt_world(f, w);
+    dojo_same("the spawn reused b's index, in its next life", fmt_text(f), "0:1=10 1:2=41 2:1=3");
+    dojo_same("b is alive after apply", dojo_bool_name(world_alive(w, b)), "false");
+    fmt_reset(f);
+    fmt_u64(f, commands_len(cmds));
+    dojo_same("commands left in the buffer", fmt_text(f), "0");
+    fmt_reset(f);
+    fmt_applied(f, commands_apply(cmds, w));
+    dojo_same("apply the empty buffer", fmt_text(f), "applied 0, skipped 0");
+
+    commands_despawn(cmds, target_entity(c));
+    q: pending = commands_spawn(cmds, 50);
+    commands_despawn(cmds, target_pending(q));
+    commands_set(cmds, target_pending(q), 51);
+    fmt_reset(f);
+    fmt_applied(f, commands_apply(cmds, w));
+    dojo_same("the buffer again: despawn c, spawn 50, despawn it, set it 51", fmt_text(f), "applied 3, skipped 1");
+    fmt_reset(f);
+    fmt_world(f, w);
+    dojo_same("the world", fmt_text(f), "0:1=10 1:2=41");
+}
+
+// ---------------------------------------------------------------------------
+// The fuzz run
+// ---------------------------------------------------------------------------
+
+// A command as the model sees it: what it does, and its target, a handle or
+// the k-th spawn of this frame.
+op_kind: enum = {
+    spawn,
+    set,
+    despawn,
+}
+
+op: struct = {
+    kind: op_kind;
+    value: u32;
+    to_spawn: b32;
+    handle: dojo_handle;
+    spawn: u32;
+}
+
+print_op: proc(o: op) -> void = {
+    if (o.kind == op_kind.spawn) {
+        printfmt("spawn({})", o.value);
+        return;
+    }
+    if (o.kind == op_kind.set) {
+        printfmt("set(");
+    } else {
+        printfmt("despawn(");
+    }
+    if (o.to_spawn) {
+        printfmt("spawn {} of this frame", o.spawn);
+    } else {
+        printfmt("{}:{}", o.handle.index, o.handle.generation);
+    }
+    if (o.kind == op_kind.set) {
+        printfmt(", {}", o.value);
+    }
+    printfmt(")");
+}
+
+// The same commands, applied straight away, in order, to `w`: what
+// commands_apply must do. What it allocates goes in r, the frame.
+model_apply: proc(r: region R, w: *world, ops: *const vec<op>) -> applied = {
+    done: applied = {};
+    spawned: *vec<dojo_handle> in R = vec<dojo_handle>make(r, 0);
+    for (i: u64 = 0; i < ops*.length; i += 1) {
+        o: op = vec<op>at(ops, i)*;
+        result: dojo_status = dojo_status.ok;
+        h: dojo_handle = o.handle;
+        if (o.to_spawn) {
+            h = vec<dojo_handle>at(spawned, cast(o.spawn, u64))*;
+        }
+        if (o.kind == op_kind.spawn) {
+            _ = vec<dojo_handle>push(spawned, world_spawn(w, o.value));
+        } else if (o.kind == op_kind.set) {
+            result = world_set(w, h, o.value);
+        } else {
+            result = world_despawn(w, h);
+        }
+        if (result == dojo_status.ok) {
+            done.applied += 1;
+        } else {
+            done.skipped += 1;
+        }
+    }
+    return done;
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    w: *world in level = world_make(r);
+    cmds: *commands in level = commands_make(r);
+    seen: *vec<dojo_handle> in level = vec<dojo_handle>make(r, 0);
+    for (v: u32 = 0; v < 8; v += 1) {
+        _ = vec<dojo_handle>push(seen, world_spawn(w, v));
+    }
+    n: u64 = 0;
+    while (n < run*.ops) {
+        // Each frame's lists and model live in the frame region, gone at its
+        // end; the two world copies live in level, see above.
+        frame: region = {
+            live: *vec<dojo_handle> in frame = vec<dojo_handle>make(frame, 0);
+            for (i: u64 = 0; i < w*.slots*.length; i += 1) {
+                slot: world_slot = vec<world_slot>at(w*.slots, i)*;
+                if (slot.alive) {
+                    _ = vec<dojo_handle>push(live, { .index = cast(i, u32), .generation = slot.generation });
+                }
+            }
+            before: *world in level = world_copy(r, w);
+            ops: *vec<op> in frame = vec<op>make(frame, 0);
+            pendings: *vec<pending> in frame = vec<pending>make(frame, 0);
+            count: u64 = 1 + dojo_rng_below(rng&, 12);
+            for (k: u64 = 0; k < count; k += 1) {
+                n += 1;
+                value: u32 = cast(dojo_rng_below(rng&, 1000), u32);
+                roll: u64 = dojo_rng_below(rng&, 100);
+                aim: u64 = dojo_rng_below(rng&, 100);
+                next: op = { .value = value };
+                if (aim < 55 && live*.length > 0) {
+                    next.handle = vec<dojo_handle>at(live, dojo_rng_below(rng&, live*.length))*;
+                } else if (aim < 80 || pendings*.length == 0) {
+                    next.handle = vec<dojo_handle>at(seen, dojo_rng_below(rng&, seen*.length))*;
+                } else {
+                    next.to_spawn = 1;
+                    next.spawn = cast(dojo_rng_below(rng&, pendings*.length), u32);
+                }
+                next.kind = roll < 30 ? op_kind.spawn : roll < 65 ? op_kind.set : op_kind.despawn;
+                if (dojo_before(run, n)) {
+                    printfmt("record ");
+                    print_op(next);
+                    printfmt("\n");
+                }
+                t: target = target_entity(next.handle);
+                if (next.to_spawn) {
+                    t = target_pending(vec<pending>at(pendings, cast(next.spawn, u64))*);
+                }
+                if (next.kind == op_kind.spawn) {
+                    _ = vec<pending>push(pendings, commands_spawn(cmds, value));
+                } else if (next.kind == op_kind.set) {
+                    commands_set(cmds, t, value);
+                } else {
+                    commands_despawn(cmds, t);
+                }
+                _ = vec<op>push(ops, next);
+                if (commands_len(cmds) != ops*.length) {
+                    dojo_fail(run, n);
+                    printfmt("commands_len is {} after recording {} commands\n", commands_len(cmds), ops*.length);
+                    dojo_failed(run, n);
+                }
+            }
+            if (!same_world(w, before)) {
+                dojo_fail(run, n);
+                printfmt("recording commands changed the world\n");
+                dojo_failed(run, n);
+            }
+            n += 1;
+            if (dojo_before(run, n)) {
+                printfmt("commands_apply() of {} commands\n", ops*.length);
+            }
+            got: applied = commands_apply(cmds, w);
+            want_world: *world in level = world_copy(r, before);
+            want: applied = model_apply(frame, want_world, ops);
+            if (got.applied != want.applied || got.skipped != want.skipped) {
+                dojo_fail(run, n);
+                printfmt("commands_apply returned applied {}, skipped {}, the model says applied {}, skipped {}\n",
+                    got.applied, got.skipped, want.applied, want.skipped);
+                dojo_failed(run, n);
+            }
+            if (!same_world(w, want_world)) {
+                dojo_fail(run, n);
+                printfmt("after commands_apply, ");
+                print_difference(w, want_world);
+                dojo_failed(run, n);
+            }
+            if (commands_len(cmds) != 0) {
+                dojo_fail(run, n);
+                printfmt("commands_len is {} after commands_apply; the buffer should be empty\n", commands_len(cmds));
+                dojo_failed(run, n);
+            }
+            // Remember the handles this frame made, so later frames can aim at
+            // them after they die.
+            for (i: u64 = 0; i < w*.slots*.length; i += 1) {
+                slot: world_slot = vec<world_slot>at(w*.slots, i)*;
+                h: dojo_handle = { .index = cast(i, u32), .generation = slot.generation };
+                if (slot.alive && !world_alive(before, h)) {
+                    _ = vec<dojo_handle>push(seen, h);
+                }
+            }
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "commands", "5. a command buffer");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

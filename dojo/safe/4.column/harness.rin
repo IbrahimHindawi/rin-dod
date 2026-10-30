@@ -1,0 +1,386 @@
+// The harness for dojo 4, a type-erased column. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build and
+// run yours with
+//
+//   python tools/dojo.py column
+//   python tools/dojo.py column --sanitize   the same with AddressSanitizer and
+//                                            UBSan, which watch every byte
+//
+// First a short scenario: rows written through the typed view and read back
+// as bytes, a swap-remove, a column aligned to 16, and a column of zero-byte
+// rows. Then a fuzz run for each of four row types, from a 3-byte one to a
+// 16-byte one aligned to 16: random pushes, writes and swap-removes, each
+// checked against a vec of that type. The model doesn't care how the column
+// stores its bytes, only that the rows come back right and aligned, and that a
+// full column grows by at least half, so pushing stays cheap on average.
+//
+// What the scenario can't check is a refusal. A column read as the wrong type
+// stops the program, and so does a row past the end, and a harness that stops
+// can't go on to the next step. Try those by hand: they are in the README.
+//
+// Safe subset: the column is type erasure itself, so its core is [trusted] in
+// the kata, and this harness keeps two [trusted] helpers of its own, bytes_of
+// and slice_address, which look at a value as bytes and at a slice's address.
+// Everything else here is checked; the bytes are copied and compared by
+// slices, with bounds, not by memcpy and memcmp.
+
+import "../dojo.rin"
+
+// The row types the fuzz run uses.
+rgb: struct = {
+    r: u8;
+    g: u8;
+    b: u8;
+}
+
+vec3: struct = {
+    x: f32;
+    y: f32;
+    z: f32;
+}
+
+vec4: struct[align(16)] = {
+    x: f32;
+    y: f32;
+    z: f32;
+    w: f32;
+}
+
+// For each row type: its name, how to make one from the random numbers, and
+// how to print one. The generic fuzz run calls these by type.
+sample_name: proc<rgb>() -> ^const char = { return "rgb, 3 bytes aligned to 1"; }
+sample_name: proc<u32>() -> ^const char = { return "u32, 4 bytes aligned to 4"; }
+sample_name: proc<vec3>() -> ^const char = { return "vec3, 12 bytes aligned to 4"; }
+sample_name: proc<vec4>() -> ^const char = { return "vec4, 16 bytes aligned to 16"; }
+
+// Small whole numbers and quarters: exact as f32s, and never NaN.
+quarters: proc(r: *dojo_rng) -> f32 = {
+    return cast(dojo_rng_below(r, 4000), f32) * 0.25;
+}
+
+sample_make: proc<rgb>(r: *dojo_rng) -> rgb = {
+    n: u64 = dojo_rng_next(r);
+    return { .r = cast(n & 255, u8), .g = cast((n shr 8) & 255, u8), .b = cast((n shr 16) & 255, u8) };
+}
+
+sample_make: proc<u32>(r: *dojo_rng) -> u32 = {
+    return cast(dojo_rng_next(r), u32);
+}
+
+sample_make: proc<vec3>(r: *dojo_rng) -> vec3 = {
+    v: vec3 = {};
+    v.x = quarters(r);
+    v.y = quarters(r);
+    v.z = quarters(r);
+    return v;
+}
+
+sample_make: proc<vec4>(r: *dojo_rng) -> vec4 = {
+    v: vec4 = {};
+    v.x = quarters(r);
+    v.y = quarters(r);
+    v.z = quarters(r);
+    v.w = quarters(r);
+    return v;
+}
+
+sample_print: proc<rgb>(v: rgb) -> void = {
+    printfmt("rgb({}, {}, {})", v.r, v.g, v.b);
+}
+
+sample_print: proc<u32>(v: u32) -> void = {
+    printfmt("{}", v);
+}
+
+sample_print: proc<vec3>(v: vec3) -> void = {
+    printfmt("vec3({:.2}, {:.2}, {:.2})", cast(v.x, f64), cast(v.y, f64), cast(v.z, f64));
+}
+
+sample_print: proc<vec4>(v: vec4) -> void = {
+    printfmt("vec4({:.2}, {:.2}, {:.2}, {:.2})", cast(v.x, f64), cast(v.y, f64), cast(v.z, f64), cast(v.w, f64));
+}
+
+// A value's bytes, as the column should hold them. Trusted: it looks at a T
+// as bytes, which is what this whole block is about.
+bytes_of: proc[trusted]<T>(value: *const T) -> []u8 = {
+    raw: ^u8 = cast(value, ^u8);
+    size: u64 = sizeof(T);
+    return raw[0..size];
+}
+
+// Where a slice's first element is, as a number, for the alignment check.
+slice_address: proc[trusted]<T>(s: []const T) -> u64 = {
+    return cast(cast(s.data, usize), u64);
+}
+
+same_bytes: proc(a: []u8, b: []u8) -> b32 = {
+    if (a.length != b.length) {
+        return 0;
+    }
+    for (i: u64 = 0; i < a.length; i += 1) {
+        if (a[i] != b[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Every byte of src into dst, which must be as long.
+copy_bytes: proc(dst: []u8, src: []u8) -> void = {
+    for (i: u64 = 0; i < src.length; i += 1) {
+        dst[i] = src[i];
+    }
+}
+
+fmt_hex_bytes: proc(f: *fmt, bytes: []u8) -> void = {
+    for (i: u64 = 0; i < bytes.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_hex(f, cast(bytes[i], u64), 2, 0);
+    }
+}
+
+print_hex_bytes: proc(f: *fmt, bytes: []u8) -> void = {
+    fmt_reset(f);
+    fmt_hex_bytes(f, bytes);
+    printfmt("{}", fmt_text(f));
+}
+
+fmt_vec3: proc(f: *fmt, v: vec3) -> void = {
+    fmt_char(f, '(');
+    fmt_i64(f, cast(v.x, i64));
+    fmt_char(f, ' ');
+    fmt_i64(f, cast(v.y, i64));
+    fmt_char(f, ' ');
+    fmt_i64(f, cast(v.z, i64));
+    fmt_char(f, ')');
+}
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    f: *fmt in level = fmt_make(r, 96);
+    c: *column in level = column_make(r, sizeof(vec3), alignof(vec3));
+    for (i: u64 = 0; i < 3; i += 1) {
+        _ = column_push_zeroed(c);
+    }
+    fmt_reset(f);
+    fmt_u64(f, column_len(c));
+    dojo_same("push 3 zeroed rows: len", fmt_text(f), "3");
+    fmt_reset(f);
+    fmt_hex_bytes(f, column_row(c, 2));
+    dojo_same("row 2 as bytes", fmt_text(f), "00 00 00 00 00 00 00 00 00 00 00 00");
+
+    vs: []vec3 = column_slice<vec3>(c);
+    vs[0] = { .x = 1.0, .y = 2.0, .z = 3.0 };
+    vs[1] = { .x = 4.0, .y = 5.0, .z = 6.0 };
+    vs[2] = { .x = 7.0, .y = 8.0, .z = 9.0 };
+    view: []vec3 = column_slice<vec3>(c);
+    fmt_reset(f);
+    for (i: u64 = 0; i < view.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        v: vec3 = view[i];
+        fmt_vec3(f, v);
+    }
+    dojo_same("write 3 vec3s through column_slice, read them back through it", fmt_text(f), "(1 2 3) (4 5 6) (7 8 9)");
+    fmt_reset(f);
+    fmt_hex_bytes(f, column_row(c, 1));
+    dojo_same("row 1 as bytes is 4.0, 5.0 and 6.0", fmt_text(f), "00 00 80 40 00 00 a0 40 00 00 c0 40");
+
+    minus: vec3 = { .x = -1.0, .y = -2.0, .z = -3.0 };
+    row0: []u8 = column_row(c, 0);
+    copy_bytes(row0, bytes_of<vec3>(minus&));
+    view = column_slice<vec3>(c);
+    fmt_reset(f);
+    fmt_vec3(f, view[0]);
+    dojo_same("write row 0 as bytes, read it as a vec3", fmt_text(f), "(-1 -2 -3)");
+    column_swap_remove(c, 0);
+    fmt_reset(f);
+    fmt_u64(f, column_len(c));
+    dojo_same("swap_remove row 0: the last row moves in; len", fmt_text(f), "2");
+    view = column_slice<vec3>(c);
+    fmt_reset(f);
+    fmt_vec3(f, view[0]);
+    dojo_same("row 0 is now", fmt_text(f), "(7 8 9)");
+
+    big: *column in level = column_make(r, 16, 16);
+    for (i: u64 = 0; i < 100; i += 1) {
+        _ = column_push_zeroed(big);
+    }
+    fmt_reset(f);
+    fmt_u64(f, column_len(big));
+    dojo_same("push 100 rows of 16 bytes aligned to 16: len", fmt_text(f), "100");
+    at: u64 = slice_address<vec4>(column_slice<vec4>(big));
+    dojo_same("the typed view starts on a 16-byte boundary", dojo_bool_name(at % 16 == 0), "true");
+
+    tags: *column in level = column_make(r, 0, 1);
+    for (i: u64 = 0; i < 3; i += 1) {
+        _ = column_push_zeroed(tags);
+    }
+    column_swap_remove(tags, 1);
+    fmt_reset(f);
+    fmt_u64(f, column_len(tags));
+    dojo_same("a column of zero-byte tags: push 3, swap_remove 1: len", fmt_text(f), "2");
+    fmt_reset(f);
+    fmt_char(f, '[');
+    fmt_hex_bytes(f, column_row(tags, 1));
+    fmt_char(f, ']');
+    dojo_same("a tag's row as bytes", fmt_text(f), "[]");
+}
+
+// One row type's share of the fuzz run, against a vec of that type. `op`
+// counts across all four types, so --stop finds the same operation every time.
+fuzz_type: proc<T>(run: *dojo_run, r: region level, f: *fmt, rng: *dojo_rng, op: *u64, ops: u64) -> void = {
+    name: ^const char = sample_name<T>();
+    printfmt("    {}\n", name);
+    size: u64 = sizeof(T);
+    align: u64 = alignof(T);
+    c: *column in level = column_make(r, size, align);
+    model: *vec<T> in level = vec<T>make(r, 0);
+    for (k: u64 = 0; k < ops; k += 1) {
+        op* += 1;
+        n: u64 = op*;
+        roll: u64 = dojo_rng_below(rng, 100);
+        if (roll < 45 || model*.length == 0) {
+            value: T = sample_make<T>(rng);
+            through_bytes: b32 = dojo_rng_below(rng, 2) == 0;
+            if (dojo_before(run, n)) {
+                printfmt("column_push_zeroed(), then write ");
+                sample_print<T>(value);
+                printfmt(" into it\n");
+            }
+            len: u64 = column_len(c);
+            capacity: u64 = column_capacity(c);
+            row: u64 = column_push_zeroed(c);
+            if (row != len) {
+                dojo_fail(run, n);
+                printfmt("column_push_zeroed returned row {}, the new row is {}\n", row, len);
+                dojo_failed(run, n);
+            }
+            zero: T = {};
+            if (!same_bytes(column_row(c, row), bytes_of<T>(zero&))) {
+                dojo_fail(run, n);
+                printfmt("column_push_zeroed's row {} is ", row);
+                print_hex_bytes(f, column_row(c, row));
+                printfmt(", not zeroed\n");
+                dojo_failed(run, n);
+            }
+            grown: u64 = column_capacity(c);
+            if (len == capacity) {
+                if (grown <= capacity || grown < capacity + capacity / 2) {
+                    dojo_fail(run, n);
+                    printfmt("the column was full at {} rows and grew to {}; it should grow by at least half\n",
+                        capacity, grown);
+                    dojo_failed(run, n);
+                }
+            } else if (grown != capacity) {
+                dojo_fail(run, n);
+                printfmt("capacity went from {} to {} with room to spare\n", capacity, grown);
+                dojo_failed(run, n);
+            }
+            if (through_bytes) {
+                bytes: []u8 = column_row(c, row);
+                copy_bytes(bytes, bytes_of<T>(value&));
+            } else {
+                rows: []T = column_slice<T>(c);
+                rows[row] = value;
+            }
+            _ = vec<T>push(model, value);
+        } else if (roll < 75) {
+            row: u64 = dojo_rng_below(rng, model*.length);
+            if (dojo_before(run, n)) {
+                printfmt("column_swap_remove({}) of {} rows\n", row, model*.length);
+            }
+            column_swap_remove(c, row);
+            last: T = vec<T>pop(model);
+            if (row < model*.length) {
+                vec<T>at(model, row)* = last;
+            }
+        } else {
+            row: u64 = dojo_rng_below(rng, model*.length);
+            value: T = sample_make<T>(rng);
+            if (dojo_before(run, n)) {
+                printfmt("write ");
+                sample_print<T>(value);
+                printfmt(" into row {}\n", row);
+            }
+            if (dojo_rng_below(rng, 2) == 0) {
+                bytes: []u8 = column_row(c, row);
+                copy_bytes(bytes, bytes_of<T>(value&));
+            } else {
+                rows: []T = column_slice<T>(c);
+                rows[row] = value;
+            }
+            vec<T>at(model, row)* = value;
+        }
+        if (column_len(c) != model*.length) {
+            dojo_fail(run, n);
+            printfmt("column_len is {}, the model says {}\n", column_len(c), model*.length);
+            dojo_failed(run, n);
+        }
+        if (column_capacity(c) < column_len(c)) {
+            dojo_fail(run, n);
+            printfmt("column_capacity {} is less than column_len {}\n", column_capacity(c), column_len(c));
+            dojo_failed(run, n);
+        }
+        if (n % 32 == 0 || model*.length < 4) {
+            view: []T = column_slice<T>(c);
+            at: u64 = slice_address<T>(view);
+            if (at % align != 0) {
+                dojo_fail(run, n);
+                printfmt("column_slice starts at {}, not aligned to {}\n", at, align);
+                dojo_failed(run, n);
+            }
+            for (row: u64 = 0; row < model*.length; row += 1) {
+                // Copies: the checker treats what goes into a generic call as
+                // changed by it, so the rows are compared as values.
+                shown: T = view[row];
+                want: T = vec<T>at(model, row)*;
+                if (!same_bytes(bytes_of<T>(shown&), bytes_of<T>(want&))) {
+                    dojo_fail(run, n);
+                    printfmt("row {} is ", row);
+                    sample_print<T>(shown);
+                    printfmt(" through column_slice, the model says ");
+                    sample_print<T>(want);
+                    printfmt("\n");
+                    dojo_failed(run, n);
+                }
+                if (!same_bytes(column_row(c, row), bytes_of<T>(want&))) {
+                    dojo_fail(run, n);
+                    printfmt("row {} is ", row);
+                    print_hex_bytes(f, column_row(c, row));
+                    printfmt(" through column_row, the model says ");
+                    print_hex_bytes(f, bytes_of<T>(want&));
+                    printfmt("\n");
+                    dojo_failed(run, n);
+                }
+            }
+        }
+    }
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    f: *fmt in level = fmt_make(r, 128);
+    op: u64 = 0;
+    share: u64 = run*.ops / 4;
+    fuzz_type<rgb>(run, r, f, rng&, op&, share);
+    fuzz_type<u32>(run, r, f, rng&, op&, share);
+    fuzz_type<vec3>(run, r, f, rng&, op&, share);
+    fuzz_type<vec4>(run, r, f, rng&, op&, run*.ops - 3 * share);
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "column", "4. a type-erased column");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

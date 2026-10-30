@@ -1,0 +1,111 @@
+// The reference: memoized edges. A graph of signatures in which each node
+// remembers, per component, the node one add or one remove away, once a move
+// has looked it up.
+//
+// Safe subset: the graph lives in the region `level`, made by graph_make.
+
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Component `id`'s bit in a signature.
+graph_bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+graph_node: struct = {
+    signature: u64;
+    // add[id] is one more than the node with component id added, once a move
+    // has looked it up, so 0 means not known yet; remove[id] is the same, with
+    // it removed.
+    add: [64]u32;
+    remove: [64]u32;
+}
+
+graph: struct = {
+    nodes: *vec<graph_node> in level;
+    lookups: u64;
+    hits: u64;
+}
+
+graph_add_node: proc(g: *graph, signature: u64) -> u32 = {
+    _ = vec<graph_node>push(g*.nodes, { .signature = signature });
+    return cast(g*.nodes*.length - 1, u32);
+}
+
+// Node 0 is the empty signature, where every entity starts.
+graph_make: proc(r: region level) -> *graph in level = {
+    g: *graph in level = new<graph>(r, { .nodes = vec<graph_node>make(r, 0) });
+    _ = graph_add_node(g, 0);
+    return g;
+}
+
+// The slow path: the node with this signature, made if there is none yet. A
+// search through every node; 2.4 keeps a hash map instead, and dojo 9 builds
+// one.
+graph_find_or_make: proc(g: *graph, signature: u64) -> u32 = {
+    g*.lookups += 1;
+    for (i: u64 = 0; i < g*.nodes*.length; i += 1) {
+        if (vec<graph_node>at(g*.nodes, i)*.signature == signature) {
+            return cast(i, u32);
+        }
+    }
+    return graph_add_node(g, signature);
+}
+
+graph_signature: proc(g: *graph, node: u32) -> u64 = {
+    return vec<graph_node>at(g*.nodes, cast(node, u64))*.signature;
+}
+
+// The node with component `id` added. A known edge is followed. An unknown
+// one is looked up, once, and written on both nodes: the add edge here and
+// the remove edge back.
+graph_with: proc(g: *graph, node: u32, id: u32) -> u32 = {
+    signature: u64 = graph_signature(g, node);
+    if ((signature & graph_bit(id)) != 0) {
+        return node;
+    }
+    edge: u32 = vec<graph_node>at(g*.nodes, cast(node, u64))*.add[id];
+    if (edge != 0) {
+        g*.hits += 1;
+        return edge - 1;
+    }
+    to: u32 = graph_find_or_make(g, signature | graph_bit(id));
+    // graph_find_or_make can make a node, and the vec can move them all to
+    // grow, so both pointers are taken after it.
+    vec<graph_node>at(g*.nodes, cast(node, u64))*.add[id] = to + 1;
+    vec<graph_node>at(g*.nodes, cast(to, u64))*.remove[id] = node + 1;
+    return to;
+}
+
+// The node with component `id` removed: graph_with's mirror.
+graph_without: proc(g: *graph, node: u32, id: u32) -> u32 = {
+    signature: u64 = graph_signature(g, node);
+    if ((signature & graph_bit(id)) == 0) {
+        return node;
+    }
+    edge: u32 = vec<graph_node>at(g*.nodes, cast(node, u64))*.remove[id];
+    if (edge != 0) {
+        g*.hits += 1;
+        return edge - 1;
+    }
+    to: u32 = graph_find_or_make(g, signature & ~graph_bit(id));
+    vec<graph_node>at(g*.nodes, cast(node, u64))*.remove[id] = to + 1;
+    vec<graph_node>at(g*.nodes, cast(to, u64))*.add[id] = node + 1;
+    return to;
+}
+
+graph_len: proc(g: *graph) -> u64 = {
+    return g*.nodes*.length;
+}
+
+// How many moves took the slow path.
+graph_lookups: proc(g: *graph) -> u64 = {
+    return g*.lookups;
+}
+
+// How many moves followed an edge.
+graph_hits: proc(g: *graph) -> u64 = {
+    return g*.hits;
+}

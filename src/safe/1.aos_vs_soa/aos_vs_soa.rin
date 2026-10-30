@@ -1,0 +1,283 @@
+// 1. AoS vs SoA
+//
+// The first decision in data-oriented code is how a collection sits in memory,
+// and it is made before any system is written.
+//
+// An array of structs (AoS) keeps each particle's fields together: position,
+// velocity, tint, age, lifetime, size and a name, one particle after another.
+// A struct of arrays (SoA) keeps each field together instead: every position,
+// then every velocity, and so on, each in an array of its own.
+//
+// Both hold exactly the same data. What differs is what a loop drags through
+// the cache. Movement reads position and velocity, 24 bytes of each particle.
+// The CPU fetches memory 64 bytes at a time, so in AoS most of every line it
+// fetches for movement is tint, age and name, which the loop never looks at. In
+// SoA the two arrays movement reads are all it fetches.
+//
+// SoA still stores each position as a vec3, x y z side by side. A third layout
+// splits those too: one array of f32 per coordinate. Each array is then a
+// straight run of floats, which is what a SIMD register loads: four floats at
+// once with SSE, eight with AVX, nothing to rearrange first.
+//
+// The movement procs below also differ in what they ask for. move_aos takes the
+// whole particle. move_soa and move_split take the arrays they use and nothing
+// else, so their parameter lists are lists of their data dependencies. That
+// habit is what the rest of these lessons build on.
+//
+// The program runs the same movement over all three layouts and checks that
+// they agree. With `--time` it also times them. Build Release before believing
+// the numbers: Debug checks every slice index.
+//
+// Safe subset: the arena is a region, `level`, that main opens; every array is
+// a slice that names it, `[]vec3 in level`, made by `new_slice`. The kernels
+// take plain slices, as before. One trusted proc remains, `has_flag`, which
+// reads argv, a C array of C strings, which safe code cannot index.
+
+cinclude "time.h"
+import "std/print.rin"
+
+clock: proc[external]() -> long = {}
+CLOCKS_PER_SEC: const long;
+
+level: region;
+
+// argv is C's: `^^c8` with no lengths. Trusted, because strcmp reads to the
+// terminator and the checker cannot see that argv's strings have one.
+has_flag: proc[trusted](argc: i32, argv: ^^c8, flag: ^const c8) -> b32 = {
+    for (i: i32 = 1; i < argc; i += 1) {
+        if (strcmp(argv[i], flag) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+particle_count: u64 = 262144;
+steps: u64 = 60;
+dt: f32 = 1.0 / 60.0;
+// static: only this file can reach gravity, and nothing takes its address, so
+// the compiler knows no write through a slice can change it. Without it gcc
+// puts a run-time check in front of move_split's vector loop.
+gravity: static f32 = -9.8;
+
+vec3: struct = {
+    x: f32;
+    y: f32;
+    z: f32;
+}
+
+color: struct = {
+    r: f32;
+    g: f32;
+    b: f32;
+    a: f32;
+}
+
+particle_name: struct = {
+    text: [16]c8;
+}
+
+// One particle, the way a particle system tends to grow.
+particle: struct = {
+    position: vec3;
+    velocity: vec3;
+    tint: color;
+    age: f32;
+    lifetime: f32;
+    size: f32;
+    name: particle_name;
+}
+
+// The same particles, one array per field. Every array has the same length, and
+// index i in each of them is particle i. Each slice says which region holds
+// its elements: a slice kept in memory always does.
+particles: struct = {
+    positions: []vec3 in level;
+    velocities: []vec3 in level;
+    tints: []color in level;
+    ages: []f32 in level;
+    lifetimes: []f32 in level;
+    sizes: []f32 in level;
+    names: []particle_name in level;
+}
+
+// Position and velocity split one step further, one array per coordinate.
+split_columns: struct = {
+    px: []f32 in level;
+    py: []f32 in level;
+    pz: []f32 in level;
+    vx: []f32 in level;
+    vy: []f32 in level;
+    vz: []f32 in level;
+}
+
+// A small LCG, so both layouts start from the same particles on every compiler.
+random_state: u64 = 12345;
+
+random01: proc() -> f32 = {
+    random_state = random_state * 6364136223846793005'u64 + 1442695040888963407'u64;
+    return cast(random_state shr 40, f32) / 16777216.0;
+}
+
+make_particle: proc(i: u64) -> particle = {
+    p: particle = {};
+    p.position = { .x = random01() * 100.0, .y = random01() * 100.0, .z = random01() * 100.0 };
+    p.velocity = { .x = random01() - 0.5, .y = random01() * 4.0, .z = random01() - 0.5 };
+    p.tint = { .r = random01(), .g = random01(), .b = random01(), .a = 1.0 };
+    p.lifetime = 2.0 + random01() * 3.0;
+    p.size = 0.1 + random01();
+    p.name.text[0] = 'p';
+    p.name.text[1] = cast('0' + i % 10, c8);
+    return p;
+}
+
+// noalias even on a single slice: on Windows a slice is passed by reference,
+// and clang-cl does not use C's type rules, so without it a float written
+// through ps might be the slice's own pointer or length. The loop would read
+// both again after every particle.
+move_aos: proc(ps: noalias []particle, dt: f32) -> void = {
+    for (i: u64 = 0; i < ps.length; i += 1) {
+        p: *particle = ps[i]&;
+        p*.velocity.y += gravity * dt;
+        p*.position.x += p*.velocity.x * dt;
+        p*.position.y += p*.velocity.y * dt;
+        p*.position.z += p*.velocity.z * dt;
+    }
+}
+
+// noalias: positions and velocities never overlap, so the compiler can work on
+// several particles at once without first checking that they don't.
+move_soa: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        velocities[i].y += gravity * dt;
+        positions[i].x += velocities[i].x * dt;
+        positions[i].y += velocities[i].y * dt;
+        positions[i].z += velocities[i].z * dt;
+    }
+}
+
+// Every column it writes is noalias; vx and vz are only read. Each line of the
+// loop is one SIMD load, multiply, add and store over consecutive floats.
+move_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32,
+                 vx: []const f32, vy: noalias []f32, vz: []const f32, dt: f32) -> void = {
+    for (i: u64 = 0; i < px.length; i += 1) {
+        vy[i] += gravity * dt;
+        px[i] += vx[i] * dt;
+        py[i] += vy[i] * dt;
+        pz[i] += vz[i] * dt;
+    }
+}
+
+checksum_aos: proc(ps: []particle) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < ps.length; i += 1) {
+        sum += cast(ps[i].position.x + ps[i].position.y + ps[i].position.z, f64);
+    }
+    return sum;
+}
+
+checksum_soa: proc(positions: []vec3) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        sum += cast(positions[i].x + positions[i].y + positions[i].z, f64);
+    }
+    return sum;
+}
+
+checksum_split: proc(xs: []const f32, ys: []const f32, zs: []const f32) -> f64 = {
+    sum: f64 = 0.0;
+    for (i: u64 = 0; i < xs.length; i += 1) {
+        sum += cast(xs[i] + ys[i] + zs[i], f64);
+    }
+    return sum;
+}
+
+seconds: proc() -> f64 = {
+    return cast(clock(), f64) / cast(CLOCKS_PER_SEC, f64);
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    timing: b32 = has_flag(argc, argv, "--time");
+    same: b32 = 0;
+
+    // Everything below lives exactly as long as this block: the region is the
+    // arena, and new_slice is push_slice with the length kept.
+    level: region = {
+    aos: []particle in level = new_slice<particle>(level, particle_count);
+    soa: *particles in level = new<particles>(level, {
+        .positions = new_slice<vec3>(level, particle_count),
+        .velocities = new_slice<vec3>(level, particle_count),
+        .tints = new_slice<color>(level, particle_count),
+        .ages = new_slice<f32>(level, particle_count),
+        .lifetimes = new_slice<f32>(level, particle_count),
+        .sizes = new_slice<f32>(level, particle_count),
+        .names = new_slice<particle_name>(level, particle_count),
+    });
+    split: *split_columns in level = new<split_columns>(level, {
+        .px = new_slice<f32>(level, particle_count),
+        .py = new_slice<f32>(level, particle_count),
+        .pz = new_slice<f32>(level, particle_count),
+        .vx = new_slice<f32>(level, particle_count),
+        .vy = new_slice<f32>(level, particle_count),
+        .vz = new_slice<f32>(level, particle_count),
+    });
+
+    // The same particle goes into every layout: whole into aos, field by field
+    // into soa, coordinate by coordinate into split.
+    for (i: u64 = 0; i < particle_count; i += 1) {
+        p: particle = make_particle(i);
+        aos[i] = p;
+        soa*.positions[i] = p.position;
+        soa*.velocities[i] = p.velocity;
+        soa*.tints[i] = p.tint;
+        soa*.ages[i] = p.age;
+        soa*.lifetimes[i] = p.lifetime;
+        soa*.sizes[i] = p.size;
+        soa*.names[i] = p.name;
+        split*.px[i] = p.position.x;
+        split*.py[i] = p.position.y;
+        split*.pz[i] = p.position.z;
+        split*.vx[i] = p.velocity.x;
+        split*.vy[i] = p.velocity.y;
+        split*.vz[i] = p.velocity.z;
+    }
+
+    t0: f64 = seconds();
+    for (s: u64 = 0; s < steps; s += 1) {
+        move_aos(aos, dt);
+    }
+    t1: f64 = seconds();
+    for (s: u64 = 0; s < steps; s += 1) {
+        move_soa(soa*.positions, soa*.velocities, dt);
+    }
+    t2: f64 = seconds();
+    for (s: u64 = 0; s < steps; s += 1) {
+        move_split(split*.px, split*.py, split*.pz, split*.vx, split*.vy, split*.vz, dt);
+    }
+    t3: f64 = seconds();
+
+    used: u64 = sizeof(vec3) * 2;
+    printfmt("{} particles, {} steps\n", particle_count, steps);
+    printfmt("array of structs: a particle is {} bytes, movement uses {} of them\n", sizeof(particle), used);
+    printfmt("  bytes fetched per step: {}\n", sizeof(particle) * particle_count);
+    printfmt("struct of arrays: movement reads two arrays of {}-byte vec3\n", sizeof(vec3));
+    printfmt("  bytes fetched per step: {}\n", used * particle_count);
+    printfmt("split columns: movement reads six arrays of {}-byte f32\n", sizeof(f32));
+    printfmt("  bytes fetched per step: {}\n", used * particle_count);
+
+    a: f64 = checksum_aos(aos);
+    b: f64 = checksum_soa(soa*.positions);
+    c: f64 = checksum_split(split*.px, split*.py, split*.pz);
+    printfmt("checksum aos {:.3}\n", a);
+    printfmt("checksum soa {:.3}\n", b);
+    printfmt("checksum split {:.3}\n", c);
+    same = a == b && b == c;
+    printfmt("same result: {}\n", same ? "yes" : "no");
+
+    if (timing) {
+        printfmt("aos {:.1} ms, soa {:.1} ms, split {:.1} ms\n",
+            (t1 - t0) * 1000.0, (t2 - t1) * 1000.0, (t3 - t2) * 1000.0);
+    }
+    }
+    return same ? 0 : 1;
+}

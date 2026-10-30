@@ -1,0 +1,26 @@
+// Level 3: a blank page. Write the sparse set from memory.
+//
+// Start it with: python tools/dojo.py start swap_remove 3
+//
+// The harness needs exactly this, and checks what each does. vec<T>,
+// option<T> and the region `level` are given.
+//
+//   sparse_set: struct
+//   sparse_set_make: proc(r: region level) -> *sparse_set in level
+//   sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> option<u64>
+//                                          replaces, returning the old value
+//   sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64>
+//                                          keeps the rows packed
+//   sparse_set_get: proc(s: *sparse_set, id: u32) -> ?*u64    null if id has no value
+//   sparse_set_len: proc(s: *sparse_set) -> u64
+//   sparse_set_values: proc(s: *sparse_set) -> []u64         packed, in row order
+//   sparse_set_ids: proc(s: *sparse_set) -> []u32            ids[row] owns values[row]
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

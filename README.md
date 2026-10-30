@@ -19,6 +19,16 @@ courses and a dojo:
 There is no renderer, no window and no library: only data, and the loops
 that stream it.
 
+**Every program is also here in rin's safe subset**, under `ecs/safe`,
+`src/safe`, `includes/safe` and `dojo/safe`: the same lessons, katas and
+playgrounds, printing the same expected output, checked by the compiler's
+`regions` branch with its memory-safety rules on and run clean under the
+sanitizers. 23039 lines, 1444 procs, 134 of them `[trusted]`: the type-erased
+byte columns, the arena-level allocation inside the shared library, reading
+`argv`, and `strcmp`; everything else is checked. Each `safe` folder has a
+README on what the port changed, and the header of each file names its
+trusted procs. `tools/check.py` runs both versions.
+
 ## Build an ECS
 
 | | chapter | about |

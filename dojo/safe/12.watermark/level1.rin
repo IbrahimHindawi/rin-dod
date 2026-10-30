@@ -1,0 +1,55 @@
+// Level 1: one proc. Everything here works except query_update. Write its
+// body.
+//
+// Start it with: python tools/dojo.py start watermark 1
+//
+// Safe subset: the query lives in the region `level`, made by query_make,
+// and its list of tables grows there.
+
+import "std/vec.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Every bit of `all`, and none of `none`.
+query_matches: proc(signature: u64, all: u64, none: u64) -> b32 = {
+    return (signature & all) == all && (signature & none) == 0;
+}
+
+query: struct = {
+    all: u64;
+    none: u64;
+    // The tables that match, by index, in the order they were found.
+    tables: *vec<u32> in level;
+    // The watermark: tables 0 to checked - 1 have been looked at.
+    checked: u64;
+    // How many tables query_update has looked at, ever. With the watermark,
+    // each table once.
+    scanned: u64;
+}
+
+query_make: proc(r: region level, all: u64, none: u64) -> *query in level = {
+    return new<query>(r, { .all = all, .none = none, .tables = vec<u32>make(r, 0) });
+}
+
+// Tables are only ever added, at the end, so the ones past the watermark are
+// the only ones this query hasn't seen.
+query_update: proc(q: *query, signatures: []const u64) -> void = {
+    // Level 1: look at the tables past the watermark, and only those: count
+    // each in scanned, keep the ones that match, and move the watermark.
+}
+
+// The matching tables, in increasing order.
+query_tables: proc(q: *query) -> []u32 = {
+    return vec<u32>items(q*.tables);
+}
+
+// How many tables the query has been updated over: the watermark.
+query_checked: proc(q: *query) -> u64 = {
+    return q*.checked;
+}
+
+// How many tables query_update has looked at, in all.
+query_scanned: proc(q: *query) -> u64 = {
+    return q*.scanned;
+}

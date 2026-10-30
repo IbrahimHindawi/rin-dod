@@ -1,0 +1,465 @@
+// The harness for dojo 8, index not pointer. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build
+// and run yours with
+//
+//   python tools/dojo.py index
+//
+// First a short scenario, the playground's steps, each printed as it passes.
+// Then a fuzz run: thousands of random pushes, inserts, removes, reads and
+// writes from a seed, against a model that keeps the live nodes in list order
+// and each node's value. After every operation the harness walks the list
+// both ways, list_head to the end by list_next and list_tail back by
+// list_prev, so a link left wrong is caught by the operation that left it.
+// The list grows to about a thousand nodes, so its vec moves many times, and
+// every node is checked by the index it was given.
+//
+// Safe subset: the list and the model live in the region `level`, and
+// list_get hands back a nullable `?*u64`, narrowed with `if (p)`.
+
+import "../dojo.rin"
+
+fmt_node: proc(f: *fmt, node: u32) -> void = {
+    if (node == list_none) {
+        fmt_cstr(f, "none");
+    } else {
+        fmt_u64(f, cast(node, u64));
+    }
+}
+
+fmt_found: proc(f: *fmt, p: ?*const u64) -> void = {
+    if (p) {
+        fmt_u64(f, p*);
+    } else {
+        fmt_cstr(f, "null");
+    }
+}
+
+fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
+    if (o.has_value) {
+        fmt_u64(f, o.value);
+    } else {
+        fmt_cstr(f, "none");
+    }
+}
+
+// The values, head to tail, following the links; at most `limit` of them, in
+// case a link loops back.
+fmt_values: proc(f: *fmt, l: *list, limit: u64) -> void = {
+    count: u64 = 0;
+    for (at: u32 = list_head(l); at != list_none && count < limit; at = list_next(l, at)) {
+        if (count > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_found(f, list_get(l, at));
+        count += 1;
+    }
+}
+
+print_node: proc(node: u32) -> void = {
+    if (node == list_none) {
+        printfmt("none");
+    } else {
+        printfmt("{}", node);
+    }
+}
+
+print_found: proc(p: ?*const u64) -> void = {
+    if (p) {
+        printfmt("{}", p*);
+    } else {
+        printfmt("null");
+    }
+}
+
+print_option: proc(o: option<u64>) -> void = {
+    if (o.has_value) {
+        printfmt("{}", o.value);
+    } else {
+        printfmt("none");
+    }
+}
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    l: *list in level = list_make(r);
+    f: *fmt in level = fmt_make(r, 128);
+
+    a: u32 = list_push_back(l, 10);
+    b: u32 = list_push_back(l, 20);
+    c: u32 = list_push_back(l, 30);
+    fmt_reset(f);
+    fmt_node(f, a);
+    fmt_char(f, ' ');
+    fmt_node(f, b);
+    fmt_char(f, ' ');
+    fmt_node(f, c);
+    dojo_same("push_back 10, 20, 30 as a, b, c", fmt_text(f), "0 1 2");
+    p: ?*u64 = list_get(l, b);
+    if (p) {
+        p* = 21;
+    }
+    fmt_reset(f);
+    fmt_values(f, l, 10);
+    dojo_same("write 21 into b, by its index", fmt_text(f), "10 21 30");
+    d: u32 = list_push_front(l, 5);
+    fmt_reset(f);
+    fmt_node(f, d);
+    dojo_same("push_front 5 as d", fmt_text(f), "3");
+    fmt_reset(f);
+    fmt_values(f, l, 10);
+    dojo_same("values", fmt_text(f), "5 10 21 30");
+    fmt_reset(f);
+    fmt_option(f, list_remove(l, a));
+    dojo_same("remove a", fmt_text(f), "10");
+    fmt_reset(f);
+    fmt_option(f, list_remove(l, a));
+    dojo_same("remove a again", fmt_text(f), "none");
+    fmt_reset(f);
+    fmt_found(f, list_get(l, a));
+    dojo_same("get a", fmt_text(f), "null");
+    e: u32 = list_insert_after(l, b, 25);
+    fmt_reset(f);
+    fmt_node(f, e);
+    dojo_same("insert 25 after b as e: a's node, from the free list", fmt_text(f), "0");
+    fmt_reset(f);
+    fmt_values(f, l, 10);
+    dojo_same("values", fmt_text(f), "5 21 25 30");
+    for (v: u64 = 100; v < 200; v += 1) {
+        _ = list_push_back(l, v);
+    }
+    fmt_reset(f);
+    fmt_found(f, list_get(l, b));
+    dojo_same("push_back 100 more, so the nodes move; get b by its index", fmt_text(f), "21");
+    fmt_reset(f);
+    fmt_option(f, list_remove(l, c));
+    dojo_same("remove c", fmt_text(f), "30");
+    fmt_reset(f);
+    fmt_node(f, list_insert_after(l, c, 1));
+    dojo_same("insert after c, now removed", fmt_text(f), "none");
+    fmt_reset(f);
+    fmt_found(f, list_get(l, 1000));
+    dojo_same("get node 1000, never made", fmt_text(f), "null");
+    fmt_reset(f);
+    fmt_u64(f, list_len(l));
+    dojo_same("len", fmt_text(f), "103");
+    fmt_reset(f);
+    fmt_values(f, l, 4);
+    dojo_same("the first 4 values", fmt_text(f), "5 21 25 100");
+    fmt_reset(f);
+    fmt_node(f, list_head(l));
+    fmt_char(f, ' ');
+    fmt_node(f, list_tail(l));
+    dojo_same("head, tail", fmt_text(f), "3 103");
+    fmt_reset(f);
+    fmt_node(f, list_next(l, b));
+    fmt_char(f, ' ');
+    fmt_node(f, list_prev(l, b));
+    dojo_same("next(b), prev(b)", fmt_text(f), "0 3");
+}
+
+// What a correct list must do, kept the simple way: the live nodes in list
+// order, each node's value and whether it's alive, and the freed nodes waiting
+// to be used again.
+model: struct = {
+    order: *vec<u32> in level;
+    value: *vec<u64> in level;
+    alive: *vec<b32> in level;
+    free: *vec<u32> in level;
+}
+
+model_make: proc(r: region level) -> *model in level = {
+    return new<model>(r, { .order = vec<u32>make(r, 0), .value = vec<u64>make(r, 0),
+        .alive = vec<b32>make(r, 0), .free = vec<u32>make(r, 0) });
+}
+
+model_get: proc(m: *model, node: u32) -> option<u64> = {
+    i: u64 = cast(node, u64);
+    if (i >= m*.value*.length || !vec<b32>at(m*.alive, i)*) {
+        return option<u64>none();
+    }
+    return option<u64>some(vec<u64>at(m*.value, i)*);
+}
+
+model_set: proc(m: *model, node: u32, value: u64) -> void = {
+    vec<u64>at(m*.value, cast(node, u64))* = value;
+    vec<b32>at(m*.alive, cast(node, u64))* = 1;
+}
+
+found_is: proc(p: ?*const u64, o: option<u64>) -> b32 = {
+    if (!p) {
+        return !o.has_value;
+    }
+    return o.has_value && p* == o.value;
+}
+
+same_option: proc(a: option<u64>, b: option<u64>) -> b32 = {
+    return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
+}
+
+// Put `node` at position `at` of `v`, moving the rest up.
+order_insert: proc(v: *vec<u32>, at: u64, node: u32) -> void = {
+    _ = vec<u32>push(v, node);
+    for (i: u64 = v*.length - 1; i > at; i -= 1) {
+        vec<u32>at(v, i)* = vec<u32>at(v, i - 1)*;
+    }
+    vec<u32>at(v, at)* = node;
+}
+
+// Take out the node at position `at` of `v`, moving the rest down.
+order_remove: proc(v: *vec<u32>, at: u64) -> u32 = {
+    node: u32 = vec<u32>at(v, at)*;
+    for (i: u64 = at; i + 1 < v*.length; i += 1) {
+        vec<u32>at(v, i)* = vec<u32>at(v, i + 1)*;
+    }
+    _ = vec<u32>pop(v);
+    return node;
+}
+
+// A new node must be a freed one if any are waiting, and the next new index
+// if not.
+took: proc(run: *dojo_run, op: u64, m: *model, node: u32, what: ^const char) -> void = {
+    if (m*.free*.length == 0) {
+        if (cast(node, u64) != m*.value*.length) {
+            dojo_fail(run, op);
+            printfmt("{} returned node ", what);
+            print_node(node);
+            printfmt(" with nothing free; the next new node is {}\n", m*.value*.length);
+            dojo_failed(run, op);
+        }
+        _ = vec<u64>push(m*.value, 0);
+        _ = vec<b32>push(m*.alive, 0);
+        return;
+    }
+    for (i: u64 = 0; i < m*.free*.length; i += 1) {
+        if (vec<u32>at(m*.free, i)* == node) {
+            last: u32 = vec<u32>pop(m*.free);
+            if (i < m*.free*.length) {
+                vec<u32>at(m*.free, i)* = last;
+            }
+            return;
+        }
+    }
+    dojo_fail(run, op);
+    printfmt("{} returned node ", what);
+    print_node(node);
+    printfmt(", but it isn't free, and {} freed nodes wait\n", m*.free*.length);
+    dojo_failed(run, op);
+}
+
+// The links, both ways: list_head to the end by list_next must visit the
+// model's nodes in order, and list_tail back by list_prev the same nodes
+// backwards. A walk stops at the first node that's wrong, so a loop in the
+// links can't hang it.
+links_agree: proc(run: *dojo_run, op: u64, l: *list, m: *model) -> void = {
+    n: u64 = m*.order*.length;
+    at: u32 = list_head(l);
+    for (i: u64 = 0; i < n; i += 1) {
+        want: u32 = vec<u32>at(m*.order, i)*;
+        if (at != want) {
+            dojo_fail(run, op);
+            if (i == 0) {
+                printfmt("walking head to tail, list_head gives ");
+            } else {
+                printfmt("walking head to tail, list_next({}) gives ", vec<u32>at(m*.order, i - 1)*);
+            }
+            print_node(at);
+            printfmt(", but the model has node {} there, at position {} of {}\n", want, i, n);
+            dojo_failed(run, op);
+        }
+        at = list_next(l, want);
+    }
+    if (at != list_none) {
+        dojo_fail(run, op);
+        if (n > 0) {
+            last: u32 = vec<u32>at(m*.order, n - 1)*;
+            printfmt("walking head to tail, list_next({}) gives {}, but {} is the last of {} nodes\n", last, at, last, n);
+        } else {
+            printfmt("list_head gives {}, but the list is empty\n", at);
+        }
+        dojo_failed(run, op);
+    }
+    at = list_tail(l);
+    for (i: u64 = n; i > 0; i -= 1) {
+        want: u32 = vec<u32>at(m*.order, i - 1)*;
+        if (at != want) {
+            dojo_fail(run, op);
+            if (i == n) {
+                printfmt("walking tail to head, list_tail gives ");
+            } else {
+                printfmt("walking tail to head, list_prev({}) gives ", vec<u32>at(m*.order, i)*);
+            }
+            print_node(at);
+            printfmt(", but the model has node {} there, at position {} of {}\n", want, i - 1, n);
+            dojo_failed(run, op);
+        }
+        at = list_prev(l, want);
+    }
+    if (at != list_none) {
+        dojo_fail(run, op);
+        if (n > 0) {
+            first: u32 = vec<u32>at(m*.order, 0)*;
+            printfmt("walking tail to head, list_prev({}) gives {}, but {} is the first of {} nodes\n", first, at, first, n);
+        } else {
+            printfmt("list_tail gives {}, but the list is empty\n", at);
+        }
+        dojo_failed(run, op);
+    }
+}
+
+// Every node by its index, live and free.
+all_agree: proc(run: *dojo_run, op: u64, l: *list, m: *model) -> void = {
+    for (i: u64 = 0; i < m*.value*.length; i += 1) {
+        node: u32 = cast(i, u32);
+        if (!found_is(list_get(l, node), model_get(m, node))) {
+            dojo_fail(run, op);
+            printfmt("get({}) gives ", node);
+            print_found(list_get(l, node));
+            printfmt(", the model says ");
+            print_option(model_get(m, node));
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+    }
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    l: *list in level = list_make(r);
+    m: *model in level = model_make(r);
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        value: u64 = op;
+        if (roll < 20 || m*.order*.length == 0) {
+            if (dojo_before(run, op)) {
+                printfmt("push_back({})\n", value);
+            }
+            node: u32 = list_push_back(l, value);
+            took(run, op, m, node, "push_back");
+            model_set(m, node, value);
+            _ = vec<u32>push(m*.order, node);
+        } else if (roll < 30) {
+            if (dojo_before(run, op)) {
+                printfmt("push_front({})\n", value);
+            }
+            node: u32 = list_push_front(l, value);
+            took(run, op, m, node, "push_front");
+            model_set(m, node, value);
+            order_insert(m*.order, 0, node);
+        } else if (roll < 45) {
+            at: u64 = dojo_rng_below(rng&, m*.order*.length);
+            after: u32 = vec<u32>at(m*.order, at)*;
+            if (dojo_before(run, op)) {
+                printfmt("insert_after({}, {})\n", after, value);
+            }
+            node: u32 = list_insert_after(l, after, value);
+            if (node == list_none) {
+                dojo_fail(run, op);
+                printfmt("insert_after({}, {}) gave none, but node {} is in the list\n", after, value, after);
+                dojo_failed(run, op);
+            }
+            took(run, op, m, node, "insert_after");
+            model_set(m, node, value);
+            order_insert(m*.order, at + 1, node);
+        } else if (roll < 85) {
+            at: u64 = dojo_rng_below(rng&, m*.order*.length);
+            node: u32 = order_remove(m*.order, at);
+            want: option<u64> = model_get(m, node);
+            vec<b32>at(m*.alive, cast(node, u64))* = 0;
+            if (dojo_before(run, op)) {
+                printfmt("remove({})\n", node);
+            }
+            got: option<u64> = list_remove(l, node);
+            if (!same_option(got, want)) {
+                dojo_fail(run, op);
+                printfmt("remove({}) returned ", node);
+                print_option(got);
+                printfmt(", the model says ");
+                print_option(want);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+            _ = vec<u32>push(m*.free, node);
+        } else if (roll < 88 && m*.free*.length > 0) {
+            node: u32 = vec<u32>at(m*.free, dojo_rng_below(rng&, m*.free*.length))*;
+            if (dojo_before(run, op)) {
+                printfmt("remove({}), a freed node, and insert_after({}, {})\n", node, node, value);
+            }
+            len: u64 = list_len(l);
+            removed: option<u64> = list_remove(l, node);
+            inserted: u32 = list_insert_after(l, node, value);
+            if (removed.has_value || inserted != list_none || list_len(l) != len) {
+                dojo_fail(run, op);
+                printfmt("node {} is free, so remove({}) and insert_after({}, {}) should give none and change nothing\n",
+                    node, node, node, value);
+                dojo_failed(run, op);
+            }
+            if (list_get(l, node) || list_next(l, node) != list_none || list_prev(l, node) != list_none) {
+                dojo_fail(run, op);
+                printfmt("node {} is free, so get, next and prev should give null, none and none; they give ", node);
+                print_found(list_get(l, node));
+                printfmt(", ");
+                print_node(list_next(l, node));
+                printfmt(", ");
+                print_node(list_prev(l, node));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 96) {
+            node: u32 = vec<u32>at(m*.order, dojo_rng_below(rng&, m*.order*.length))*;
+            if (dojo_before(run, op)) {
+                printfmt("get({}), then add 1 through the pointer\n", node);
+            }
+            p: ?*u64 = list_get(l, node);
+            if (p) {
+                p* += 1;
+            }
+            vec<u64>at(m*.value, cast(node, u64))* += 1;
+            if (!found_is(list_get(l, node), model_get(m, node))) {
+                dojo_fail(run, op);
+                printfmt("after adding 1 through get({}), it gives ", node);
+                print_found(list_get(l, node));
+                printfmt(", the model says ");
+                print_option(model_get(m, node));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        } else {
+            node: u32 = cast(dojo_rng_below(rng&, m*.value*.length + 2), u32);
+            if (dojo_before(run, op)) {
+                printfmt("get({})\n", node);
+            }
+            if (!found_is(list_get(l, node), model_get(m, node))) {
+                dojo_fail(run, op);
+                printfmt("get({}) gives ", node);
+                print_found(list_get(l, node));
+                printfmt(", the model says ");
+                print_option(model_get(m, node));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        }
+        if (list_len(l) != m*.order*.length) {
+            dojo_fail(run, op);
+            printfmt("len() is {}, the model has {}\n", list_len(l), m*.order*.length);
+            dojo_failed(run, op);
+        }
+        links_agree(run, op, l, m);
+        if (op % 256 == 0) {
+            all_agree(run, op, l, m);
+        }
+    }
+    all_agree(run, run*.ops, l, m);
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "index", "8. index, not pointer");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

@@ -1,0 +1,38 @@
+// Level 3: a blank page. Write the command buffer from memory.
+//
+// Start it with: python tools/dojo.py start commands 3
+//
+// The harness needs exactly this, and checks what each does. It provides the
+// world and the result, and dojo_handle, dojo_status, vec<T> and the region
+// `level` are given:
+//
+//   world_spawn: proc(w: *world, value: u32) -> dojo_handle
+//   world_despawn: proc(w: *world, h: dojo_handle) -> dojo_status
+//   world_set: proc(w: *world, h: dojo_handle, value: u32) -> dojo_status
+//   applied: struct = { applied: u32; skipped: u32; }
+//
+// You write:
+//
+//   pending: struct                                    a spawn not applied yet
+//   target: struct                                     a handle, or a pending spawn
+//   target_entity: proc(h: dojo_handle) -> target
+//   target_pending: proc(p: pending) -> target
+//   commands: struct
+//   commands_make: proc(r: region level) -> *commands in level
+//   commands_spawn: proc(c: *commands, value: u32) -> pending
+//   commands_set: proc(c: *commands, t: target, value: u32) -> void
+//   commands_despawn: proc(c: *commands, t: target) -> void
+//   commands_len: proc(c: *commands) -> u64            recorded, not yet applied
+//   commands_apply: proc(c: *commands, w: *world) -> applied
+//                                                      every command in order; a dead
+//                                                      target is skipped; the buffer
+//                                                      ends up empty
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

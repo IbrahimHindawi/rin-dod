@@ -1,0 +1,31 @@
+// Level 3: a blank page. Write the column from memory.
+//
+// Start it with: python tools/dojo.py start column 3
+//
+// The harness needs exactly this, and checks what each does. The region
+// `level`, memcpy and memset are given. The procs that touch the bytes are
+// [trusted]; the two that only read a count are checked.
+//
+//   column: struct
+//   column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level
+//                                          stops unless align is a power of two, 1 to 16
+//   column_len: proc(c: *const column) -> u64
+//   column_capacity: proc(c: *const column) -> u64         rows that fit before it grows
+//   column_push_zeroed: proc[trusted](c: *column) -> u64   a zeroed row at the end, its
+//                                                           number; a full column grows
+//                                                           by at least half
+//   column_swap_remove: proc[trusted](c: *column, row: u64) -> void
+//   column_row: proc[trusted](c: *const column, row: u64) -> []u8    stops past the rows in use
+//   column_slice: proc[trusted]<T>(c: *const column) -> []T          stops unless T has the
+//                                                                    column's size and alignment
+//
+// Rows of zero bytes, tags, are in the scenario too.
+
+import "std/cstd.rin"
+import "std/print.rin"
+import "std/memops.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

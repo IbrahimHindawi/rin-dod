@@ -1,0 +1,284 @@
+// The harness for dojo 12, a watermark. It is fixed. Your work is kata.rin,
+// beside it: kata.rin imports this file, which has main, so the two are one
+// program. The reference, solution.rin, and each level file do the same, so
+// each of them builds on its own, and this file never does. Build and run
+// yours with
+//
+//   python tools/dojo.py watermark
+//
+// The world's tables are here, reduced to what a query reads: a list of
+// signatures that only ever grows at the end. First a short scenario, the
+// playground's steps. Then a fuzz run: tables made at random, four queries
+// updated at random and now and then replaced by new ones, against a model
+// that keeps, for each query, the matching tables and how many tables it has
+// been updated over. After every update the query must list exactly the
+// matching tables, in order, and have looked at each table once.
+//
+// Safe subset: the region `level` is the arena. The list of tables, the
+// queries and the models all live in it; a query that is replaced is a new
+// one made in the region, where the original re-initialized it in place.
+
+import "../dojo.rin"
+
+fmt_list: proc(f: *fmt, items: []u32) -> void = {
+    if (items.length == 0) {
+        fmt_cstr(f, "none");
+    }
+    for (i: u64 = 0; i < items.length; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, cast(items[i], u64));
+    }
+}
+
+// A signature as the components in it: {0 2 5}.
+print_set: proc(bits: u64) -> void = {
+    printfmt("{");
+    first: b32 = 1;
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (((bits shr i) & 1) == 1) {
+            if (!first) {
+                printfmt(" ");
+            }
+            printfmt("{}", i);
+            first = 0;
+        }
+    }
+    printfmt("}");
+}
+
+// checked, scanned
+fmt_counts: proc(f: *fmt, q: *query) -> void = {
+    fmt_u64(f, query_checked(q));
+    fmt_char(f, ' ');
+    fmt_u64(f, query_scanned(q));
+}
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    position: u64 = 1;
+    velocity: u64 = 2;
+    health: u64 = 4;
+    burning: u64 = 8;
+    f: *fmt in level = fmt_make(r, 64);
+    tables: *vec<u64> in level = vec<u64>make(r, 0);
+    _ = vec<u64>push(tables, position);
+    _ = vec<u64>push(tables, position | velocity);
+    _ = vec<u64>push(tables, position | velocity | health);
+    movers: *query in level = query_make(r, position | velocity, 0);
+    healthy: *query in level = query_make(r, health, burning);
+
+    fmt_reset(f);
+    fmt_counts(f, movers);
+    fmt_char(f, ' ');
+    fmt_list(f, query_tables(movers));
+    dojo_same("a new query: checked, scanned, tables", fmt_text(f), "0 0 none");
+    query_update(movers, vec<u64>items(tables));
+    fmt_reset(f);
+    fmt_list(f, query_tables(movers));
+    dojo_same("update movers over tables 0 to 2: tables", fmt_text(f), "1 2");
+    fmt_reset(f);
+    fmt_counts(f, movers);
+    dojo_same("checked, scanned", fmt_text(f), "3 3");
+    query_update(movers, vec<u64>items(tables));
+    fmt_reset(f);
+    fmt_list(f, query_tables(movers));
+    dojo_same("update movers again, nothing new: tables", fmt_text(f), "1 2");
+    fmt_reset(f);
+    fmt_counts(f, movers);
+    dojo_same("checked, scanned: it looked at nothing", fmt_text(f), "3 3");
+    _ = vec<u64>push(tables, position | velocity | health | burning);
+    _ = vec<u64>push(tables, health);
+    query_update(movers, vec<u64>items(tables));
+    fmt_reset(f);
+    fmt_list(f, query_tables(movers));
+    dojo_same("make tables 3 and 4, update movers: tables", fmt_text(f), "1 2 3");
+    fmt_reset(f);
+    fmt_counts(f, movers);
+    dojo_same("checked, scanned: only 3 and 4 were new", fmt_text(f), "5 5");
+    query_update(healthy, vec<u64>items(tables));
+    fmt_reset(f);
+    fmt_list(f, query_tables(healthy));
+    dojo_same("update healthy for the first time: tables", fmt_text(f), "2 4");
+    fmt_reset(f);
+    fmt_counts(f, healthy);
+    dojo_same("checked, scanned: all five", fmt_text(f), "5 5");
+    _ = vec<u64>push(tables, velocity | health);
+    query_update(healthy, vec<u64>items(tables));
+    fmt_reset(f);
+    fmt_list(f, query_tables(healthy));
+    dojo_same("make table 5, update healthy: tables", fmt_text(f), "2 4 5");
+    fmt_reset(f);
+    fmt_counts(f, healthy);
+    dojo_same("checked, scanned", fmt_text(f), "6 6");
+    fmt_reset(f);
+    fmt_u64(f, query_checked(movers));
+    dojo_same("movers, not updated since: checked", fmt_text(f), "5");
+}
+
+// What a query must have, kept the plain way: its masks, the tables that
+// match among the ones it has been updated over, and how many those are.
+model: struct = {
+    all: u64;
+    none: u64;
+    tables: *vec<u32> in level;
+    seen: u64;
+}
+
+// Two random components that must be there, and sometimes two that mustn't.
+// Each two may be one component twice, and the ones that mustn't may be ones
+// that must, so some queries match nothing. One random number per statement,
+// so the order they are drawn in is rust-dod's.
+random_query: proc(rng: *dojo_rng, r: region level) -> *model in level = {
+    m: *model in level = new<model>(r, { .tables = vec<u32>make(r, 0) });
+    a: u64 = dojo_rng_below(rng, 8);
+    b: u64 = dojo_rng_below(rng, 8);
+    m*.all = (1'u64 shl a) | (1'u64 shl b);
+    if (dojo_rng_below(rng, 3) == 0) {
+        c: u64 = dojo_rng_below(rng, 8);
+        d: u64 = dojo_rng_below(rng, 8);
+        m*.none = (1'u64 shl c) | (1'u64 shl d);
+    }
+    return m;
+}
+
+print_query: proc(k: u64, m: *model) -> void = {
+    printfmt("query {} (all ", k);
+    print_set(m*.all);
+    printfmt(", none ");
+    print_set(m*.none);
+    printfmt(")");
+}
+
+same_tables: proc(a: []u32, b: []u32) -> b32 = {
+    if (a.length != b.length) {
+        return 0;
+    }
+    for (i: u64 = 0; i < a.length; i += 1) {
+        if (a[i] != b[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+print_table_at: proc(tables: []u32, at: u64) -> void = {
+    if (at < tables.length) {
+        printfmt("table {}", tables[at]);
+    } else {
+        printfmt("nothing");
+    }
+}
+
+// Where two lists of tables first differ, in words.
+print_difference: proc(got: []u32, want: []u32) -> void = {
+    at: u64 = 0;
+    while (at < got.length && at < want.length && got[at] == want[at]) {
+        at += 1;
+    }
+    printfmt("it lists {}, the model {}; the first difference is at position {}: ", got.length, want.length, at);
+    print_table_at(got, at);
+    printfmt(", where the model has ");
+    print_table_at(want, at);
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    signatures: *vec<u64> in level = vec<u64>make(r, 0);
+    models: [4]?*model in level = {};
+    queries: [4]?*query in level = {};
+    for (k: u64 = 0; k < 4; k += 1) {
+        m: *model in level = random_query(rng&, r);
+        models[k] = m;
+        queries[k] = query_make(r, m*.all, m*.none);
+    }
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 20) {
+            signature: u64 = dojo_rng_below(rng&, 256);
+            if (dojo_before(run, op)) {
+                printfmt("make table {} ", signatures*.length);
+                print_set(signature);
+                printfmt("\n");
+            }
+            _ = vec<u64>push(signatures, signature);
+        } else if (roll < 90) {
+            k: u64 = dojo_rng_below(rng&, 4);
+            m: ?*model in level = models[k];
+            q: ?*query in level = queries[k];
+            if (!m || !q) {
+                continue;
+            }
+            if (dojo_before(run, op)) {
+                printfmt("update ");
+                print_query(k, m);
+                printfmt(" over {} tables, {} new\n", signatures*.length, signatures*.length - m*.seen);
+            }
+            query_update(q, vec<u64>items(signatures));
+            for (ti: u64 = m*.seen; ti < signatures*.length; ti += 1) {
+                s: u64 = vec<u64>at(signatures, ti)*;
+                if ((s & m*.all) == m*.all && (s & m*.none) == 0) {
+                    _ = vec<u32>push(m*.tables, cast(ti, u32));
+                }
+            }
+            m*.seen = signatures*.length;
+            if (query_checked(q) != m*.seen) {
+                dojo_fail(run, op);
+                printfmt("after query_update, ");
+                print_query(k, m);
+                printfmt(" says checked is {}, but signatures*.length is {}\n", query_checked(q), m*.seen);
+                dojo_failed(run, op);
+            }
+            if (!same_tables(query_tables(q), vec<u32>items(m*.tables))) {
+                dojo_fail(run, op);
+                printfmt("after query_update, ");
+                print_query(k, m);
+                printfmt(": ");
+                print_difference(query_tables(q), vec<u32>items(m*.tables));
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+            if (query_scanned(q) != m*.seen) {
+                dojo_fail(run, op);
+                print_query(k, m);
+                printfmt(" has scanned {} in all, but signatures*.length is {}, and each table should be looked at once, by the first update after it was made\n",
+                    query_scanned(q), m*.seen);
+                dojo_failed(run, op);
+            }
+        } else {
+            k: u64 = dojo_rng_below(rng&, 4);
+            m: *model in level = random_query(rng&, r);
+            models[k] = m;
+            if (dojo_before(run, op)) {
+                printfmt("query_init(all ");
+                print_set(m*.all);
+                printfmt(", none ");
+                print_set(m*.none);
+                printfmt(") as query {}\n", k);
+            }
+            queries[k] = query_make(r, m*.all, m*.none);
+            q: ?*query in level = queries[k];
+            if (!q) {
+                continue;
+            }
+            if (query_checked(q) != 0 || query_scanned(q) != 0 || query_tables(q).length != 0) {
+                dojo_fail(run, op);
+                printfmt("a new query should have checked nothing; it says checked {}, scanned {}, {} tables\n",
+                    query_checked(q), query_scanned(q), query_tables(q).length);
+                dojo_failed(run, op);
+            }
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "watermark", "12. a watermark");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

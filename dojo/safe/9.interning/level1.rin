@@ -1,0 +1,96 @@
+// Level 1: one proc. Everything here works except interner_intern. Write its
+// body.
+//
+// Start it with: python tools/dojo.py start interning 1
+//
+// Safe subset: the interner lives in the region `level`, made by
+// interner_make; when the table grows, its vec is refilled in place.
+
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// splitmix64's finisher: every bit of the key moves every bit of the hash, so
+// keys that differ only in their high bits still land far apart. u64
+// arithmetic wraps, as it wants.
+interner_hash: proc(key: u64) -> u64 = {
+    x: u64 = key;
+    x ^= x shr 30;
+    x *= 0xbf58476d1ce4e5b9'u64;
+    x ^= x shr 27;
+    x *= 0x94d049bb133111eb'u64;
+    return x ^ (x shr 31);
+}
+
+interner: struct = {
+    // The table: a power of two long, never more than 3/4 full. 0 is an
+    // empty slot, and anything else is an id + 1.
+    slots: *vec<u32> in level;
+    // keys[id] is the key interned as id.
+    keys: *vec<u64> in level;
+}
+
+// `count` empty slots in `slots`, whatever it held.
+interner_empty: proc(slots: *vec<u32>, count: u64) -> void = {
+    vec<u32>clear(slots);
+    for (i: u64 = 0; i < count; i += 1) {
+        _ = vec<u32>push(slots, 0);
+    }
+}
+
+interner_make: proc(r: region level) -> *interner in level = {
+    t: *interner in level = new<interner>(r, { .slots = vec<u32>make(r, 8), .keys = vec<u64>make(r, 0) });
+    interner_empty(t*.slots, 8);
+    return t;
+}
+
+// Where `key` is in the table, or the empty slot where it would go: start at
+// its hash, and step to the next slot, wrapping, until one is either.
+interner_slot_of: proc(t: *interner, key: u64) -> u64 = {
+    mask: u64 = t*.slots*.length - 1;
+    at: u64 = interner_hash(key) & mask;
+    s: u32 = vec<u32>at(t*.slots, at)*;
+    while (s != 0 && vec<u64>at(t*.keys, cast(s - 1, u64))* != key) {
+        at = (at + 1) & mask;
+        s = vec<u32>at(t*.slots, at)*;
+    }
+    return at;
+}
+
+// The key's id, or none if it was never interned.
+interner_find: proc(t: *interner, key: u64) -> option<u32> = {
+    s: u32 = vec<u32>at(t*.slots, interner_slot_of(t, key))*;
+    if (s == 0) {
+        return option<u32>none();
+    }
+    return option<u32>some(s - 1);
+}
+
+// Found, or made: a new key gets the next id, and the table grows before it
+// would be more than 3/4 full.
+interner_intern: proc(t: *interner, key: u64) -> u32 = {
+    // Level 1: its id if it's in the table, or the next id, in its empty
+    // slot.
+    return 0;
+}
+
+// Twice the slots, and every id put back where its key's hash says, which in
+// a bigger table is somewhere else.
+interner_grow: proc(t: *interner) -> void = {
+    count: u64 = t*.slots*.length * 2;
+    interner_empty(t*.slots, count);
+    for (id: u64 = 0; id < t*.keys*.length; id += 1) {
+        at: u64 = interner_slot_of(t, vec<u64>at(t*.keys, id)*);
+        vec<u32>at(t*.slots, at)* = cast(id + 1, u32);
+    }
+}
+
+interner_key: proc(t: *interner, id: u32) -> u64 = {
+    return vec<u64>at(t*.keys, cast(id, u64))*;
+}
+
+interner_len: proc(t: *interner) -> u64 = {
+    return t*.keys*.length;
+}

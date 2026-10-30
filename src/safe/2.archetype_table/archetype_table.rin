@@ -1,0 +1,170 @@
+// 2. One archetype table
+//
+// An archetype is one combination of components. Its table holds every entity
+// that has exactly that combination: one column per component, one row per
+// entity. It is lesson 1's struct of arrays with two rules added.
+//
+// Every column has the same length, always. Spawn appends to every column in
+// one place and despawn removes from every column in one place. kayan appended
+// to each column at the call site, and three appends that must happen together
+// are three chances to forget one.
+//
+// Rows are packed. Despawn moves the last row into the hole it leaves (a
+// swap-remove), so a system loops over 0..count with no gaps and no "alive"
+// flag to test. The price is that a row is not a stable name for an entity: the
+// last entity changes rows every time something before it dies. Lesson 4 deals
+// with that.
+//
+// The sparks here have a position, a velocity and a life in seconds. Each frame
+// they move, they age, and the ones whose life ran out are removed. Removal
+// walks the rows backwards, so the row swapped into a hole has already been
+// looked at this frame.
+//
+// Safe subset: the arena is the region `level`; the table is made in it and
+// its columns are slices that name it. No trusted proc anywhere: the checker
+// sees every line of this lesson.
+
+import "std/print.rin"
+
+level: region;
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// The table for the archetype {position, velocity, life}. Each column is sized
+// to the capacity once; count says how many rows are in use. `numbers` is not a
+// component: it only lets the output say which spark sits in which row.
+spark_table: struct = {
+    count: u64;
+    capacity: u64;
+    numbers: []u32 in level;
+    positions: []vec2 in level;
+    velocities: []vec2 in level;
+    lives: []f32 in level;
+}
+
+spawn_status: enum[must_use] = {
+    ok,
+    full,
+}
+
+// The table and its columns come from the region: the pointer says so, and
+// the checker will not let it be kept past the region's end.
+spark_table_create: proc(r: region level, capacity: u64) -> *spark_table in level = {
+    return new<spark_table>(r, {
+        .capacity = capacity,
+        .numbers = new_slice<u32>(r, capacity),
+        .positions = new_slice<vec2>(r, capacity),
+        .velocities = new_slice<vec2>(r, capacity),
+        .lives = new_slice<f32>(r, capacity),
+    });
+}
+
+// The only place a row is added: every column gets its value here.
+spark_spawn: proc(t: *spark_table, number: u32, position: vec2, velocity: vec2, life: f32,
+                  row: *u64) -> spawn_status = {
+    if (t*.count == t*.capacity) {
+        return spawn_status.full;
+    }
+    r: u64 = t*.count;
+    t*.numbers[r] = number;
+    t*.positions[r] = position;
+    t*.velocities[r] = velocity;
+    t*.lives[r] = life;
+    t*.count += 1;
+    row* = r;
+    return spawn_status.ok;
+}
+
+// The only place a row is removed. The last row moves into `row`, in every
+// column, and the table shrinks by one. Returns the row that moved, which is
+// `row` itself when the removed row was the last one.
+spark_despawn: proc(t: *spark_table, row: u64) -> u64 = {
+    last: u64 = t*.count - 1;
+    t*.numbers[row] = t*.numbers[last];
+    t*.positions[row] = t*.positions[last];
+    t*.velocities[row] = t*.velocities[last];
+    t*.lives[row] = t*.lives[last];
+    t*.count = last;
+    return last;
+}
+
+// Systems. Each takes the columns it reads and writes, cut to the rows in use.
+// noalias on the column a system writes promises nothing else reaches it, so
+// the loop can be vectorized without runtime overlap checks.
+move_system: proc(positions: noalias []vec2, velocities: []const vec2, dt: f32) -> void = {
+    for (i: u64 = 0; i < positions.length; i += 1) {
+        positions[i].x += velocities[i].x * dt;
+        positions[i].y += velocities[i].y * dt;
+    }
+}
+
+// One slice, and still noalias: on Windows the slice arrives by reference, and
+// without the promise a float written through lives might be its own pointer
+// or length, so clang-cl reads both again after every element.
+age_system: proc(lives: noalias []f32, dt: f32) -> void = {
+    for (i: u64 = 0; i < lives.length; i += 1) {
+        lives[i] -= dt;
+    }
+}
+
+// Structural change: rows leave the table. Backwards, so the row a swap-remove
+// pulls in has already been tested.
+expire_system: proc(t: *spark_table) -> void = {
+    i: u64 = t*.count;
+    while (i > 0) {
+        i -= 1;
+        if (t*.lives[i] <= 0.0) {
+            number: u32 = t*.numbers[i];
+            moved: u64 = spark_despawn(t, i);
+            if (moved != i) {
+                printfmt("    spark {} in row {} expired; spark {} moved from row {} into it\n",
+                    number, i, t*.numbers[i], moved);
+            } else {
+                printfmt("    spark {} in row {} expired; it was the last row\n", number, i);
+            }
+        }
+    }
+}
+
+print_table: proc(t: *spark_table) -> void = {
+    for (i: u64 = 0; i < t*.count; i += 1) {
+        printfmt("    row {}  spark {}  position ({:6.2}, {:6.2})  life {:.2}\n",
+            cast(i, i32), cast(t*.numbers[i], i32),
+            cast(t*.positions[i].x, f64), cast(t*.positions[i].y, f64), cast(t*.lives[i], f64));
+    }
+}
+
+main: proc() -> i32 = {
+    level: region = {
+    sparks: *spark_table in level = spark_table_create(level, 8);
+    printfmt("a table with room for {} sparks, {} bytes of components a row\n", sparks*.capacity,
+        sizeof(vec2) * 2 + sizeof(f32));
+
+    // Eight sparks with lives of 0.5s to 4s, plus one more than fits.
+    for (i: u64 = 0; i < 9; i += 1) {
+        f: f32 = cast(i, f32);
+        row: u64 = 0;
+        life: f32 = 0.5 + cast((i * 5) % 8, f32) * 0.5;
+        status: spawn_status = spark_spawn(sparks, cast(i, u32), { .x = f, .y = 0.0 }, { .x = 1.0, .y = f },
+            life, row&);
+        if (status == spawn_status.full) {
+            printfmt("spark {} did not fit: the table is full\n", i);
+        }
+    }
+    print_table(sparks);
+
+    dt: f32 = 0.5;
+    for (frame: i32 = 1; frame <= 4; frame += 1) {
+        printfmt("frame {}\n", frame);
+        move_system(sparks*.positions[0..sparks*.count], sparks*.velocities[0..sparks*.count], dt);
+        age_system(sparks*.lives[0..sparks*.count], dt);
+        expire_system(sparks);
+        print_table(sparks);
+    }
+    printfmt("{} sparks left\n", sparks*.count);
+    }
+    return 0;
+}

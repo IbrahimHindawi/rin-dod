@@ -1,0 +1,263 @@
+// The harness for dojo 7, the arena. It is fixed. Your work is kata.rin,
+// beside it: kata.rin imports this file, which has main, so the two are one
+// program. The reference, solution.rin, and each level file do the same, so
+// each of them builds on its own, and this file never does. Build and run
+// yours with
+//
+//   python tools/dojo.py arena
+//   python tools/dojo.py arena --sanitize    the same with AddressSanitizer and
+//                                            UBSan, which watch every byte
+//
+// First a short scenario, the playground's steps, each printed as it passes.
+// Then a fuzz run: thousands of random pushes, marks, rewinds and clears from
+// a seed, against a model that keeps the used count and every push not yet
+// let go of. Each push is filled with a pattern at the offset it gave, and
+// read back later, so a push that lands on another shows.
+//
+// Safe subset: the arena's bytes come from the region `level`, and a push
+// hands out an offset into them, not an address, as rust-dod's kata does.
+// The harness writes and reads through bump_bytes(b)[offset], a slice the
+// checker bounds-checks, so a push past the end is caught as it happens.
+// What the original checked about addresses is checked about offsets.
+
+import "../dojo.rin"
+
+// The offset of a push, as text, or null.
+fmt_push: proc(f: *fmt, p: option<u64>) -> void = {
+    if (option<u64>is_none(p)) {
+        fmt_cstr(f, "null");
+    } else {
+        fmt_u64(f, option<u64>unwrap(p));
+    }
+}
+
+same_push: proc(f: *fmt, what: ^const char, b: *bump, size: u64, align: u64, want: ^const char) -> option<u64> = {
+    p: option<u64> = bump_push(b, size, align);
+    fmt_reset(f);
+    fmt_push(f, p);
+    dojo_same(what, fmt_text(f), want);
+    return p;
+}
+
+same_used: proc(f: *fmt, what: ^const char, b: *bump, want: ^const char) -> void = {
+    fmt_reset(f);
+    fmt_u64(f, bump_used(b));
+    dojo_same(what, fmt_text(f), want);
+}
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    f: *fmt in level = fmt_make(r, 64);
+    b: *bump in level = bump_make(r, 64);
+    fmt_reset(f);
+    fmt_u64(f, bump_capacity(b));
+    dojo_same("capacity", fmt_text(f), "64");
+    _ = same_push(f, "push 1 byte, align 1", b, 1, 1, "0");
+    _ = same_push(f, "push 4 bytes, align 4: 3 bytes of padding first", b, 4, 4, "4");
+    _ = same_push(f, "push 8 bytes, align 8", b, 8, 8, "8");
+    _ = same_push(f, "push 16 bytes, align 16", b, 16, 16, "16");
+    same_used(f, "used", b, "32");
+    mark: u64 = bump_mark(b);
+    _ = same_push(f, "mark, then push 3 bytes, align 1", b, 3, 1, "32");
+    _ = same_push(f, "push 8 bytes, align 8: 5 bytes of padding first", b, 8, 8, "40");
+    same_used(f, "used", b, "48");
+    bump_rewind(b, mark);
+    same_used(f, "rewind to the mark: used", b, "32");
+    _ = same_push(f, "push 40 bytes, align 8: past the end", b, 40, 8, "null");
+    same_used(f, "used, after a push that didn't fit", b, "32");
+    _ = same_push(f, "push 32 bytes, align 16: to the last byte", b, 32, 16, "32");
+    _ = same_push(f, "push 1 byte: full", b, 1, 1, "null");
+    bump_clear(b);
+    same_used(f, "clear: used", b, "0");
+    p: option<u64> = same_push(f, "push 8 bytes, align 8", b, 8, 8, "0");
+    if (option<u64>is_some(p)) {
+        offset: u64 = option<u64>unwrap(p);
+        bytes: []u8 = bump_bytes(b);
+        for (k: u64 = 0; k < 8; k += 1) {
+            bytes[offset + k] = cast(k + 1, u8);
+        }
+    }
+    fmt_reset(f);
+    bytes: []u8 = bump_bytes(b);
+    for (k: u64 = 0; k < 8; k += 1) {
+        if (k > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_u64(f, cast(bytes[k], u64));
+    }
+    dojo_same("write 1 to 8 through the address, read them from the buffer", fmt_text(f), "1 2 3 4 5 6 7 8");
+}
+
+// A push the model holds: where, how big, and the pattern written into it,
+// byte k being tag + k.
+live_push: struct = {
+    offset: u64;
+    size: u64;
+    tag: u64;
+    op: u64;
+}
+
+// A mark: the arena's, and the model's used count and number of pushes then.
+mark_record: struct = {
+    mark: u64;
+    used: u64;
+    live: u64;
+}
+
+check_pattern: proc(run: *dojo_run, op: u64, bytes: []const u8, p: live_push) -> void = {
+    for (k: u64 = 0; k < p.size; k += 1) {
+        got: u8 = bytes[p.offset + k];
+        want: u8 = cast((p.tag + k) & 255, u8);
+        if (got != want) {
+            dojo_fail(run, op);
+            printfmt("the {} bytes at {}, pushed at operation {}, have changed: byte {} is {}, it should be {}\n",
+                p.size, p.offset, p.op, k, got, want);
+            dojo_failed(run, op);
+        }
+    }
+}
+
+// Drop the records after the first `count`.
+truncate_live: proc(live: *vec<live_push>, count: u64) -> void = {
+    while (live*.length > count) {
+        _ = vec<live_push>pop(live);
+    }
+}
+
+truncate_marks: proc(marks: *vec<mark_record>, count: u64) -> void = {
+    while (marks*.length > count) {
+        _ = vec<mark_record>pop(marks);
+    }
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    cap: u64 = 256;
+    b: *bump in level = bump_make(r, cap);
+    if (bump_capacity(b) != cap) {
+        dojo_fail(run, 0);
+        printfmt("capacity is {}, the arena was made with {} bytes\n", bump_capacity(b), cap);
+        dojo_failed(run, 0);
+    }
+    used: u64 = 0;
+    live: *vec<live_push> in level = vec<live_push>make(r, 0);
+    marks: *vec<mark_record> in level = vec<mark_record>make(r, 0);
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        if (roll < 58) {
+            align: u64 = 1'u64 shl dojo_rng_below(rng&, 5);
+            rounded: u64 = (used + align - 1) / align * align;
+            room: u64 = rounded < cap ? cap - rounded : 0;
+            // Mostly small pushes; some that end exactly at the last byte, and
+            // some one byte past it.
+            size: u64 = 0;
+            if (roll < 50) {
+                size = 1 + dojo_rng_below(rng&, 24);
+            } else if (roll < 55) {
+                size = room > 0 ? room : 1;
+            } else {
+                size = room + 1;
+            }
+            fits: b32 = rounded + size <= cap;
+            if (dojo_before(run, op)) {
+                printfmt("push({}, {}) with {} of {} used\n", size, align, used, cap);
+            }
+            p: option<u64> = bump_push(b, size, align);
+            if (option<u64>is_some(p)) {
+                offset: u64 = option<u64>unwrap(p);
+                if (!fits || offset + size > cap) {
+                    dojo_fail(run, op);
+                    printfmt("push({}, {}) with {} used gave offset {}, but there is no room: it would end at {}, past the {} bytes there are\n",
+                        size, align, used, offset, offset + size, cap);
+                    dojo_failed(run, op);
+                }
+                if (offset % align != 0) {
+                    dojo_fail(run, op);
+                    printfmt("push({}, {}) gave offset {}, which isn't a multiple of {}\n", size, align, offset, align);
+                    dojo_failed(run, op);
+                }
+                if (offset != rounded) {
+                    dojo_fail(run, op);
+                    printfmt("push({}, {}) with {} used gave offset {}; the first multiple of {} at or after {} is {}\n",
+                        size, align, used, offset, align, used, rounded);
+                    dojo_failed(run, op);
+                }
+                tag: u64 = op & 255;
+                bytes: []u8 = bump_bytes(b);
+                for (k: u64 = 0; k < size; k += 1) {
+                    bytes[offset + k] = cast((tag + k) & 255, u8);
+                }
+                _ = vec<live_push>push(live, { .offset = offset, .size = size, .tag = tag, .op = op });
+                used = rounded + size;
+            } else if (fits) {
+                dojo_fail(run, op);
+                printfmt("push({}, {}) with {} of {} used gave null, but it fits at {} and ends at {}\n",
+                    size, align, used, cap, rounded, rounded + size);
+                dojo_failed(run, op);
+            }
+            if (bump_used(b) != used) {
+                dojo_fail(run, op);
+                printfmt("after push({}, {}), used is {}, it should be {}\n", size, align, bump_used(b), used);
+                dojo_failed(run, op);
+            }
+        } else if (roll < 66 || (roll < 74 && marks*.length == 0)) {
+            if (dojo_before(run, op)) {
+                printfmt("mark, with {} used\n", used);
+            }
+            _ = vec<mark_record>push(marks, { .mark = bump_mark(b), .used = used, .live = live*.length });
+        } else if (roll < 74) {
+            at: u64 = dojo_rng_below(rng&, marks*.length);
+            truncate_marks(marks, at + 1);
+            m: mark_record = vec<mark_record>at(marks, at)*;
+            if (dojo_before(run, op)) {
+                printfmt("rewind to a mark from {} used, with {} used\n", m.used, used);
+            }
+            bump_rewind(b, m.mark);
+            used = m.used;
+            truncate_live(live, m.live);
+            if (bump_used(b) != used) {
+                dojo_fail(run, op);
+                printfmt("after the rewind, used is {}, it should be {}\n", bump_used(b), used);
+                dojo_failed(run, op);
+            }
+        } else if (roll < 77) {
+            if (dojo_before(run, op)) {
+                printfmt("clear, with {} used\n", used);
+            }
+            bump_clear(b);
+            used = 0;
+            vec<live_push>clear(live);
+            vec<mark_record>clear(marks);
+            if (bump_used(b) != 0) {
+                dojo_fail(run, op);
+                printfmt("after clear, used is {}\n", bump_used(b));
+                dojo_failed(run, op);
+            }
+        } else if (live*.length > 0) {
+            p: live_push = vec<live_push>at(live, dojo_rng_below(rng&, live*.length))*;
+            if (dojo_before(run, op)) {
+                printfmt("read the {} bytes at {}\n", p.size, p.offset);
+            }
+            check_pattern(run, op, bump_bytes(b), p);
+        }
+        if (op % 64 == 0) {
+            for (k: u64 = 0; k < live*.length; k += 1) {
+                check_pattern(run, op, bump_bytes(b), vec<live_push>at(live, k)*);
+            }
+        }
+    }
+    for (k: u64 = 0; k < live*.length; k += 1) {
+        check_pattern(run, run*.ops, bump_bytes(b), vec<live_push>at(live, k)*);
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "arena", "7. an arena");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

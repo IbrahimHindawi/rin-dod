@@ -1,0 +1,86 @@
+// The reference: a sparse set. Values packed in rows, a row per id, and the
+// back-reference that keeps the two in step when swap-remove moves a row.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/option.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+sparse_set: struct = {
+    // Packed: values[row] belongs to ids[row]. No holes, in no order.
+    values: *vec<u64> in level;
+    ids: *vec<u32> in level;
+    // Sparse: rows[id] is one more than the row id's value is in, so 0, what
+    // a new entry starts as, means id has no value.
+    rows: *vec<u32> in level;
+}
+
+sparse_set_make: proc(r: region level) -> *sparse_set in level = {
+    return new<sparse_set>(r, { .values = vec<u64>make(r, 0), .ids = vec<u32>make(r, 0), .rows = vec<u32>make(r, 0) });
+}
+
+// id's value, to read or to change, or null if it has none.
+sparse_set_get: proc(s: *sparse_set, id: u32) -> ?*u64 = {
+    if (cast(id, u64) >= s*.rows*.length) {
+        return null;
+    }
+    row: u32 = vec<u32>at(s*.rows, cast(id, u64))*;
+    if (row == 0) {
+        return null;
+    }
+    return vec<u64>at(s*.values, cast(row - 1, u64));
+}
+
+// Give id a value. If it has one already, the new value replaces it and the
+// old one comes back; otherwise it goes in a new row at the end.
+sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> option<u64> = {
+    current: ?*u64 = sparse_set_get(s, id);
+    if (current) {
+        old: u64 = current*;
+        current* = value;
+        return option<u64>some(old);
+    }
+    while (s*.rows*.length <= cast(id, u64)) {
+        _ = vec<u32>push(s*.rows, 0);
+    }
+    vec<u32>at(s*.rows, cast(id, u64))* = cast(s*.values*.length, u32) + 1;
+    _ = vec<u64>push(s*.values, value);
+    _ = vec<u32>push(s*.ids, id);
+    return option<u64>none();
+}
+
+// Swap-remove: the last row moves into the hole, and the id that owned the
+// last row is told where its value went.
+sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64> = {
+    if (sparse_set_get(s, id) == null) {
+        return option<u64>none();
+    }
+    entry: *u32 = vec<u32>at(s*.rows, cast(id, u64));
+    row: u64 = cast(entry* - 1, u64);
+    entry* = 0;
+    value: u64 = vec<u64>at(s*.values, row)*;
+    last_value: u64 = vec<u64>pop(s*.values);
+    last_id: u32 = vec<u32>pop(s*.ids);
+    if (row < s*.values*.length) {
+        vec<u64>at(s*.values, row)* = last_value;
+        vec<u32>at(s*.ids, row)* = last_id;
+        vec<u32>at(s*.rows, cast(last_id, u64))* = cast(row, u32) + 1;
+    }
+    return option<u64>some(value);
+}
+
+sparse_set_len: proc(s: *sparse_set) -> u64 = {
+    return s*.values*.length;
+}
+
+// The values, packed, in row order: what a system loops over.
+sparse_set_values: proc(s: *sparse_set) -> []u64 = {
+    return vec<u64>items(s*.values);
+}
+
+// ids[row] is the id that owns values[row].
+sparse_set_ids: proc(s: *sparse_set) -> []u32 = {
+    return vec<u32>items(s*.ids);
+}

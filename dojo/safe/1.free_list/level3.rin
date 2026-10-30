@@ -1,0 +1,24 @@
+// Level 3: a blank page. Write the allocator from memory.
+//
+// Start it with: python tools/dojo.py start free_list 3
+//
+// The harness needs exactly this, and checks what each does. dojo_handle
+// ({ index: u32; generation: u32; }) and dojo_status ({ ok, dead }) are given,
+// in dojo/dojo.rin, as is vec<T>; the kata lives in the region `level`.
+//
+//   handles: struct
+//   handles_make: proc(r: region level) -> *handles in level
+//   handles_alloc: proc(h: *handles) -> dojo_handle            reuses a freed index first
+//   handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status
+//   handles_alive: proc(h: *handles, e: dojo_handle) -> b32
+//   handles_live: proc(h: *handles) -> u64                     handles alive now
+//   handles_slots: proc(h: *handles) -> u64                    indices handed out, alive or free
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// Your code here.

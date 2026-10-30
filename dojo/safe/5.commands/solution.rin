@@ -1,0 +1,118 @@
+// The reference: structural changes recorded now, applied later, in order.
+//
+// Safe subset: the buffer lives in the region `level`, made by commands_make;
+// its two vecs grow into it.
+
+import "std/memops.rin"
+import "std/vec.rin"
+import "../dojo.rin"
+// The harness: it has main, and runs the procs below, so with it this file
+// is a whole program.
+import "harness.rin"
+
+// A spawn that has been recorded and not applied. It has no handle yet, so it
+// is named by its place among this buffer's spawns: 0 for the first.
+pending: struct = {
+    index: u32;
+}
+
+// Who a command is for: something alive now, or something this buffer spawns.
+target: struct = {
+    is_pending: b32;
+    handle: dojo_handle;
+    spawn: pending;
+}
+
+target_entity: proc(h: dojo_handle) -> target = {
+    t: target = {};
+    t.handle = h;
+    return t;
+}
+
+target_pending: proc(p: pending) -> target = {
+    t: target = {};
+    t.is_pending = 1;
+    t.spawn = p;
+    return t;
+}
+
+command_kind: enum = {
+    spawn,
+    set,
+    despawn,
+}
+
+command: struct = {
+    kind: command_kind;
+    target: target;
+    value: u32;
+}
+
+// The frame's commands. Cleared after apply, keeping their room, so once the
+// game has run a few frames, recording allocates nothing.
+commands: struct = {
+    list: *vec<command> in level;
+    spawns: u32;
+    // While the buffer is applied: the handle each spawn made, in order.
+    spawned: *vec<dojo_handle> in level;
+}
+
+commands_make: proc(r: region level) -> *commands in level = {
+    return new<commands>(r, { .list = vec<command>make(r, 0), .spawned = vec<dojo_handle>make(r, 0) });
+}
+
+// Record a spawn; it happens in commands_apply. Returns its pending number.
+commands_spawn: proc(c: *commands, value: u32) -> pending = {
+    _ = vec<command>push(c*.list, { .kind = command_kind.spawn, .value = value });
+    c*.spawns += 1;
+    return { .index = c*.spawns - 1 };
+}
+
+commands_set: proc(c: *commands, t: target, value: u32) -> void = {
+    _ = vec<command>push(c*.list, { .kind = command_kind.set, .target = t, .value = value });
+}
+
+commands_despawn: proc(c: *commands, t: target) -> void = {
+    _ = vec<command>push(c*.list, { .kind = command_kind.despawn, .target = t });
+}
+
+// Commands recorded and not yet applied.
+commands_len: proc(c: *commands) -> u64 = {
+    return c*.list*.length;
+}
+
+// The handle a target names: its own, or the one its spawn made, which was
+// applied before any command that names it.
+commands_resolve: proc(c: *commands, t: target) -> dojo_handle = {
+    if (t.is_pending) {
+        return vec<dojo_handle>at(c*.spawned, cast(t.spawn.index, u64))*;
+    }
+    return t.handle;
+}
+
+// Every command, in the order it was recorded. A spawn always happens; a set
+// or despawn whose target is dead by then, perhaps despawned earlier in this
+// same buffer, changes nothing and is counted as skipped.
+commands_apply: proc(c: *commands, w: *world) -> applied = {
+    done: applied = {};
+    for (i: u64 = 0; i < c*.list*.length; i += 1) {
+        cmd: command = vec<command>at(c*.list, i)*;
+        result: dojo_status = dojo_status.ok;
+        if (cmd.kind == command_kind.spawn) {
+            _ = vec<dojo_handle>push(c*.spawned, world_spawn(w, cmd.value));
+        } else if (cmd.kind == command_kind.set) {
+            result = world_set(w, commands_resolve(c, cmd.target), cmd.value);
+        } else {
+            result = world_despawn(w, commands_resolve(c, cmd.target));
+        }
+        if (result == dojo_status.ok) {
+            done.applied += 1;
+        } else {
+            done.skipped += 1;
+        }
+    }
+    vec<command>clear(c*.list);
+    vec<dojo_handle>clear(c*.spawned);
+    c*.spawns = 0;
+    return done;
+}

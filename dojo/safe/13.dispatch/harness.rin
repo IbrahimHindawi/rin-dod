@@ -1,0 +1,509 @@
+// The harness for dojo 13, a dispatch table. It is fixed. Your work is
+// kata.rin, beside it: kata.rin imports this file, which has main, so the two
+// are one program. The reference, solution.rin, and each level file do the
+// same, so each of them builds on its own, and this file never does. Build and
+// run yours with
+//
+//   python tools/dojo.py dispatch
+//
+// The systems are here: twelve procs, each of which writes its own number in
+// the context's log when it is called. So after a run the log says which
+// systems ran, in what order, and that each name was run through its own
+// proc. First a short scenario. Then a fuzz run: random adds, inserts,
+// removes, enables, disables and runs, against a model that keeps the
+// schedule as a plain list of names, each enabled or not, with its count of
+// calls. After every operation the order and the counts must match, and every
+// run must log the model's enabled systems, in order.
+//
+// Safe subset: a C string and a proc pointer are both pointers without a
+// region, so a struct holding them is a carrier, which safe code cannot
+// write, hold by value or make with new. The log holds each system's number
+// in the pool instead of its name, and the pool is two tables, the names and
+// the procs, the second read through the trusted pool_run. The kata keeps
+// the names and procs it is given behind a pointer into the region `level`,
+// made by its own trusted proc, so schedule_add and schedule_insert_before
+// take the region.
+
+import "../dojo.rin"
+
+// What a system is given when it runs. Here only a log, which each system
+// writes its number in.
+ctx: struct = {
+    log: [32]u32;
+    count: u64;
+}
+
+ctx_ran: proc(c: *ctx, id: u32) -> void = {
+    if (c*.count < 32) {
+        c*.log[c*.count] = id;
+    }
+    c*.count += 1;
+}
+
+input_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 0);
+}
+
+think_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 1);
+}
+
+move_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 2);
+}
+
+collide_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 3);
+}
+
+damage_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 4);
+}
+
+die_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 5);
+}
+
+spawn_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 6);
+}
+
+animate_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 7);
+}
+
+sound_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 8);
+}
+
+draw_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 9);
+}
+
+net_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 10);
+}
+
+save_system: proc(c: *ctx) -> void = {
+    ctx_ran(c, 11);
+}
+
+// The systems the scenario and the fuzz run use: system `id` is the name
+// pool_names[id], run by the proc pool_run(id), which logs `id`.
+pool_names: [12]^const char = {
+    "input", "think", "move", "collide", "damage", "die", "spawn", "animate", "sound", "draw", "net", "save",
+};
+
+// Trusted because safe code may not hand out a proc pointer from a proc: the
+// checker takes it for the address of a local.
+pool_run: proc[trusted](id: u64) -> system_proc = {
+    if (id == 0) { return input_system; }
+    if (id == 1) { return think_system; }
+    if (id == 2) { return move_system; }
+    if (id == 3) { return collide_system; }
+    if (id == 4) { return damage_system; }
+    if (id == 5) { return die_system; }
+    if (id == 6) { return spawn_system; }
+    if (id == 7) { return animate_system; }
+    if (id == 8) { return sound_system; }
+    if (id == 9) { return draw_system; }
+    if (id == 10) { return net_system; }
+    return save_system;
+}
+
+pool_find: proc(name: ^const char) -> u64 = {
+    for (i: u64 = 0; i < 12; i += 1) {
+        if (dojo_cstr_equal(pool_names[i], name)) {
+            return i;
+        }
+    }
+    printfmt("the harness has no system called {}\n", name);
+    exit(2);
+    return 0;
+}
+
+add: proc(s: *schedule, r: region level, name: ^const char) -> void = {
+    id: u64 = pool_find(name);
+    schedule_add(s, r, pool_names[id], pool_run(id));
+}
+
+fmt_order: proc(f: *fmt, s: *schedule) -> void = {
+    if (schedule_len(s) == 0) {
+        fmt_cstr(f, "nothing");
+    }
+    for (i: u64 = 0; i < schedule_len(s); i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_cstr(f, schedule_name(s, i));
+    }
+}
+
+fmt_log: proc(f: *fmt, c: *ctx) -> void = {
+    if (c*.count == 0) {
+        fmt_cstr(f, "nothing");
+    }
+    for (i: u64 = 0; i < c*.count && i < 32; i += 1) {
+        if (i > 0) {
+            fmt_char(f, ' ');
+        }
+        fmt_cstr(f, pool_names[c*.log[i]]);
+    }
+}
+
+scenario: proc(r: region level) -> void = {
+    printfmt("scenario\n");
+    f: *fmt in level = fmt_make(r, 128);
+    c: *ctx in level = new<ctx>(r);
+    s: *schedule in level = schedule_make(r);
+    add(s, r, "move");
+    add(s, r, "collide");
+    add(s, r, "die");
+    fmt_reset(f);
+    fmt_order(f, s);
+    dojo_same("add move, collide, die: the order", fmt_text(f), "move collide die");
+    damage: u64 = pool_find("damage");
+    dojo_same("insert damage before die",
+        dojo_bool_name(schedule_insert_before(s, r, "die", pool_names[damage], pool_run(damage))), "true");
+    fmt_reset(f);
+    fmt_order(f, s);
+    dojo_same("the order", fmt_text(f), "move collide damage die");
+    c* = {};
+    schedule_run(s, c);
+    fmt_reset(f);
+    fmt_log(f, c);
+    dojo_same("run: what ran", fmt_text(f), "move collide damage die");
+    dojo_same("disable collide", dojo_bool_name(schedule_set_enabled(s, "collide", 0)), "true");
+    c* = {};
+    schedule_run(s, c);
+    fmt_reset(f);
+    fmt_log(f, c);
+    dojo_same("run: what ran", fmt_text(f), "move damage die");
+    fmt_reset(f);
+    fmt_order(f, s);
+    dojo_same("the order, with collide still in its place", fmt_text(f), "move collide damage die");
+    fmt_reset(f);
+    fmt_u64(f, cast(schedule_calls(s, "move"), u64));
+    fmt_char(f, ' ');
+    fmt_u64(f, cast(schedule_calls(s, "collide"), u64));
+    dojo_same("calls of move, collide", fmt_text(f), "2 1");
+    spawn: u64 = pool_find("spawn");
+    dojo_same("insert spawn before a system that isn't there",
+        dojo_bool_name(schedule_insert_before(s, r, "nobody", pool_names[spawn], pool_run(spawn))), "false");
+    fmt_reset(f);
+    fmt_order(f, s);
+    dojo_same("the order, unchanged", fmt_text(f), "move collide damage die");
+    dojo_same("remove collide", dojo_bool_name(schedule_remove(s, "collide")), "true");
+    fmt_reset(f);
+    fmt_order(f, s);
+    dojo_same("the order", fmt_text(f), "move damage die");
+    fmt_reset(f);
+    fmt_u64(f, cast(schedule_calls(s, "collide"), u64));
+    dojo_same("calls of collide, now it's gone", fmt_text(f), "0");
+    dojo_same("remove collide again", dojo_bool_name(schedule_remove(s, "collide")), "false");
+    dojo_same("enable collide, which isn't there", dojo_bool_name(schedule_set_enabled(s, "collide", 1)), "false");
+    add(s, r, "collide");
+    fmt_reset(f);
+    fmt_u64(f, cast(schedule_calls(s, "collide"), u64));
+    dojo_same("add collide again: at the end, enabled, calls from 0", fmt_text(f), "0");
+    c* = {};
+    schedule_run(s, c);
+    fmt_reset(f);
+    fmt_log(f, c);
+    dojo_same("run: what ran", fmt_text(f), "move damage die collide");
+}
+
+// A system as the model keeps it: which of the pool, whether it is enabled,
+// and how many times it has run since it was added.
+entry: struct = {
+    id: u64;
+    enabled: b32;
+    calls: u32;
+}
+
+// The schedule as the model keeps it: entries[0] to entries[count - 1], in
+// the order they run.
+model: struct = {
+    entries: [12]entry;
+    count: u64;
+}
+
+// Where system `id` is in the model, or count if it isn't there.
+model_find: proc(m: *model, id: u64) -> u64 = {
+    for (i: u64 = 0; i < m*.count; i += 1) {
+        if (m*.entries[i].id == id) {
+            return i;
+        }
+    }
+    return m*.count;
+}
+
+model_insert: proc(m: *model, at: u64, e: entry) -> void = {
+    for (i: u64 = m*.count; i > at; i -= 1) {
+        m*.entries[i] = m*.entries[i - 1];
+    }
+    m*.entries[at] = e;
+    m*.count += 1;
+}
+
+model_remove: proc(m: *model, at: u64) -> void = {
+    for (i: u64 = at; i + 1 < m*.count; i += 1) {
+        m*.entries[i] = m*.entries[i + 1];
+    }
+    m*.count -= 1;
+}
+
+// The system an operation names: one in the schedule, three times in four,
+// or any of the twelve, which may not be.
+target: proc(rng: *dojo_rng, m: *model) -> u64 = {
+    if (m*.count > 0 && dojo_rng_below(rng, 4) != 0) {
+        return m*.entries[dojo_rng_below(rng, m*.count)].id;
+    }
+    return dojo_rng_below(rng, 12);
+}
+
+// The model's schedule in words: draw (die off) damage.
+print_model: proc(m: *model) -> void = {
+    if (m*.count == 0) {
+        printfmt("an empty schedule");
+    }
+    for (i: u64 = 0; i < m*.count; i += 1) {
+        if (i > 0) {
+            printfmt(" ");
+        }
+        if (m*.entries[i].enabled) {
+            printfmt("{}", pool_names[m*.entries[i].id]);
+        } else {
+            printfmt("({} off)", pool_names[m*.entries[i].id]);
+        }
+    }
+}
+
+print_names: proc(m: *model, enabled_only: b32) -> void = {
+    written: u64 = 0;
+    for (i: u64 = 0; i < m*.count; i += 1) {
+        if (m*.entries[i].enabled || !enabled_only) {
+            if (written > 0) {
+                printfmt(" ");
+            }
+            printfmt("{}", pool_names[m*.entries[i].id]);
+            written += 1;
+        }
+    }
+    if (written == 0) {
+        printfmt("nothing");
+    }
+}
+
+// The operation, in words, for --trace, --stop and failures.
+op_kind: enum = {
+    add,
+    insert_before,
+    remove,
+    set_enabled,
+    run,
+}
+
+operation: struct = {
+    kind: op_kind;
+    id: u64;
+    other: u64;
+    on: b32;
+}
+
+print_operation: proc(o: *operation, m: *model) -> void = {
+    if (o*.kind == op_kind.add) {
+        printfmt("schedule_add({})", pool_names[o*.id]);
+    } else if (o*.kind == op_kind.insert_before) {
+        printfmt("schedule_insert_before({}, {})", pool_names[o*.other], pool_names[o*.id]);
+    } else if (o*.kind == op_kind.remove) {
+        printfmt("schedule_remove({})", pool_names[o*.id]);
+    } else if (o*.kind == op_kind.set_enabled) {
+        printfmt("schedule_set_enabled({}, {})", pool_names[o*.id], dojo_bool_name(o*.on));
+    } else {
+        printfmt("schedule_run over ");
+        print_model(m);
+    }
+}
+
+same_log: proc(c: *ctx, m: *model) -> b32 = {
+    n: u64 = 0;
+    for (i: u64 = 0; i < m*.count; i += 1) {
+        if (m*.entries[i].enabled) {
+            if (n >= c*.count || n >= 32 || cast(c*.log[n], u64) != m*.entries[i].id) {
+                return 0;
+            }
+            n += 1;
+        }
+    }
+    return n == c*.count;
+}
+
+same_order: proc(s: *schedule, m: *model) -> b32 = {
+    if (schedule_len(s) != m*.count) {
+        return 0;
+    }
+    for (i: u64 = 0; i < m*.count; i += 1) {
+        if (!dojo_cstr_equal(schedule_name(s, i), pool_names[m*.entries[i].id])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
+    dojo_fuzz(run);
+    rng: dojo_rng = { .state = run*.seed };
+    s: *schedule in level = schedule_make(r);
+    c: *ctx in level = new<ctx>(r);
+    m: model = {};
+    f: *fmt in level = fmt_make(r, 256);
+    for (op: u64 = 1; op <= run*.ops; op += 1) {
+        roll: u64 = dojo_rng_below(rng&, 100);
+        o: operation = {};
+        // The model before the operation, for its description.
+        before: model = m;
+        found: b32 = 0;
+        if (roll < 20 && m.count < 12) {
+            free: [12]u64 = {};
+            free_count: u64 = 0;
+            for (id: u64 = 0; id < 12; id += 1) {
+                if (model_find(m&, id) == m.count) {
+                    free[free_count] = id;
+                    free_count += 1;
+                }
+            }
+            o.id = free[dojo_rng_below(rng&, free_count)];
+            e: entry = { .id = o.id, .enabled = 1 };
+            if (roll < 10) {
+                o.kind = op_kind.add;
+                if (dojo_before(run, op)) {
+                    print_operation(o&, before&);
+                    printfmt("\n");
+                }
+                schedule_add(s, r, pool_names[o.id], pool_run(o.id));
+                model_insert(m&, m.count, e);
+            } else {
+                o.kind = op_kind.insert_before;
+                o.other = target(rng&, m&);
+                at: u64 = model_find(m&, o.other);
+                found = at < m.count;
+                if (dojo_before(run, op)) {
+                    print_operation(o&, before&);
+                    printfmt("\n");
+                }
+                got: b32 = schedule_insert_before(s, r, pool_names[o.other], pool_names[o.id], pool_run(o.id));
+                if (found) {
+                    model_insert(m&, at, e);
+                }
+                if ((got != 0) != found) {
+                    dojo_fail(run, op);
+                    print_operation(o&, before&);
+                    printfmt(" returned {}, but {} {}in the schedule\n", dojo_bool_name(got), pool_names[o.other],
+                        found ? "is " : "is not ");
+                    dojo_failed(run, op);
+                }
+            }
+        } else if (roll < 40) {
+            o.kind = op_kind.remove;
+            o.id = target(rng&, m&);
+            at: u64 = model_find(m&, o.id);
+            found = at < m.count;
+            if (dojo_before(run, op)) {
+                print_operation(o&, before&);
+                printfmt("\n");
+            }
+            got: b32 = schedule_remove(s, pool_names[o.id]);
+            if (found) {
+                model_remove(m&, at);
+            }
+            if ((got != 0) != found) {
+                dojo_fail(run, op);
+                print_operation(o&, before&);
+                printfmt(" returned {}, but {} was {}in the schedule\n", dojo_bool_name(got), pool_names[o.id],
+                    found ? "" : "not ");
+                dojo_failed(run, op);
+            }
+        } else if (roll < 55) {
+            o.kind = op_kind.set_enabled;
+            o.id = target(rng&, m&);
+            o.on = dojo_rng_below(rng&, 2) == 1;
+            at: u64 = model_find(m&, o.id);
+            found = at < m.count;
+            if (dojo_before(run, op)) {
+                print_operation(o&, before&);
+                printfmt("\n");
+            }
+            got: b32 = schedule_set_enabled(s, pool_names[o.id], o.on);
+            if (found) {
+                m.entries[at].enabled = o.on;
+            }
+            if ((got != 0) != found) {
+                dojo_fail(run, op);
+                print_operation(o&, before&);
+                printfmt(" returned {}, but {} {}in the schedule\n", dojo_bool_name(got), pool_names[o.id],
+                    found ? "is " : "is not ");
+                dojo_failed(run, op);
+            }
+        } else {
+            o.kind = op_kind.run;
+            if (dojo_before(run, op)) {
+                print_operation(o&, before&);
+                printfmt("\n");
+            }
+            c* = {};
+            schedule_run(s, c);
+            for (i: u64 = 0; i < m.count; i += 1) {
+                if (m.entries[i].enabled) {
+                    m.entries[i].calls += 1;
+                }
+            }
+            if (!same_log(c, m&)) {
+                dojo_fail(run, op);
+                print_operation(o&, before&);
+                fmt_reset(f);
+                fmt_log(f, c);
+                printfmt(" ran {}; it should run ", fmt_text(f));
+                print_names(m&, 1);
+                printfmt("\n");
+                dojo_failed(run, op);
+            }
+        }
+        if (!same_order(s, m&)) {
+            dojo_fail(run, op);
+            printfmt("after ");
+            print_operation(o&, before&);
+            fmt_reset(f);
+            fmt_order(f, s);
+            printfmt(", the order is {}; it should be ", fmt_text(f));
+            print_names(m&, 0);
+            printfmt("\n");
+            dojo_failed(run, op);
+        }
+        for (id: u64 = 0; id < 12; id += 1) {
+            at: u64 = model_find(m&, id);
+            want: u32 = 0;
+            if (at < m.count) {
+                want = m.entries[at].calls;
+            }
+            if (schedule_calls(s, pool_names[id]) != want) {
+                dojo_fail(run, op);
+                printfmt("after ");
+                print_operation(o&, before&);
+                printfmt(", schedule_calls({}) is {}; the model counts {} since it was added\n", pool_names[id],
+                    schedule_calls(s, pool_names[id]), want);
+                dojo_failed(run, op);
+            }
+        }
+    }
+    dojo_pass();
+}
+
+main: proc(argc: i32, argv: ^^c8) -> i32 = {
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "dispatch", "13. a dispatch table");
+        scenario(level);
+        fuzz(run, level);
+    }
+    return 0;
+}

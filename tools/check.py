@@ -143,8 +143,13 @@ KATA_QUIET = ["-Wno-unused-parameter", "-Wno-unused-variable", "-Wno-unused-but-
 
 
 def dojo_blocks() -> list[Path]:
-    return sorted((p for p in DOJO.iterdir() if p.is_dir() and re.match(r"\d+\.", p.name)),
-                  key=lambda p: int(p.name.split(".")[0]))
+    # The blocks, then the same blocks in the safe subset under dojo/safe.
+    roots = [DOJO] + ([DOJO / "safe"] if (DOJO / "safe").is_dir() else [])
+    blocks: list[Path] = []
+    for root in roots:
+        blocks += sorted((p for p in root.iterdir() if p.is_dir() and re.match(r"\d+\.", p.name)),
+                         key=lambda p: int(p.name.split(".")[0]))
+    return blocks
 
 
 # A kata file is a whole program: it imports what it uses and the harness,

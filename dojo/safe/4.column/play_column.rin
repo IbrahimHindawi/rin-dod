@@ -1,0 +1,197 @@
+// Dojo 4, the playground: a type-erased column.
+//
+// A column is one component's rows, kept as bytes. It doesn't know the type
+// it holds, only how many bytes make a row and how they must be aligned, and
+// that is enough to grow, to zero a row, and to move the last row into a hole.
+// The type comes back only at the edge: a typed view turns the bytes into a
+// []T, for a T of the column's size and alignment.
+//
+// Two things make it work:
+//
+//   * the storage starts on a boundary of the column's alignment, so every
+//     row of the type lands where it may live;
+//   * a full column grows by a factor, not by a row, so the copies that
+//     growing costs add up to about one per push.
+//
+// This program fills a column, draws each row's bytes next to the value they
+// are, grows it, swap-removes from it, and asks it for the wrong type. Break
+// on `column_grow` in a debugger and watch the rows move to the new block.
+//
+// The switch: set grow_by_doubling to 0, so a full column grows by one row,
+// and run it again. Look at the last line: the same 1000 pushes, and how many
+// rows were copied to make room for them. It's a global, read each time a
+// column grows, so a debugger can flip it mid-run too: stop on column_grow, set
+// it to 0 in the watch window, and continue.
+//
+// Safe subset: the column's bytes are touched by four [trusted] procs, as in
+// the kata; the arena is the region `level`.
+
+import "std/print.rin"
+import "std/memops.rin"
+import "std/fmt.rin"
+
+grow_by_doubling: b32 = 1;
+
+level: region;
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+// 8 bytes, like a vec2, but aligned to 1.
+bytes8: struct = {
+    b: [8]u8;
+}
+
+column: struct = {
+    data: ^u8;
+    size: u64;
+    align: u64;
+    count: u64;
+    capacity: u64;
+    // What growing has cost so far.
+    grows: u64;
+    copied: u64;
+    arena: ^memops_arena;
+}
+
+column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level = {
+    c: *column in level = new<column>(r);
+    c*.arena = r;
+    c*.size = size;
+    c*.align = align;
+    return c;
+}
+
+// A new block from the region, and the rows in use copied into it. The old
+// block stays in the region, unused: an arena frees everything at once, never
+// one allocation.
+column_grow: proc[trusted](c: *column) -> void = {
+    capacity: u64 = 4;
+    if (c*.capacity > 0) {
+        capacity = grow_by_doubling ? c*.capacity * 2 : c*.capacity + 1;
+    }
+    data: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+    if (c*.count > 0) {
+        memcpy(data, c*.data, c*.size * c*.count);
+    }
+    c*.data = data;
+    c*.grows += 1;
+    c*.copied += c*.count;
+    c*.capacity = capacity;
+}
+
+column_push_zeroed: proc[trusted](c: *column) -> u64 = {
+    if (c*.count == c*.capacity) {
+        column_grow(c);
+    }
+    row: u64 = c*.count;
+    c*.count += 1;
+    memset(c*.data[row * c*.size]&, 0, c*.size);
+    return row;
+}
+
+column_swap_remove: proc[trusted](c: *column, row: u64) -> void = {
+    last: u64 = c*.count - 1;
+    if (row != last) {
+        memcpy(c*.data[row * c*.size]&, c*.data[last * c*.size]&, c*.size);
+    }
+    c*.count = last;
+}
+
+column_row: proc[trusted](c: *const column, row: u64) -> []u8 = {
+    return c*.data[row * c*.size..(row + 1) * c*.size];
+}
+
+// Whether T can be the column's type: its size and its alignment. The kata
+// stops the program for a T that can't; this program wants to keep going.
+column_fits: proc<T>(c: *const column) -> b32 = {
+    size: u64 = sizeof(T);
+    align: u64 = alignof(T);
+    return size == c*.size && align == c*.align;
+}
+
+column_slice: proc[trusted]<T>(c: *const column) -> []T = {
+    raw: ^T = cast(c*.data, ^T);
+    return raw[0..c*.count];
+}
+
+draw: proc(c: *column, f: *fmt) -> void = {
+    printfmt("    capacity {}, {} rows in use, {} bytes of storage\n", c*.capacity, c*.count, c*.capacity * c*.size);
+    view: []vec2 = column_slice<vec2>(c);
+    for (row: u64 = 0; row < c*.count; row += 1) {
+        printfmt("    row {} ", row);
+        bytes: []u8 = column_row(c, row);
+        fmt_reset(f);
+        for (i: u64 = 0; i < bytes.length; i += 1) {
+            fmt_char(f, ' ');
+            fmt_hex(f, cast(bytes[i], u64), 2, 0);
+        }
+        v: vec2 = view[row];
+        printfmt("{}   as a vec2 ({:.0}, {:.0})\n", fmt_text(f), cast(v.x, f64), cast(v.y, f64));
+    }
+}
+
+push: proc(c: *column, x: f32, y: f32) -> void = {
+    row: u64 = column_push_zeroed(c);
+    view: []vec2 = column_slice<vec2>(c);
+    view[row] = { .x = x, .y = y };
+}
+
+refused: proc(fits: b32) -> ^const char = {
+    return fits ? "a slice" : "refused";
+}
+
+main: proc() -> i32 = {
+    level: region = {
+        f: *fmt in level = fmt_make(level, 64);
+        c: *column in level = column_make(level, sizeof(vec2), alignof(vec2));
+        printfmt("a column of vec2: {}-byte rows aligned to {}, kept in blocks from an arena\n", c*.size, c*.align);
+
+        printfmt("push 3 zeroed rows, and write each through the typed view\n");
+        for (i: u64 = 0; i < 3; i += 1) {
+            push(c, cast(2 * i + 1, f32), cast(2 * i + 2, f32));
+        }
+        draw(c, f);
+
+        printfmt("push 2 more: the column is full at 4 rows, so it grows before the fifth\n");
+        push(c, 7.0, 8.0);
+        before: u64 = c*.grows;
+        push(c, 9.0, 10.0);
+        if (c*.grows > before) {
+            printfmt("    grew to {} rows: a new block from the arena, {} rows copied into it, the old one left there\n",
+                c*.capacity, c*.count - 1);
+            printfmt("    a slice taken before the grow still points into the old block: writes through it are lost\n");
+        }
+        draw(c, f);
+
+        printfmt("swap_remove row 0: the last row's 8 bytes move into row 0\n");
+        column_swap_remove(c, 0);
+        draw(c, f);
+
+        printfmt("ask for the rows as other types\n");
+        printfmt("    as u32: {}, a u32 is 4 bytes and these rows are 8\n", refused(column_fits<u32>(c)));
+        printfmt("    as bytes8: {}, the size is right, but it is aligned to 1, not 4\n", refused(column_fits<bytes8>(c)));
+
+        big: *column in level = column_make(level, sizeof(u32), alignof(u32));
+        for (i: u32 = 0; i < 1000; i += 1) {
+            row: u64 = column_push_zeroed(big);
+            values: []u32 = column_slice<u32>(big);
+            values[row] = i;
+        }
+        if (grow_by_doubling) {
+            printfmt("1000 pushes into a u32 column, growing by doubling\n");
+        } else {
+            printfmt("1000 pushes into a u32 column, growing by one row at a time\n");
+        }
+        printfmt("    {} grows, {} rows copied to make room\n", big*.grows, big*.copied);
+        sum: u32 = 0;
+        values: []u32 = column_slice<u32>(big);
+        for (i: u64 = 0; i < values.length; i += 1) {
+            sum += values[i];
+        }
+        printfmt("    and the rows are all there: they add up to {}\n", sum);
+    }
+    return 0;
+}
