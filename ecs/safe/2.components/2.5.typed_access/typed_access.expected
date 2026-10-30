@@ -1,0 +1,14 @@
+two drones and a bullet, built with kayan_set:
+    0:1 at (20.00,  5.00), health 100
+    1:1 at (30.00, -5.00), health 100
+drone 0:1 is hit through kayan_get<health>:
+    0:1 at (20.00,  5.00), health 75
+the bullet has a velocity: yes; a health: no
+kayan_get<health> on the bullet is null: yes
+kayan_set<health> on the bullet: missing
+despawned 1:1; kayan_set<health> on it now: dead
+    1:1 is not a live drone
+kept a pointer to 0:1's health, spawned 8 drones (the table grew), wrote 1 through it:
+    0:1 at (20.00,  5.00), health 75
+    the write went to the column's old block; the handle still finds the real one
+kayan_verify: 0 problems

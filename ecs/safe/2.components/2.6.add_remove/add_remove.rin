@@ -1,0 +1,628 @@
+// 2.6 Adding and removing components
+//
+// A drone catches fire: it gains a `burning` component. The fire goes out: it
+// loses it. In an archetype ECS a table holds exactly one combination, so a
+// drone that gains a component no longer belongs in its table. It moves:
+//
+//   1. find the table for its signature plus (or minus) the component;
+//   2. add a row there, and copy every component the two tables share;
+//   3. swap-remove its old row, fixing whoever moved into the hole;
+//   4. point its slot at the new table and row.
+//
+// Its handle does not change. Everything else about it is where it was, one
+// table over.
+//
+// Step 1 is a hashmap lookup by signature, and a game toggling components
+// does it constantly, always between the same few tables. So each table
+// remembers its neighbours: "add burning: table 2", "remove burning: table 1".
+// These edges make the tables a graph, the archetype graph, and after the
+// first move between two tables every later one follows an edge instead of
+// looking anything up.
+//
+// In the safe subset, as in 2.4 and 2.5: the world and its tables live in the
+// `level` region, the two trusted procs are the column's, and the row copy
+// between tables is a bounds-checked byte loop.
+
+import "std/print.rin"
+import "std/memops.rin"
+import "std/vec.rin"
+import "std/hashmap.rin"
+
+level: region;
+
+vec2: struct = {
+    x: f32;
+    y: f32;
+}
+
+position: struct = { at: vec2; }
+velocity: struct = { per_second: vec2; }
+health: struct = { points: f32; max: f32; }
+damage: struct = { amount: f32; }
+lifetime: struct = { seconds: f32; }
+turret: struct = { cooldown: f32; timer: f32; }
+burning: struct = { per_second: f32; }
+
+component: enum = {
+    position,
+    velocity,
+    health,
+    damage,
+    lifetime,
+    turret,
+    burning,
+}
+
+component_of: proc<position>() -> component = { return component.position; }
+component_of: proc<velocity>() -> component = { return component.velocity; }
+component_of: proc<health>() -> component = { return component.health; }
+component_of: proc<damage>() -> component = { return component.damage; }
+component_of: proc<lifetime>() -> component = { return component.lifetime; }
+component_of: proc<turret>() -> component = { return component.turret; }
+component_of: proc<burning>() -> component = { return component.burning; }
+
+// ---------------------------------------------------------------------------
+// Entities (Part 1)
+// ---------------------------------------------------------------------------
+
+kayan_entity: struct = {
+    index: u32;
+    generation: u32;
+}
+
+// `missing`: the entity is alive but has no such component.
+kayan_status: enum[must_use] = {
+    ok,
+    dead,
+    missing,
+}
+
+// Where an entity lives: which table, and which row of it.
+kayan_slot: struct = {
+    generation: u32;
+    table: u32;
+    row: u32;
+}
+
+// ---------------------------------------------------------------------------
+// Columns (2.2)
+// ---------------------------------------------------------------------------
+
+kayan_column: struct = {
+    data: []u8 in level;
+    size: u64;
+    align: u64;
+}
+
+kayan_column_init: proc(c: *kayan_column, info: *const reflect) -> void = {
+    c*.size = info*.size;
+    c*.align = info*.align;
+}
+
+kayan_column_grow: proc[trusted](r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = {
+    bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
+    if (count > 0) {
+        memcpy(bytes, c*.data.data, c*.size * count);
+    }
+    c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
+}
+
+kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
+    for (i: u64 = 0; i < c*.size; i += 1) {
+        c*.data[to * c*.size + i] = c*.data[from * c*.size + i];
+    }
+}
+
+// Row `from` of one column over row `to` of another: the same component in
+// two tables, as a move between tables copies it.
+kayan_column_copy_row_from: proc(dst: *kayan_column, to: u64, src: *const kayan_column, from: u64) -> void = {
+    for (i: u64 = 0; i < dst*.size; i += 1) {
+        dst*.data[to * dst*.size + i] = src*.data[from * src*.size + i];
+    }
+}
+
+kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
+    for (i: u64 = 0; i < c*.size; i += 1) {
+        c*.data[row * c*.size + i] = 0;
+    }
+}
+
+kayan_column_slice: proc[trusted]<T>(c: *const kayan_column, count: u64) -> []T in level = {
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+        exit(1);
+    }
+    if (count * c*.size > c*.data.length) {
+        printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / c*.size);
+        exit(1);
+    }
+    raw: ^T = cast(c*.data.data, ^T);
+    return cast(raw[0..count], []T in level);
+}
+
+// ---------------------------------------------------------------------------
+// The table
+// ---------------------------------------------------------------------------
+
+// `columns[id]` is in use when the signature has bit `id`; the others stay
+// zeroed. Count and capacity are the table's, shared by its columns and by
+// `entities`, so they can never disagree.
+//
+// The edges: `add_edges[id]` is the table this one's entities move to when
+// they gain component `id`, and `remove_edges[id]` when they lose it. Each is
+// the table's index plus one, so 0, which a new table starts with, means "not
+// known yet".
+kayan_table: struct = {
+    signature: u64;
+    count: u64;
+    capacity: u64;
+    entities: []kayan_entity in level;
+    columns: [64]kayan_column;
+    add_edges: [64]u32;
+    remove_edges: [64]u32;
+}
+
+// The world: the registry, the slots and free list, and every table, with a
+// map from signature to table index so finding one is a lookup, not a search.
+// Tables are referred to by index in the slots, and by pointer everywhere
+// else: a table is made once in the region and never moves.
+kayan_world: struct = {
+    infos: [64]?*const reflect in permanent;
+    component_count: u32;
+    tables: *vec<*kayan_table in level> in level;
+    by_signature: *hashmap<u64, u32> in level;
+    slots: *vec<kayan_slot> in level;
+    free: *vec<u32> in level;
+    live: u64;
+    // How table moves found their destination, for this chapter's output.
+    lookups: u64;
+    edge_hits: u64;
+}
+
+kayan_bit: proc(id: u32) -> u64 = {
+    return 1'u64 shl cast(id, u64);
+}
+
+kayan_id_of: proc<T>() -> u32 = {
+    return cast(component_of<T>(), u32);
+}
+
+kayan_mask_of: proc<T>() -> u64 = {
+    return kayan_bit(kayan_id_of<T>());
+}
+
+kayan_register: proc(w: *kayan_world in level, id: u32, info: *const reflect in permanent) -> void = {
+    if (id >= 64) {
+        printfmt("kayan: component id {} is past the 64 a signature can hold\n", id);
+        exit(1);
+    }
+    w*.infos[id] = info;
+    if (id + 1 > w*.component_count) {
+        w*.component_count = id + 1;
+    }
+}
+
+// A component's name, for printing: a registered id's, or "?" for a slot
+// nobody filled.
+kayan_name: proc(w: *kayan_world in level, id: u32) -> ^const char = {
+    info: ?*const reflect in permanent = w*.infos[id];
+    return info ? info*.name : "?";
+}
+
+kayan_table_has: proc(t: *kayan_table in level, id: u32) -> b32 = {
+    return (t*.signature & kayan_bit(id)) != 0;
+}
+
+// A table for a signature: one empty column per component in it, sized from
+// the registry. Every component in the signature must be registered.
+kayan_table_init: proc(w: *kayan_world in level, t: *kayan_table in level, signature: u64) -> void = {
+    t*.signature = signature;
+    for (id: u32 = 0; id < 64; id += 1) {
+        if ((signature & kayan_bit(id)) != 0) {
+            info: ?*const reflect in permanent = id < w*.component_count ? w*.infos[id] : null;
+            if (!info) {
+                printfmt("kayan: signature {} uses component {}, which was never registered\n", signature, id);
+                exit(1);
+            } else {
+                kayan_column_init(t*.columns[id]&, info);
+            }
+        }
+    }
+}
+
+// Double the room in `entities` and in every column at once.
+kayan_table_grow: proc(r: region level, w: *kayan_world in level, t: *kayan_table in level) -> void = {
+    capacity: u64 = t*.capacity == 0 ? 4 : t*.capacity * 2;
+    entities: []kayan_entity in level = new_slice<kayan_entity>(r, capacity);
+    for (row: u64 = 0; row < t*.count; row += 1) {
+        entities[row] = t*.entities[row];
+    }
+    t*.entities = entities;
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
+        if (kayan_table_has(t, id)) {
+            kayan_column_grow(r, t*.columns[id]&, t*.count, capacity);
+        }
+    }
+    t*.capacity = capacity;
+}
+
+// A new row at the end, owned by `e`, with every component zeroed.
+kayan_table_add_row: proc(r: region level, w: *kayan_world in level, t: *kayan_table in level, e: kayan_entity) -> u64 = {
+    if (t*.count == t*.capacity) {
+        kayan_table_grow(r, w, t);
+    }
+    row: u64 = t*.count;
+    t*.count += 1;
+    t*.entities[row] = e;
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
+        if (kayan_table_has(t, id)) {
+            kayan_column_zero_row(t*.columns[id]&, row);
+        }
+    }
+    return row;
+}
+
+// 1.4's swap-remove, for every column: the last row is copied over `row`, and
+// the slot of the entity that owned the last row is told where it went.
+kayan_table_remove_row: proc(w: *kayan_world in level, t: *kayan_table in level, row: u64) -> void = {
+    last: u64 = t*.count - 1;
+    if (row != last) {
+        for (id: u32 = 0; id < w*.component_count; id += 1) {
+            if (kayan_table_has(t, id)) {
+                kayan_column_copy_row(t*.columns[id]&, row, last);
+            }
+        }
+        moved: kayan_entity = t*.entities[last];
+        t*.entities[row] = moved;
+        vec<kayan_slot>at(w*.slots, cast(moved.index, u64))*.row = cast(row, u32);
+    }
+    t*.count = last;
+}
+
+// The typed view of one of the table's columns: T's rows, all of them in use.
+// Asking for a component the table does not have is a bug, so it stops.
+kayan_slice: proc<T>(t: *kayan_table in level) -> []T in level = {
+    id: u32 = kayan_id_of<T>();
+    if (!kayan_table_has(t, id)) {
+        printfmt("kayan: the table has no column for component {}\n", id);
+        exit(1);
+    }
+    return kayan_column_slice<T>(t*.columns[id]&, t*.count);
+}
+
+// The table at an index: a pointer into the region, good for as long as the
+// level is. The vec of pointers may grow, but what it points at does not move.
+kayan_table_at: proc(w: *kayan_world in level, index: u32) -> *kayan_table in level = {
+    return vec<*kayan_table in level>at(w*.tables, cast(index, u64))*;
+}
+
+// The table for a signature: found if it exists, made if it does not. This is
+// where archetypes come from.
+kayan_table_for: proc(r: region level, w: *kayan_world in level, signature: u64) -> u32 = {
+    found: ?*u32 = hashmap<u64, u32>get(w*.by_signature, signature);
+    if (found) {
+        return found*;
+    }
+    index: u32 = cast(w*.tables*.length, u32);
+    t: *kayan_table in level = new<kayan_table>(r);
+    kayan_table_init(w, t, signature);
+    _ = vec<*kayan_table in level>push(w*.tables, t);
+    _ = hashmap<u64, u32>set(w*.by_signature, signature, index);
+    return index;
+}
+
+// ---------------------------------------------------------------------------
+// The world
+// ---------------------------------------------------------------------------
+
+kayan_world_make: proc(r: region level) -> *kayan_world in level = {
+    return new<kayan_world>(r, {
+        .tables = vec<*kayan_table in level>make(r, 8),
+        .by_signature = hashmap<u64, u32>make(r),
+        .slots = vec<kayan_slot>make(r, 8),
+        .free = vec<u32>make(r, 8),
+    });
+}
+
+kayan_alive: proc(w: *kayan_world in level, e: kayan_entity) -> b32 = {
+    if (cast(e.index, u64) >= w*.slots*.length) {
+        return false;
+    }
+    return vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.generation == e.generation;
+}
+
+// A new entity with the components in `signature`, all zeroed, in the table
+// for that signature.
+kayan_spawn: proc(r: region level, w: *kayan_world in level, signature: u64) -> kayan_entity = {
+    e: kayan_entity = {};
+    if (!vec<u32>is_empty(w*.free)) {
+        e.index = vec<u32>pop(w*.free);
+    } else {
+        e.index = cast(w*.slots*.length, u32);
+        _ = vec<kayan_slot>push(w*.slots, { .generation = 1 });
+    }
+    e.generation = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.generation;
+    table_index: u32 = kayan_table_for(r, w, signature);
+    t: *kayan_table in level = kayan_table_at(w, table_index);
+    row: u64 = kayan_table_add_row(r, w, t, e);
+    // Both calls were handed the world, so the pointer into the slots is
+    // taken after them.
+    slot: *kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64));
+    slot*.table = table_index;
+    slot*.row = cast(row, u32);
+    w*.live += 1;
+    return e;
+}
+
+kayan_despawn: proc(w: *kayan_world in level, e: kayan_entity) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    slot: kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*;
+    kayan_table_remove_row(w, kayan_table_at(w, slot.table), cast(slot.row, u64));
+    vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.generation += 1;
+    _ = vec<u32>push(w*.free, e.index);
+    w*.live -= 1;
+    return kayan_status.ok;
+}
+
+// The components a live entity has: its table's signature. 0 for a dead one.
+kayan_signature: proc(w: *kayan_world in level, e: kayan_entity) -> u64 = {
+    if (!kayan_alive(w, e)) {
+        return 0;
+    }
+    return kayan_table_at(w, vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.table)*.signature;
+}
+
+// ---------------------------------------------------------------------------
+// Moving between tables
+// ---------------------------------------------------------------------------
+
+// The table an entity of table `from` moves to when it gains component `id`.
+// The first time, it is found by signature, which can make the table; the
+// answer is written on both tables, as from's add edge and the destination's
+// remove edge, so neither direction is looked up again.
+kayan_table_with: proc(r: region level, w: *kayan_world in level, from: u32, id: u32) -> u32 = {
+    edge: u32 = kayan_table_at(w, from)*.add_edges[id];
+    if (edge != 0) {
+        w*.edge_hits += 1;
+        return edge - 1;
+    }
+    w*.lookups += 1;
+    to: u32 = kayan_table_for(r, w, kayan_table_at(w, from)*.signature | kayan_bit(id));
+    kayan_table_at(w, from)*.add_edges[id] = to + 1;
+    kayan_table_at(w, to)*.remove_edges[id] = from + 1;
+    return to;
+}
+
+// The same for losing component `id`.
+kayan_table_without: proc(r: region level, w: *kayan_world in level, from: u32, id: u32) -> u32 = {
+    edge: u32 = kayan_table_at(w, from)*.remove_edges[id];
+    if (edge != 0) {
+        w*.edge_hits += 1;
+        return edge - 1;
+    }
+    w*.lookups += 1;
+    to: u32 = kayan_table_for(r, w, kayan_table_at(w, from)*.signature & ~kayan_bit(id));
+    kayan_table_at(w, from)*.remove_edges[id] = to + 1;
+    kayan_table_at(w, to)*.add_edges[id] = from + 1;
+    return to;
+}
+
+// Move a live entity to table `to_index`. Components both tables have are
+// copied, byte for byte; components only the new table has start zeroed;
+// components only the old table has are dropped with its old row.
+kayan_move: proc(r: region level, w: *kayan_world in level, e: kayan_entity, to_index: u32) -> void = {
+    slot: kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*;
+    from_index: u32 = slot.table;
+    if (from_index == to_index) {
+        return;
+    }
+    from: *kayan_table in level = kayan_table_at(w, from_index);
+    to: *kayan_table in level = kayan_table_at(w, to_index);
+    from_row: u64 = cast(slot.row, u64);
+    to_row: u64 = kayan_table_add_row(r, w, to, e);
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
+        if (kayan_table_has(from, id) && kayan_table_has(to, id)) {
+            kayan_column_copy_row_from(to*.columns[id]&, to_row, from*.columns[id]&, from_row);
+        }
+    }
+    kayan_table_remove_row(w, from, from_row);
+    // The slot is written after the calls that were handed the world.
+    moved: *kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64));
+    moved*.table = to_index;
+    moved*.row = cast(to_row, u32);
+}
+
+// ---------------------------------------------------------------------------
+// The typed layer
+// ---------------------------------------------------------------------------
+
+// e's T, or null if e is dead or has no T. Handle, slot, table, row, typed
+// view: the same path as 1.4's get_position, for any component. The pointer is
+// good until the next structural change, so use it now and keep the handle.
+kayan_get: proc<T>(w: *kayan_world in level, e: kayan_entity) -> ?*T in level = {
+    if (!kayan_alive(w, e)) {
+        return null;
+    }
+    slot: kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*;
+    t: *kayan_table in level = kayan_table_at(w, slot.table);
+    if (!kayan_table_has(t, kayan_id_of<T>())) {
+        return null;
+    }
+    rows: []T in level = kayan_slice<T>(t);
+    return rows[cast(slot.row, u64)]&;
+}
+
+kayan_has: proc<T>(w: *kayan_world in level, e: kayan_entity) -> b32 = {
+    return (kayan_signature(w, e) & kayan_mask_of<T>()) != 0;
+}
+
+// Write e's T. It must already have one: giving an entity a component it does
+// not have changes its table, which is 2.6.
+kayan_set: proc<T>(w: *kayan_world in level, e: kayan_entity, value: T) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    p: ?*T in level = kayan_get<T>(w, e);
+    if (!p) {
+        return kayan_status.missing;
+    }
+    p* = value;
+    return kayan_status.ok;
+}
+
+// Give e a T. If it already has one, this is kayan_set; if not, it moves to
+// the table with T and then sets it.
+kayan_add: proc<T>(r: region level, w: *kayan_world in level, e: kayan_entity, value: T) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    if (!kayan_has<T>(w, e)) {
+        from: u32 = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.table;
+        kayan_move(r, w, e, kayan_table_with(r, w, from, kayan_id_of<T>()));
+    }
+    return kayan_set<T>(w, e, value);
+}
+
+// Take e's T away, moving it to the table without T.
+kayan_remove: proc<T>(r: region level, w: *kayan_world in level, e: kayan_entity) -> kayan_status = {
+    if (!kayan_alive(w, e)) {
+        return kayan_status.dead;
+    }
+    if (!kayan_has<T>(w, e)) {
+        return kayan_status.missing;
+    }
+    from: u32 = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*.table;
+    kayan_move(r, w, e, kayan_table_without(r, w, from, kayan_id_of<T>()));
+    return kayan_status.ok;
+}
+
+// The invariant, over every table: each row belongs to a live entity whose
+// slot points back at that table and row, and the rows of all tables add up to
+// the live count.
+kayan_verify: proc(w: *kayan_world in level) -> u64 = {
+    problems: u64 = 0;
+    rows: u64 = 0;
+    for (ti: u64 = 0; ti < w*.tables*.length; ti += 1) {
+        t: *kayan_table in level = kayan_table_at(w, cast(ti, u32));
+        for (row: u64 = 0; row < t*.count; row += 1) {
+            e: kayan_entity = t*.entities[row];
+            if (!kayan_alive(w, e)) {
+                printfmt("kayan_verify: table {} row {} holds dead entity {}:{}\n", ti, row, e.index, e.generation);
+                problems += 1;
+                continue;
+            }
+            slot: kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64))*;
+            if (cast(slot.table, u64) != ti || cast(slot.row, u64) != row) {
+                printfmt("kayan_verify: {}:{} is in table {} row {}, its slot says table {} row {}\n",
+                    e.index, e.generation, ti, row, slot.table, slot.row);
+                problems += 1;
+            }
+        }
+        rows += t*.count;
+    }
+    if (rows != w*.live) {
+        printfmt("kayan_verify: {} rows in tables, {} live entities\n", rows, w*.live);
+        problems += 1;
+    }
+    return problems;
+}
+
+kayan_print_signature: proc(w: *kayan_world in level, signature: u64) -> void = {
+    printfmt("{");
+    first: b32 = true;
+    for (id: u32 = 0; id < w*.component_count; id += 1) {
+        if ((signature & kayan_bit(id)) != 0) {
+            if (!first) {
+                printfmt(" ");
+            }
+            printfmt("{}", kayan_name(w, id));
+            first = false;
+        }
+    }
+    printfmt("}");
+}
+
+kayan_print_tables: proc(w: *kayan_world in level) -> void = {
+    for (ti: u64 = 0; ti < w*.tables*.length; ti += 1) {
+        t: *kayan_table in level = kayan_table_at(w, cast(ti, u32));
+        printfmt("    table {} ", cast(ti, u32));
+        kayan_print_signature(w, t*.signature);
+        printfmt(":");
+        for (row: u64 = 0; row < t*.count; row += 1) {
+            e: kayan_entity = t*.entities[row];
+            printfmt(" {}:{}", e.index, e.generation);
+        }
+        printfmt("\n");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The program
+// ---------------------------------------------------------------------------
+
+spawn_drone: proc(r: region level, w: *kayan_world in level, x: f32, y: f32) -> kayan_entity = {
+    e: kayan_entity = kayan_spawn(r, w, kayan_mask_of<position>() | kayan_mask_of<velocity>() | kayan_mask_of<health>());
+    _ = kayan_set<position>(w, e, { .at = { .x = x, .y = y } });
+    _ = kayan_set<velocity>(w, e, { .per_second = { .x = -1.0, .y = 0.0 } });
+    _ = kayan_set<health>(w, e, { .points = 100.0, .max = 100.0 });
+    return e;
+}
+
+ignite: proc(r: region level, w: *kayan_world in level, e: kayan_entity) -> void = {
+    printfmt("    {}:{} catches fire: {}\n", e.index, e.generation,
+        kayan_add<burning>(r, w, e, { .per_second = 10.0 }));
+}
+
+put_out: proc(r: region level, w: *kayan_world in level, e: kayan_entity) -> void = {
+    printfmt("    {}:{} is put out: {}\n", e.index, e.generation, kayan_remove<burning>(r, w, e));
+}
+
+main: proc() -> i32 = {
+    level: region = {
+        w: *kayan_world in level = kayan_world_make(level);
+        kayan_register(w, kayan_id_of<position>(), position<>&);
+        kayan_register(w, kayan_id_of<velocity>(), velocity<>&);
+        kayan_register(w, kayan_id_of<health>(), health<>&);
+        kayan_register(w, kayan_id_of<damage>(), damage<>&);
+        kayan_register(w, kayan_id_of<lifetime>(), lifetime<>&);
+        kayan_register(w, kayan_id_of<turret>(), turret<>&);
+        kayan_register(w, kayan_id_of<burning>(), burning<>&);
+
+        d: [4]kayan_entity = {};
+        for (i: u32 = 0; i < 4; i += 1) {
+            d[i] = spawn_drone(level, w, 10.0 * cast(i + 1, f32), 0.0);
+        }
+        printfmt("4 drones:\n");
+        kayan_print_tables(w);
+
+        printfmt("frame 1\n");
+        ignite(level, w, d[0]);
+        ignite(level, w, d[2]);
+        kayan_print_tables(w);
+
+        printfmt("frame 2\n");
+        put_out(level, w, d[0]);
+        ignite(level, w, d[1]);
+        ignite(level, w, d[2]);
+        kayan_print_tables(w);
+
+        printfmt("frame 3\n");
+        put_out(level, w, d[1]);
+        put_out(level, w, d[2]);
+        put_out(level, w, d[3]);
+        ignite(level, w, d[3]);
+        kayan_print_tables(w);
+
+        p: ?*position in level = kayan_get<position>(w, d[2]);
+        h: ?*health in level = kayan_get<health>(w, d[2]);
+        if (p && h) {
+            printfmt("{}:{} moved tables twice and kept its data: at ({:.2}, {:.2}), health {:.0}\n", d[2].index, d[2].generation,
+                cast(p*.at.x, f64), cast(p*.at.y, f64), cast(h*.points, f64));
+        }
+        printfmt("moves that looked up a table by signature: {}; that followed an edge: {}\n", w*.lookups, w*.edge_hits);
+        printfmt("kayan_verify: {} problems\n", kayan_verify(w));
+    }
+    return 0;
+}
