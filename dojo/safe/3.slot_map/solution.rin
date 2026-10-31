@@ -55,7 +55,7 @@ slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32 = {
 
 // Handle, slot, row, value: the value to read or to change, or null if h is
 // dead.
-slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64> = {
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64 in level> = {
     if (!slot_map_contains(m, h)) {
         return null;
     }
@@ -88,11 +88,11 @@ slot_map_len: proc(m: *slot_map) -> u64 = {
 }
 
 // The values, packed, in row order: what a system loops over.
-slot_map_values: proc(m: *slot_map) -> []u64 = {
+slot_map_values: proc(m: *slot_map) -> []u64 in level = {
     return vec<u64>items(m*.values);
 }
 
 // handles[row] is the handle that owns values[row].
-slot_map_handles: proc(m: *slot_map) -> []dojo_handle = {
+slot_map_handles: proc(m: *slot_map) -> []dojo_handle in level = {
     return vec<dojo_handle>items(m*.handles);
 }

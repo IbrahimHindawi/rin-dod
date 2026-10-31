@@ -162,7 +162,7 @@ kayan_component_name: proc(w: *const kayan_world, id: u32) -> ^const char = {
 
 // Borrowed from the table list: good until the next kayan_table_for or spawn.
 // Trusted for its `*const` promise: it reads the world and moves nothing.
-kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table = {
+kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table in level = {
     return vec<kayan_table>at(w*.tables, cast(index, u64));
 }
 
@@ -368,16 +368,16 @@ kayan_move: proc(w: *kayan_world, e: kayan_entity, signature: u64) -> kayan_stat
 // The row is checked against the rows in use, so a slot pointing past the end
 // stops the program in Debug. The pointer is a borrow of the world: good until
 // the next spawn, despawn, add or remove.
-kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T> = {
+kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T in level> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
     slot: *kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64));
-    t: *kayan_table = kayan_table_at(w, slot*.table);
+    t: *kayan_table in level = kayan_table_at(w, slot*.table);
     if (t*.columns[kayan_id_of<T>()] == null) {
         return null;
     }
-    rows: []T = kayan_column<T>(t);
+    rows: []T in level = kayan_column<T>(t);
     return rows[cast(slot*.row, u64)]&;
 }
 
@@ -401,7 +401,7 @@ kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 =
         return none;
     }
     slot: *kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64));
-    t: *kayan_table = kayan_table_at(w, slot*.table);
+    t: *kayan_table in level = kayan_table_at(w, slot*.table);
     if (t*.columns[id] == null) {
         return none;
     }

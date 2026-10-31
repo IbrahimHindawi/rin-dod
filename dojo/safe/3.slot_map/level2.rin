@@ -62,11 +62,11 @@ slot_map_len: proc(m: *slot_map) -> u64 = {
 }
 
 // The values, packed, in row order.
-slot_map_values: proc(m: *slot_map) -> []u64 = {
+slot_map_values: proc(m: *slot_map) -> []u64 in level = {
     return vec<u64>items(m*.values);
 }
 
 // handles[row] is the handle that owns values[row].
-slot_map_handles: proc(m: *slot_map) -> []dojo_handle = {
+slot_map_handles: proc(m: *slot_map) -> []dojo_handle in level = {
     return vec<dojo_handle>items(m*.handles);
 }

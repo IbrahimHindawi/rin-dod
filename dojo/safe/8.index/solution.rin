@@ -39,12 +39,12 @@ list_make: proc(r: region level) -> *list in level = {
 
 // Node `index`, alive or free. The pointer is good until the next node is
 // made, which can move them all.
-list_at: proc(l: *list, index: u32) -> *list_node = {
+list_at: proc(l: *list, index: u32) -> *list_node in level = {
     return vec<list_node>at(l*.nodes, cast(index, u64));
 }
 
 // Node `index` if it's in the list, or null.
-list_live: proc(l: *list, index: u32) -> option<*list_node> = {
+list_live: proc(l: *list, index: u32) -> option<*list_node in level> = {
     if (cast(index, u64) >= l*.nodes*.length || !list_at(l, index)*.alive) {
         return null;
     }
@@ -139,8 +139,8 @@ list_remove: proc(l: *list, node: u32) -> option<u64> = {
 }
 
 // The node's value, to read or to change, or null if it isn't in the list.
-list_get: proc(l: *list, node: u32) -> option<*u64> = {
-    n: option<*list_node> = list_live(l, node);
+list_get: proc(l: *list, node: u32) -> option<*u64 in level> = {
+    n: option<*list_node in level> = list_live(l, node);
     if (!n) {
         return null;
     }

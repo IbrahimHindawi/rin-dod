@@ -143,7 +143,7 @@ model_find: proc(m: *model, signature: u64) -> i64 = {
     return -1;
 }
 
-known_at: proc(m: *model, node: u32, id: u32, adding: b32) -> *u8 = {
+known_at: proc(m: *model, node: u32, id: u32, adding: b32) -> *u8 in level = {
     return vec<u8>at(m*.known, cast(node, u64) * 128 + cast(id, u64) * 2 + (adding ? 1 : 0));
 }
 

@@ -490,8 +490,8 @@ kayan_move: proc(w: *kayan_world, e: kayan_entity, to_index: u32) -> void = {
 // e's component `id` as its bytes: an empty slice if e is dead or has no such
 // component. The typed layer is for game code, which knows its types; this is
 // for tools that work from reflect records instead.
-kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 = {
-    none: []u8 = {};
+kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 in level = {
+    none: []u8 in level = {};
     if (!kayan_alive(w, e) || id >= w*.component_count) {
         return none;
     }
@@ -514,7 +514,7 @@ kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 =
 // view: the same path as 1.4's get_position, for any component. `option<*T>` says the
 // null is possible, so the caller tests before it reads. The pointer is good
 // until the next structural change, so use it now and keep the handle.
-kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T> = {
+kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T in level> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
@@ -525,7 +525,7 @@ kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T> = {
     if (!kayan_table_has(t, kayan_id_of<T>())) {
         return null;
     }
-    rows: []T = kayan_slice<T>(t);
+    rows: []T in level = kayan_slice<T>(t);
     return rows[cast(row, u64)]&;
 }
 

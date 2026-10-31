@@ -22,7 +22,7 @@ sparse_set_make: proc(r: region level) -> *sparse_set in level = {
 }
 
 // id's value, to read or to change, or null if it has none.
-sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64> = {
+sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64 in level> = {
     if (cast(id, u64) >= s*.rows*.length) {
         return null;
     }
@@ -76,11 +76,11 @@ sparse_set_len: proc(s: *sparse_set) -> u64 = {
 }
 
 // The values, packed, in row order: what a system loops over.
-sparse_set_values: proc(s: *sparse_set) -> []u64 = {
+sparse_set_values: proc(s: *sparse_set) -> []u64 in level = {
     return vec<u64>items(s*.values);
 }
 
 // ids[row] is the id that owns values[row].
-sparse_set_ids: proc(s: *sparse_set) -> []u32 = {
+sparse_set_ids: proc(s: *sparse_set) -> []u32 in level = {
     return vec<u32>items(s*.ids);
 }

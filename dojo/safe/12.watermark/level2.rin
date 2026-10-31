@@ -40,7 +40,7 @@ query_update: proc(q: *query, signatures: []const u64) -> void = {
 }
 
 // The matching tables, in increasing order.
-query_tables: proc(q: *query) -> []u32 = {
+query_tables: proc(q: *query) -> []u32 in level = {
     return vec<u32>items(q*.tables);
 }
 

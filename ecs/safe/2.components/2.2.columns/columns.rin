@@ -63,7 +63,7 @@ kayan_column_init: proc(c: *kayan_column, info: *const reflect) -> void = {
 }
 
 // Row `row`'s bytes.
-kayan_column_row: proc(c: *kayan_column, row: u64) -> []u8 = {
+kayan_column_row: proc(c: *kayan_column, row: u64) -> []u8 in level = {
     return c*.data[row * c*.size..(row + 1) * c*.size];
 }
 

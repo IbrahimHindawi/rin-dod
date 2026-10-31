@@ -30,7 +30,7 @@ bump_push: proc(b: *bump, size: u64, align: u64) -> option<u64> = {
 }
 
 // The arena's bytes, to write and read a push through at its offset.
-bump_bytes: proc(b: *bump) -> []u8 = {
+bump_bytes: proc(b: *bump) -> []u8 in level = {
     return b*.bytes;
 }
 
