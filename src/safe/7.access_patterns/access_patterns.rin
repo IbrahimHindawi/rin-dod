@@ -45,8 +45,8 @@ has_flag: proc(argc: i32, argv: ^^c8, flag: ^const c8) -> b32 = { unsafe {
 body_count: u64 = 1048576;
 contact_count: u64 = 1048576;
 dt: static f32 = 1.0 / 60.0;
-gravity: static f32 = -9.8;
-stiffness: static f32 = 0.01;
+gravity: static const f32 = -9.8;
+stiffness: static const f32 = 0.01;
 
 vec3: struct = {
     x: f32;

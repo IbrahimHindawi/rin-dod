@@ -58,7 +58,7 @@ dt: f32 = 1.0 / 60.0;
 // static: only this file can reach gravity, and nothing takes its address, so
 // the compiler knows no write through a slice can change it. Without it gcc
 // puts a run-time check in front of move_split's vector loop.
-gravity: static f32 = -9.8;
+gravity: static const f32 = -9.8;
 
 vec3: struct = {
     x: f32;
