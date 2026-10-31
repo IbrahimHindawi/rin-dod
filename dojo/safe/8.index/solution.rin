@@ -44,7 +44,7 @@ list_at: proc(l: *list, index: u32) -> *list_node = {
 }
 
 // Node `index` if it's in the list, or null.
-list_live: proc(l: *list, index: u32) -> ?*list_node = {
+list_live: proc(l: *list, index: u32) -> option<*list_node> = {
     if (cast(index, u64) >= l*.nodes*.length || !list_at(l, index)*.alive) {
         return null;
     }
@@ -115,7 +115,7 @@ list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
 // that touch other nodes: each is a borrow of the list, and the next call
 // ends it.
 list_remove: proc(l: *list, node: u32) -> option<u64> = {
-    n: ?*list_node = list_live(l, node);
+    n: option<*list_node> = list_live(l, node);
     if (!n) {
         return option<u64>none();
     }
@@ -139,8 +139,8 @@ list_remove: proc(l: *list, node: u32) -> option<u64> = {
 }
 
 // The node's value, to read or to change, or null if it isn't in the list.
-list_get: proc(l: *list, node: u32) -> ?*u64 = {
-    n: ?*list_node = list_live(l, node);
+list_get: proc(l: *list, node: u32) -> option<*u64> = {
+    n: option<*list_node> = list_live(l, node);
     if (!n) {
         return null;
     }
@@ -158,7 +158,7 @@ list_tail: proc(l: *list) -> u32 = {
 }
 
 list_next: proc(l: *list, node: u32) -> u32 = {
-    n: ?*list_node = list_live(l, node);
+    n: option<*list_node> = list_live(l, node);
     if (!n) {
         return list_none;
     }
@@ -166,7 +166,7 @@ list_next: proc(l: *list, node: u32) -> u32 = {
 }
 
 list_prev: proc(l: *list, node: u32) -> u32 = {
-    n: ?*list_node = list_live(l, node);
+    n: option<*list_node> = list_live(l, node);
     if (!n) {
         return list_none;
     }

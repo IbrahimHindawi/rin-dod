@@ -11,7 +11,7 @@
 //   slot_map_insert: proc(m: *slot_map, value: u64) -> dojo_handle      reuses a freed index first
 //   slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64>  keeps the rows packed
 //   slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32
-//   slot_map_get: proc(m: *slot_map, h: dojo_handle) -> ?*u64            null if h is dead
+//   slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64>            null if h is dead
 //   slot_map_len: proc(m: *slot_map) -> u64
 //   slot_map_values: proc(m: *slot_map) -> []u64                        packed, in row order
 //   slot_map_handles: proc(m: *slot_map) -> []dojo_handle               handles[row] owns values[row]

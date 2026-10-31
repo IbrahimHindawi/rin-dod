@@ -157,7 +157,7 @@ run_query: proc(k: *kinds, q: query) -> void = {
 // The fast way against the slow way, for every kind: the signature's bits
 // against its b32s, and the query's answer, if there is one, against one id
 // at a time.
-verify: proc(k: *kinds, q: ?*query) -> void = {
+verify: proc(k: *kinds, q: option<*query>) -> void = {
     for (i: u32 = 0; i < k*.count; i += 1) {
         it: *kind = k*.all[i]&;
         for (id: u32 = 0; id < 8; id += 1) {

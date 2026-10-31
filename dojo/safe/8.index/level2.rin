@@ -46,7 +46,7 @@ list_at: proc(l: *list, index: u32) -> *list_node = {
 }
 
 // Node `index` if it's in the list, or null.
-list_live: proc(l: *list, index: u32) -> ?*list_node = {
+list_live: proc(l: *list, index: u32) -> option<*list_node> = {
     return null;
 }
 
@@ -79,7 +79,7 @@ list_remove: proc(l: *list, node: u32) -> option<u64> = {
 }
 
 // The node's value, to read or to change, or null if it isn't in the list.
-list_get: proc(l: *list, node: u32) -> ?*u64 = {
+list_get: proc(l: *list, node: u32) -> option<*u64> = {
     return null;
 }
 

@@ -24,7 +24,7 @@ fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
     }
 }
 
-fmt_found: proc(f: *fmt, p: ?*const u64) -> void = {
+fmt_found: proc(f: *fmt, p: option<*const u64>) -> void = {
     if (p != null) {
         fmt_u64(f, p*);
     } else {
@@ -93,7 +93,7 @@ scenario: proc(r: region level) -> void = {
     dojo_same("get b, now that its index is d's", fmt_text(f), "null");
     nobody: dojo_handle = {};
     dojo_same("contains a zeroed handle", dojo_bool_name(slot_map_contains(m, nobody)), "false");
-    p: ?*u64 = slot_map_get(m, a);
+    p: option<*u64> = slot_map_get(m, a);
     if (p) {
         p* += 1;
     }
@@ -137,7 +137,7 @@ same_option: proc(a: option<u64>, b: option<u64>) -> b32 = {
     return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
 }
 
-found_is: proc(p: ?*const u64, o: option<u64>) -> b32 = {
+found_is: proc(p: option<*const u64>, o: option<u64>) -> b32 = {
     if (p == null) {
         return !o.has_value;
     }
@@ -152,7 +152,7 @@ print_option: proc(o: option<u64>) -> void = {
     }
 }
 
-print_found: proc(p: ?*const u64) -> void = {
+print_found: proc(p: option<*const u64>) -> void = {
     if (p != null) {
         printfmt("{}", p*);
     } else {
@@ -321,7 +321,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
             if (dojo_before(run, op)) {
                 printfmt("get({}:{})\n", h.index, h.generation);
             }
-            got: ?*u64 = slot_map_get(s, h);
+            got: option<*u64> = slot_map_get(s, h);
             if (!found_is(got, model_get(m, h))) {
                 dojo_fail(run, op);
                 printfmt("get({}:{}) gives ", h.index, h.generation);
@@ -336,7 +336,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
             if (dojo_before(run, op)) {
                 printfmt("get({}:{}), then add 1 through the pointer\n", h.index, h.generation);
             }
-            got: ?*u64 = slot_map_get(s, h);
+            got: option<*u64> = slot_map_get(s, h);
             if (got) {
                 got* += 1;
             }

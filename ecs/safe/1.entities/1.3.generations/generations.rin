@@ -105,10 +105,10 @@ set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
 
 // Reading through a handle checks it first. A dead handle, or an entity
 // without a position, gives null instead of whatever is at the number. The
-// result is `?*vec2`: it may be null, and the caller has to test it before
+// result is `option<*vec2>`: it may be null, and the caller has to test it before
 // reading through it. The pointer names no region: it points into the world
 // the caller passed, and is good until the caller changes the world.
-get_position: proc(w: *kayan_world, e: kayan_entity) -> ?*vec2 = {
+get_position: proc(w: *kayan_world, e: kayan_entity) -> option<*vec2> = {
     if (!kayan_alive(w, e) || !w*.has_position[e.index]) {
         return null;
     }
@@ -155,7 +155,7 @@ print_world: proc(w: *kayan_world) -> void = {
 
 // The turret's aim: the target's position, or a new target if it is gone.
 aim: proc(w: *kayan_world, target: *kayan_entity, fallback: kayan_entity) -> void = {
-    p: ?*vec2 = get_position(w, target*);
+    p: option<*vec2> = get_position(w, target*);
     if (!p) {
         printfmt("the turret's target {}:{} is dead; it picks {}:{} instead\n",
             target*.index, target*.generation, fallback.index, fallback.generation);

@@ -28,7 +28,7 @@ fmt_option: proc(f: *fmt, o: option<u64>) -> void = {
 }
 
 // Writes what a get found: the value, or null.
-fmt_found: proc(f: *fmt, p: ?*const u64) -> void = {
+fmt_found: proc(f: *fmt, p: option<*const u64>) -> void = {
     if (p != null) {
         fmt_u64(f, p*);
     } else {
@@ -96,7 +96,7 @@ scenario: proc(r: region level) -> void = {
     fmt_reset(f);
     fmt_ids(f, sparse_set_ids(s));
     dojo_same("ids", fmt_text(f), "3 5 1 7");
-    one: ?*u64 = sparse_set_get(s, 1);
+    one: option<*u64> = sparse_set_get(s, 1);
     if (one) {
         one* += 1;
     }
@@ -127,7 +127,7 @@ print_option: proc(o: option<u64>) -> void = {
     }
 }
 
-print_found: proc(p: ?*const u64) -> void = {
+print_found: proc(p: option<*const u64>) -> void = {
     if (p != null) {
         printfmt("{}", p*);
     } else {
@@ -146,7 +146,7 @@ same_option: proc(a: option<u64>, b: option<u64>) -> b32 = {
     return a.has_value == b.has_value && (!a.has_value || a.value == b.value);
 }
 
-found_is: proc(p: ?*const u64, o: option<u64>) -> b32 = {
+found_is: proc(p: option<*const u64>, o: option<u64>) -> b32 = {
     if (p == null) {
         return !o.has_value;
     }
@@ -260,7 +260,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
             if (dojo_before(run, op)) {
                 printfmt("get({})\n", id);
             }
-            got: ?*u64 = sparse_set_get(s, id);
+            got: option<*u64> = sparse_set_get(s, id);
             if (!found_is(got, model_get(m, id))) {
                 dojo_fail(run, op);
                 printfmt("get({}) returned ", id);
@@ -274,7 +274,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
             if (dojo_before(run, op)) {
                 printfmt("get({}), then add 1 through the pointer\n", id);
             }
-            got: ?*u64 = sparse_set_get(s, id);
+            got: option<*u64> = sparse_set_get(s, id);
             if (got) {
                 got* += 1;
             }

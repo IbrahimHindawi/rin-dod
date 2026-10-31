@@ -173,7 +173,7 @@ kayan_table: struct = {
     count: u64;
     capacity: u64;
     entities: *vec<kayan_entity> in level;
-    columns: [64]?*kayan_column in level;
+    columns: [64]option<*kayan_column in level>;
     add_edges: [64]u32;
     remove_edges: [64]u32;
 }
@@ -195,7 +195,7 @@ kayan_table_new: proc(h: *kayan_heap in level) -> *kayan_table in level = { unsa
 // is made.
 kayan_world: struct = {
     heap: *kayan_heap in level;
-    infos: [64]?*const reflect in permanent;
+    infos: [64]option<*const reflect in permanent>;
     component_count: u32;
     tables: *vec<*kayan_table in level> in level;
     by_signature: *hashmap<u64, u32> in level;
@@ -232,7 +232,7 @@ kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect in permanent
 // A registered component's record. The checker needs the null test; the
 // return after exit is never reached.
 kayan_info: proc(w: *const kayan_world, id: u32) -> *const reflect in permanent = {
-    info: ?*const reflect in permanent = w*.infos[id];
+    info: option<*const reflect in permanent> = w*.infos[id];
     if (info) {
         return info;
     }
@@ -266,7 +266,7 @@ kayan_table_make: proc(w: *kayan_world, signature: u64) -> *kayan_table in level
 kayan_table_grow: proc(w: *kayan_world, t: *kayan_table) -> void = {
     capacity: u64 = t*.capacity == 0 ? 4 : t*.capacity * 2;
     for (id: u32 = 0; id < w*.component_count; id += 1) {
-        c: ?*kayan_column in level = t*.columns[id];
+        c: option<*kayan_column in level> = t*.columns[id];
         if (c) {
             kayan_column_grow(w*.heap, c, t*.count, capacity);
         }
@@ -283,7 +283,7 @@ kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> 
     t*.count += 1;
     _ = vec<kayan_entity>push(t*.entities, e);
     for (id: u32 = 0; id < w*.component_count; id += 1) {
-        c: ?*kayan_column in level = t*.columns[id];
+        c: option<*kayan_column in level> = t*.columns[id];
         if (c) {
             kayan_column_zero_row(c, row);
         }
@@ -309,7 +309,7 @@ kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void
     last: u64 = t*.count - 1;
     if (row != last) {
         for (id: u32 = 0; id < w*.component_count; id += 1) {
-            c: ?*kayan_column in level = t*.columns[id];
+            c: option<*kayan_column in level> = t*.columns[id];
             if (c) {
                 kayan_column_copy_row(c, row, last);
             }
@@ -328,7 +328,7 @@ kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void
 // column, so that is kept by hand, and 3.3 makes it a rule.
 kayan_slice: proc<T>(t: *const kayan_table) -> []T = { unsafe {
     id: u32 = kayan_id_of<T>();
-    c: ?*kayan_column in level = t*.columns[id];
+    c: option<*kayan_column in level> = t*.columns[id];
     if (!c) {
         printfmt("kayan: the table has no column for component {}\n", id);
         exit(1);
@@ -345,7 +345,7 @@ kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table in level
 // The table for a signature: found if it exists, made if it does not. This is
 // where archetypes come from.
 kayan_table_for: proc(w: *kayan_world, signature: u64) -> u32 = {
-    found: ?*u32 = hashmap<u64, u32>get(w*.by_signature, signature);
+    found: option<*u32> = hashmap<u64, u32>get(w*.by_signature, signature);
     if (found) {
         return found*;
     }
@@ -467,8 +467,8 @@ kayan_move: proc(w: *kayan_world, e: kayan_entity, to_index: u32) -> void = {
     to: *kayan_table in level = kayan_table_at(w, to_index);
     to_row: u64 = kayan_table_add_row(w, to, e);
     for (id: u32 = 0; id < w*.component_count; id += 1) {
-        fc: ?*kayan_column in level = from*.columns[id];
-        tc: ?*kayan_column in level = to*.columns[id];
+        fc: option<*kayan_column in level> = from*.columns[id];
+        tc: option<*kayan_column in level> = to*.columns[id];
         if (fc && tc) {
             dst: []u8 = kayan_column_bytes(tc, to_row);
             src: []u8 = kayan_column_bytes(fc, from_row);
@@ -499,7 +499,7 @@ kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 =
     table: u32 = slot*.table;
     row: u32 = slot*.row;
     t: *kayan_table in level = kayan_table_at(w, table);
-    c: ?*kayan_column in level = t*.columns[id];
+    c: option<*kayan_column in level> = t*.columns[id];
     if (!c) {
         return none;
     }
@@ -511,10 +511,10 @@ kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 =
 // ---------------------------------------------------------------------------
 
 // e's T, or null if e is dead or has no T. Handle, slot, table, row, typed
-// view: the same path as 1.4's get_position, for any component. `?*T` says the
+// view: the same path as 1.4's get_position, for any component. `option<*T>` says the
 // null is possible, so the caller tests before it reads. The pointer is good
 // until the next structural change, so use it now and keep the handle.
-kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> ?*T = {
+kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
@@ -539,7 +539,7 @@ kayan_set: proc<T>(w: *kayan_world, e: kayan_entity, value: T) -> kayan_status =
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
-    p: ?*T = kayan_get<T>(w, e);
+    p: option<*T> = kayan_get<T>(w, e);
     if (!p) {
         return kayan_status.missing;
     }
@@ -670,7 +670,7 @@ kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = { un
 // size, both from the reflect record.
 kayan_print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> void = {
     for (i: u64 = 0; i < type*.count; i += 1) {
-        f: ?*const reflect_field = reflect_field_at(type, i);
+        f: option<*const reflect_field> = reflect_field_at(type, i);
         if (!f) {
             continue;
         }
@@ -680,7 +680,7 @@ kayan_print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> 
         at: []const u8 = base[f*.offset..f*.offset + f*.size];
         kayan_indent(depth);
         printfmt("{}:", f*.name);
-        info: ?*const reflect = reflect_field_info(f);
+        info: option<*const reflect> = reflect_field_info(f);
         if (info && info*.kind == reflect_kind_struct) {
             printfmt("\n");
             kayan_print_fields(info, at, depth + 1);
@@ -721,7 +721,7 @@ kayan_print_layout: proc(w: *const kayan_world) -> void = {
         kayan_print_signature(w, t*.signature);
         printfmt(": {} rows, room for {}\n", cast(t*.count, u32), cast(t*.capacity, u32));
         for (id: u32 = 0; id < w*.component_count; id += 1) {
-            c: ?*kayan_column in level = t*.columns[id];
+            c: option<*kayan_column in level> = t*.columns[id];
             if (c) {
                 size: u64 = c*.size;
                 printfmt("    {:-9} {:2} bytes a row, {:4} of {:4} bytes in use\n", kayan_info(w, id)*.name, cast(size, u32),
@@ -947,20 +947,20 @@ print_state: proc(w: *const kayan_world) -> void = {
         for (row: u64 = 0; row < t*.count; row += 1) {
             es: []kayan_entity = kayan_entities(t);
             e: kayan_entity = es[row];
-            p: ?*position = kayan_get<position>(w, e);
+            p: option<*position> = kayan_get<position>(w, e);
             if (!p) {
                 continue;
             }
             at: vec2 = p*.at;
             printfmt("    {}:{} at ({:5.2}, {:5.2})", e.index, e.generation, cast(at.x, f64), cast(at.y, f64));
-            h: ?*health = kayan_get<health>(w, e);
+            h: option<*health> = kayan_get<health>(w, e);
             if (h) {
                 printfmt("  health {:.0}", cast(h*.points, f64));
             }
             if (kayan_has<burning>(w, e)) {
                 printfmt(", burning");
             }
-            l: ?*lifetime = kayan_get<lifetime>(w, e);
+            l: option<*lifetime> = kayan_get<lifetime>(w, e);
             if (l) {
                 printfmt("  lifetime {:5.2}", cast(l*.seconds, f64));
             }

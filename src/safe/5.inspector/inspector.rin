@@ -21,7 +21,7 @@
 // f32 into them, and copying a C string into a fixed array are the four
 // trusted procs of this lesson; each checks the length it is given. The walk
 // over the reflect records is checked: `reflect_field_at` and
-// `reflect_field_info` return `?*const`, since a record can run out of fields
+// `reflect_field_info` return `option<*const>`, since a record can run out of fields
 // and a builtin has no record of its own.
 
 import "../../../includes/safe/kayan.rin"
@@ -134,14 +134,14 @@ print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {
 // disagreed with the data would stop the program in Debug.
 print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> void = {
     for (i: u64 = 0; i < type*.count; i += 1) {
-        f: ?*const reflect_field = reflect_field_at(type, i);
+        f: option<*const reflect_field> = reflect_field_at(type, i);
         if (!f || reflect_field_has_attr(f, "hidden")) {
             continue;
         }
         at: []const u8 = base[f*.offset..f*.offset + f*.size];
         indent(depth);
         printfmt("{}:", f*.name);
-        info: ?*const reflect = reflect_field_info(f);
+        info: option<*const reflect> = reflect_field_info(f);
         if (is_array(f) && reflect_cstr_equal(f*.elem_type, "c8")) {
             printfmt(" \"");
             print_text(at);
@@ -203,7 +203,7 @@ set_f32_by_name: proc(w: *kayan_world, e: kayan_entity, component_name: ^const c
             continue;
         }
         bytes: []u8 = kayan_get_bytes(w, e, id);
-        f: ?*const reflect_field = reflect_find_field(info, field_name);
+        f: option<*const reflect_field> = reflect_find_field(info, field_name);
         if (bytes.length == 0 || !f || !is_type(f, "f32")) {
             return 0;
         }
@@ -216,7 +216,7 @@ set_f32_by_name: proc(w: *kayan_world, e: kayan_entity, component_name: ^const c
 // Up to 15 characters, the rest of the array zeroed, so a shorter label does
 // not keep the tail of a longer one.
 set_label: proc(w: *kayan_world, e: kayan_entity, text: ^const c8) -> void = {
-    l: ?*label = kayan_get<label>(w, e);
+    l: option<*label> = kayan_get<label>(w, e);
     if (!l) {
         return;
     }

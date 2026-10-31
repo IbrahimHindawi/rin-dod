@@ -51,7 +51,7 @@ walk_diff: proc(r: region R, type: *const reflect, a: []const u8, b: []const u8)
 // The field a path names, hidden or not, and where its bytes start in the
 // outermost value: look each name up in the record of the field before it,
 // adding offsets. Null if no field has that path.
-walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*const reflect_field = {
+walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> option<*const reflect_field> = {
     return null;
 }
 

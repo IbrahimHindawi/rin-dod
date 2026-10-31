@@ -7,7 +7,7 @@ each harness opens in `main` and hands to the scenario and the fuzz run.
 Blocks 5 and 11 also use the region `frame`, opened once per game frame or
 fuzz step. A kata is made in the region by its `_make` proc,
 `handles_make(r: region level) -> *handles in level`, where the original
-had an `_init`; a proc that may find nothing returns a nullable `?*T`,
+had an `_init`; a proc that may find nothing returns a nullable `option<*T>`,
 narrowed with `if (p)`. Each block's README says what else changed, where
 anything did: 7 (the arena hands out offsets), 12 (the region is the arena),
 13 (a system is kept behind a pointer into the region) and 6 (the playground

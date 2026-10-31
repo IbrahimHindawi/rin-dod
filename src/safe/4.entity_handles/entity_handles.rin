@@ -30,7 +30,7 @@
 //
 // Safe subset: nothing in this file is trusted. The world is made in the
 // region `level` and handed around as `*kayan_world`; `kayan_get` returns
-// `?*T`, so every read tests it, and `kayan_set` writes a component the same
+// `option<*T>`, so every read tests it, and `kayan_set` writes a component the same
 // way. The library is the trusted core; see its header.
 
 import "../../../includes/safe/kayan.rin"
@@ -69,11 +69,11 @@ print_entity: proc(w: *kayan_world, name: ^const c8, e: kayan_entity) -> void = 
     slot: *kayan_slot = vec<kayan_slot>at(w*.slots, cast(e.index, u64));
     printfmt(" in table {} row {} ", slot*.table, slot*.row);
     kayan_print_signature(w, kayan_signature(w, e));
-    p: ?*position = kayan_get<position>(w, e);
+    p: option<*position> = kayan_get<position>(w, e);
     if (p) {
         printfmt(" at ({:.1}, {:.1})", cast(p*.at.x, f64), cast(p*.at.y, f64));
     }
-    h: ?*health = kayan_get<health>(w, e);
+    h: option<*health> = kayan_get<health>(w, e);
     if (h) {
         printfmt(" health {:.0}", cast(h*.points, f64));
     }
@@ -143,7 +143,7 @@ main: proc() -> i32 = {
         _ = kayan_despawn(world, many[i]);
     }
     for (i: u64 = 1; i < 40; i += 2) {
-        p: ?*position = kayan_get<position>(world, many[i]);
+        p: option<*position> = kayan_get<position>(world, many[i]);
         if (!p || p*.at.x != cast(i, f32)) {
             wrong += 1;
         }

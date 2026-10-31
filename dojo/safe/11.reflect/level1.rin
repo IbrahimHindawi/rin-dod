@@ -86,8 +86,8 @@ walk_name_is: proc(name: ^const char, path: ^const char, start: u64, end: u64) -
 // The field a path names, hidden or not, and where its bytes start in the
 // outermost value: each name is looked up in the record of the field before
 // it, and the offsets add up. Null if no field has that path.
-walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*const reflect_field = {
-    found: ?*const reflect_field = null;
+walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> option<*const reflect_field> = {
+    found: option<*const reflect_field> = null;
     record: *const reflect = type;
     at: u64 = 0;
     start: u64 = 0;
@@ -99,7 +99,7 @@ walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*cons
         }
         found = null;
         for (i: u64 = 0; i < reflect_field_count(record); i += 1) {
-            f: ?*const reflect_field = reflect_field_at(record, i);
+            f: option<*const reflect_field> = reflect_field_at(record, i);
             if (f && walk_name_is(f*.name, path, start, end)) {
                 found = f;
             }
@@ -111,7 +111,7 @@ walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*cons
         more = walk_cstr_at(path, end) != 0;
         // A path that goes on through a field with no record of its own names nothing.
         if (more) {
-            next_record: ?*const reflect = found*.info;
+            next_record: option<*const reflect> = found*.info;
             if (!next_record) {
                 return null;
             }
@@ -126,7 +126,7 @@ walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*cons
 // The f32 a path names, or none if it names something else, or nothing.
 walk_get_f32: proc(type: *const reflect, bytes: []const u8, path: ^const char) -> option<f32> = {
     at: u64 = 0;
-    f: ?*const reflect_field = walk_find(type, path, at&);
+    f: option<*const reflect_field> = walk_find(type, path, at&);
     if (!f) {
         return option<f32>none();
     }
@@ -140,7 +140,7 @@ walk_get_f32: proc(type: *const reflect, bytes: []const u8, path: ^const char) -
 // else, or nothing.
 walk_set_f32: proc(type: *const reflect, bytes: []u8, path: ^const char, value: f32) -> b32 = {
     at: u64 = 0;
-    f: ?*const reflect_field = walk_find(type, path, at&);
+    f: option<*const reflect_field> = walk_find(type, path, at&);
     if (!f) {
         return 0;
     }

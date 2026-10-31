@@ -90,11 +90,11 @@ query: struct = {
 
 // Stops the program if the enum and component_info were written in different
 // orders: a column would silently get another component's size. The enum's
-// members come from its reflect record, one at a time, as `?*const`: null past
+// members come from its reflect record, one at a time, as `option<*const>`: null past
 // the end, which the loop bound already rules out.
 components_check: proc() -> void = {
     for (i: u64 = 0; i < component<>.count; i += 1) {
-        member: ?*const reflect_value = reflect_value_at(component<>&, i);
+        member: option<*const reflect_value> = reflect_value_at(component<>&, i);
         if (member && !reflect_cstr_equal(member*.name, component_info[i]*.name)) {
             printfmt("component {} is {} in the enum but {} in component_info\n", i,
                 member*.name, component_info[i]*.name);

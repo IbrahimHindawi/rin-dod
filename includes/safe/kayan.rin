@@ -22,7 +22,7 @@
 // library is the trusted core of lessons 4, 5 and 6: the procs that allocate,
 // copy and reinterpret those bytes are marked unsafe { }, and their signatures
 // are the promise the lessons build on. What a lesson can hold is said in the
-// types: `?*T` where null is possible, `*const` where nothing is written, a
+// types: `option<*T>` where null is possible, `*const` where nothing is written, a
 // `[]T` cut to the rows in use. Everything that can be written in terms of
 // those promises (add, remove, set, verify, printing) is checked.
 //
@@ -86,7 +86,7 @@ kayan_world: struct = {
     arena: ^memops_arena;
     // Reflect records are globals, so they live in `permanent`; null until
     // the component is registered.
-    infos: [64]?*const reflect in permanent;
+    infos: [64]option<*const reflect in permanent>;
     component_count: u32;
     // Tables are referred to by index. A pointer from kayan_table_at is good
     // until the next table is created, which can move the list; the checker
@@ -142,9 +142,9 @@ kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect in permanent
 } }
 
 // The reflect record of a registered component. Stops the program for an id
-// that was never registered, so callers get a `*const`, not a `?*const`.
+// that was never registered, so callers get a `*const`, not a `option<*const>`.
 kayan_info: proc(w: *const kayan_world, id: u32) -> *const reflect in permanent = {
-    info: ?*const reflect in permanent = w*.infos[id];
+    info: option<*const reflect in permanent> = w*.infos[id];
     if (!info) {
         printfmt("kayan: component {} was never registered\n", id);
         exit(1);
@@ -194,7 +194,7 @@ kayan_table_grow: proc(w: *kayan_world, t: *kayan_table) -> void = { unsafe {
 // The table for a signature, made the first time anything needs it. Trusted:
 // it appends to the table list and writes the world's map.
 kayan_table_for: proc(w: *kayan_world, signature: u64) -> u32 = { unsafe {
-    found: ?*u32 = hashmap<u64, u32>get(w*.by_signature, signature);
+    found: option<*u32> = hashmap<u64, u32>get(w*.by_signature, signature);
     if (found) {
         return found*;
     }
@@ -364,11 +364,11 @@ kayan_move: proc(w: *kayan_world, e: kayan_entity, signature: u64) -> kayan_stat
     return kayan_status.ok;
 } }
 
-// e's T, or null if e is dead or has no T: a `?*T`, so the caller tests it.
+// e's T, or null if e is dead or has no T: a `option<*T>`, so the caller tests it.
 // The row is checked against the rows in use, so a slot pointing past the end
 // stops the program in Debug. The pointer is a borrow of the world: good until
 // the next spawn, despawn, add or remove.
-kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> ?*T = {
+kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> option<*T> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
@@ -384,7 +384,7 @@ kayan_get: proc<T>(w: *const kayan_world, e: kayan_entity) -> ?*T = {
 // Write e's T. Returns 0 if e is dead or has no T. Checked: it is kayan_get
 // and a test, which is what every caller of kayan_get has to write anyway.
 kayan_set: proc<T>(w: *kayan_world, e: kayan_entity, value: T) -> b32 = {
-    p: ?*T = kayan_get<T>(w, e);
+    p: option<*T> = kayan_get<T>(w, e);
     if (!p) {
         return 0;
     }

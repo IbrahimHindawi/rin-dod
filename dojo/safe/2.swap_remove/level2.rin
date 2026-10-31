@@ -26,7 +26,7 @@ sparse_set_make: proc(r: region level) -> *sparse_set in level = {
 }
 
 // id's value, to read or to change, or null if it has none.
-sparse_set_get: proc(s: *sparse_set, id: u32) -> ?*u64 = {
+sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64> = {
     return null;
 }
 

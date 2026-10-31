@@ -187,8 +187,8 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
     dojo_fuzz(run);
     rng: dojo_rng = { .state = run*.seed };
     signatures: *vec<u64> in level = vec<u64>make(r, 0);
-    models: [4]?*model in level = {};
-    queries: [4]?*query in level = {};
+    models: [4]option<*model in level> = {};
+    queries: [4]option<*query in level> = {};
     for (k: u64 = 0; k < 4; k += 1) {
         m: *model in level = random_query(rng&, r);
         models[k] = m;
@@ -206,8 +206,8 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
             _ = vec<u64>push(signatures, signature);
         } else if (roll < 90) {
             k: u64 = dojo_rng_below(rng&, 4);
-            m: ?*model in level = models[k];
-            q: ?*query in level = queries[k];
+            m: option<*model in level> = models[k];
+            q: option<*query in level> = queries[k];
             if (!m || !q) {
                 continue;
             }
@@ -259,7 +259,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
                 printfmt(") as query {}\n", k);
             }
             queries[k] = query_make(r, m*.all, m*.none);
-            q: ?*query in level = queries[k];
+            q: option<*query in level> = queries[k];
             if (!q) {
                 continue;
             }

@@ -13,7 +13,7 @@
 //   list_push_front: proc(l: *list, value: u64) -> u32
 //   list_insert_after: proc(l: *list, node: u32, value: u64) -> u32      list_none if node isn't in the list
 //   list_remove: proc(l: *list, node: u32) -> option<u64>                its index can be handed out again
-//   list_get: proc(l: *list, node: u32) -> ?*u64                         null if node isn't in the list
+//   list_get: proc(l: *list, node: u32) -> option<*u64>                         null if node isn't in the list
 //   list_head: proc(l: *list) -> u32
 //   list_tail: proc(l: *list) -> u32
 //   list_next: proc(l: *list, node: u32) -> u32                          list_none after the tail, or for a free node

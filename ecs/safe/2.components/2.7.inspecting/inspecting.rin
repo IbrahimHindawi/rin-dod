@@ -166,7 +166,7 @@ kayan_table: struct = {
 // Tables are referred to by index in the slots, and by pointer everywhere
 // else: a table is made once in the region and never moves.
 kayan_world: struct = {
-    infos: [64]?*const reflect in permanent;
+    infos: [64]option<*const reflect in permanent>;
     component_count: u32;
     tables: *vec<*kayan_table in level> in level;
     by_signature: *hashmap<u64, u32> in level;
@@ -204,7 +204,7 @@ kayan_register: proc(w: *kayan_world in level, id: u32, info: *const reflect in 
 // A component's name, for printing: a registered id's, or "?" for a slot
 // nobody filled.
 kayan_name: proc(w: *kayan_world in level, id: u32) -> ^const char = {
-    info: ?*const reflect in permanent = w*.infos[id];
+    info: option<*const reflect in permanent> = w*.infos[id];
     return info ? info*.name : "?";
 }
 
@@ -218,7 +218,7 @@ kayan_table_init: proc(w: *kayan_world in level, t: *kayan_table in level, signa
     t*.signature = signature;
     for (id: u32 = 0; id < 64; id += 1) {
         if ((signature & kayan_bit(id)) != 0) {
-            info: ?*const reflect in permanent = id < w*.component_count ? w*.infos[id] : null;
+            info: option<*const reflect in permanent> = id < w*.component_count ? w*.infos[id] : null;
             if (!info) {
                 printfmt("kayan: signature {} uses component {}, which was never registered\n", signature, id);
                 exit(1);
@@ -298,7 +298,7 @@ kayan_table_at: proc(w: *kayan_world in level, index: u32) -> *kayan_table in le
 // The table for a signature: found if it exists, made if it does not. This is
 // where archetypes come from.
 kayan_table_for: proc(r: region level, w: *kayan_world in level, signature: u64) -> u32 = {
-    found: ?*u32 = hashmap<u64, u32>get(w*.by_signature, signature);
+    found: option<*u32> = hashmap<u64, u32>get(w*.by_signature, signature);
     if (found) {
         return found*;
     }
@@ -462,7 +462,7 @@ kayan_get_bytes: proc(w: *kayan_world in level, e: kayan_entity, id: u32) -> []u
 // e's T, or null if e is dead or has no T. Handle, slot, table, row, typed
 // view: the same path as 1.4's get_position, for any component. The pointer is
 // good until the next structural change, so use it now and keep the handle.
-kayan_get: proc<T>(w: *kayan_world in level, e: kayan_entity) -> ?*T in level = {
+kayan_get: proc<T>(w: *kayan_world in level, e: kayan_entity) -> option<*T in level> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
@@ -485,7 +485,7 @@ kayan_set: proc<T>(w: *kayan_world in level, e: kayan_entity, value: T) -> kayan
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
-    p: ?*T in level = kayan_get<T>(w, e);
+    p: option<*T in level> = kayan_get<T>(w, e);
     if (!p) {
         return kayan_status.missing;
     }
@@ -613,7 +613,7 @@ kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = { un
 // size, both from the reflect record.
 kayan_print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> void = {
     for (i: u64 = 0; i < type*.count; i += 1) {
-        f: ?*const reflect_field = reflect_field_at(type, i);
+        f: option<*const reflect_field> = reflect_field_at(type, i);
         if (!f) {
             continue;
         }
@@ -623,7 +623,7 @@ kayan_print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> 
         at: []const u8 = base[f*.offset..f*.offset + f*.size];
         kayan_indent(depth);
         printfmt("{}:", f*.name);
-        info: ?*const reflect = f*.info;
+        info: option<*const reflect> = f*.info;
         if (info != null && info*.kind == reflect_kind_struct) {
             printfmt("\n");
             kayan_print_fields(info, at, depth + 1);
@@ -646,7 +646,7 @@ kayan_inspect: proc(w: *kayan_world in level, e: kayan_entity) -> void = {
     printfmt("\n");
     for (id: u32 = 0; id < w*.component_count; id += 1) {
         if ((signature & kayan_bit(id)) != 0) {
-            info: ?*const reflect in permanent = w*.infos[id];
+            info: option<*const reflect in permanent> = w*.infos[id];
             if (info) {
                 printfmt("    {}\n", info*.name);
                 bytes: []u8 in level = kayan_get_bytes(w, e, id);
@@ -703,7 +703,7 @@ main: proc() -> i32 = {
         a: kayan_entity = spawn_drone(level, w, 20.0, 5.0);
         b: kayan_entity = spawn_drone(level, w, 30.0, -5.0);
         _ = kayan_add<burning>(level, w, b, { .per_second = 10.0 });
-        h: ?*health in level = kayan_get<health>(w, b);
+        h: option<*health in level> = kayan_get<health>(w, b);
         if (h) {
             h*.points = 60.0;
         }
