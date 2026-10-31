@@ -848,7 +848,7 @@ kayan_schedule_add: proc(r: region level, systems: *vec<*kayan_scheduled in leve
 }
 
 kayan_scheduled_at: proc(systems: *const vec<*kayan_scheduled in level>, s: u64) -> *kayan_scheduled in level = {
-    return vec<*kayan_scheduled in level>at(systems, s)*;
+    return vec<*kayan_scheduled in level>at_const(systems, s)*;
 }
 
 // One frame: every system in order, each over every table it matches that has

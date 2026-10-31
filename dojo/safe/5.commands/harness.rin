@@ -283,7 +283,7 @@ model_apply: proc(r: region R, w: *world, ops: *const vec<op>) -> applied = {
     done: applied = {};
     spawned: *vec<dojo_handle> in R = vec<dojo_handle>make(r, 0);
     for (i: u64 = 0; i < ops*.length; i += 1) {
-        o: op = vec<op>at(ops, i)*;
+        o: op = vec<op>at_const(ops, i)*;
         result: dojo_status = dojo_status.ok;
         h: dojo_handle = o.handle;
         if (o.to_spawn) {

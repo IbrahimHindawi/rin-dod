@@ -161,7 +161,7 @@ print_found: proc(p: ?*const u64) -> void = {
 }
 
 pick: proc(rng: *dojo_rng, hs: *const vec<dojo_handle>) -> dojo_handle = {
-    return vec<dojo_handle>at(hs, dojo_rng_below(rng, hs*.length))*;
+    return vec<dojo_handle>at_const(hs, dojo_rng_below(rng, hs*.length))*;
 }
 
 // Everything at once: the rows against the model, and every handle, live and
