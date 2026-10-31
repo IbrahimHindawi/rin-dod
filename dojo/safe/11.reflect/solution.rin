@@ -124,12 +124,15 @@ walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> ?*cons
             return null;
         }
         at += found*.offset;
-        info: ?*const reflect = found*.info;
-        if (!info) {
-            return null;
-        }
-        record = info;
         more = walk_cstr_at(path, end) != 0;
+        // A path that goes on through a field with no record of its own names nothing.
+        if (more) {
+            next_record: ?*const reflect = found*.info;
+            if (!next_record) {
+                return null;
+            }
+            record = next_record;
+        }
         start = end + 1;
     }
     offset* = at;

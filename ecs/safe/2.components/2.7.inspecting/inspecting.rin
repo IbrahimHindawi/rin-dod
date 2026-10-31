@@ -623,7 +623,7 @@ kayan_print_fields: proc(type: *const reflect, base: []const u8, depth: u32) -> 
         at: []const u8 = base[f*.offset..f*.offset + f*.size];
         kayan_indent(depth);
         printfmt("{}:", f*.name);
-        info: *const reflect = f*.info;
+        info: ?*const reflect = f*.info;
         if (info != null && info*.kind == reflect_kind_struct) {
             printfmt("\n");
             kayan_print_fields(info, at, depth + 1);
