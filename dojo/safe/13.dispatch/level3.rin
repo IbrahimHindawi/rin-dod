@@ -31,7 +31,7 @@
 // Names are C strings: compare them with dojo_cstr_equal. A C string and a
 // proc pointer are pointers without a region, so a struct holding them is a
 // carrier: safe code holds it only through a pointer into the region, made
-// by a proc marked [trusted], with memops_arena_push_zero(r, sizeof(T),
+// by a proc marked unsafe { }, with memops_arena_push_zero(r, sizeof(T),
 // alignof(T)) cast to '*T in level', and never writes its fields. Keep what
 // changes, enabled and the count, beside that pointer.
 

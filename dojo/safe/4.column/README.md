@@ -4,7 +4,7 @@
 
 **This is the safe-subset port.** A type-erased column is type erasure
 itself: it hands out rows as bytes and reads them back as `T`, which is what
-the checker exists to refuse. So the column's core is marked `[trusted]` in
+the checker exists to refuse. So the column's core is marked `unsafe { }` in
 the kata, `column_make`, `column_push_zeroed`, `column_swap_remove`,
 `column_row` and `column_slice`, with `column_len` and `column_capacity`
 checked, and `column_make` takes the region `level` and keeps it as the

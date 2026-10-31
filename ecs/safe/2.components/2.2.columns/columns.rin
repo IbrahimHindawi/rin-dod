@@ -17,7 +17,7 @@
 // In the safe subset the column's bytes are a slice into the `level` region,
 // `[]u8 in level`, with a real length, so copying and zeroing rows are plain
 // bounds-checked loops that the checker reads. Two things about a column are
-// unsafe by nature and are the chapter's two `[trusted]` procs: growing it,
+// unsafe by nature and are the chapter's two `unsafe { }` procs: growing it,
 // which asks the arena for bytes at the component's alignment, and the typed
 // view, which reads those bytes as `[]T`. Everything else is checked code.
 

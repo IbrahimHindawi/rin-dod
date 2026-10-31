@@ -14,7 +14,7 @@ is made whole by `kayan_world_make(r: region level)`: its vecs are
 `*vec<T> in level`, its tables are level pointers in a vec so a table pointer
 never moves, and every allocating proc takes the region. The type-erased
 column, bytes addressed by a size and an alignment, is the one thing that is
-unsafe by nature; it is two `[trusted]` procs, the aligned grow and the typed
+unsafe by nature; it is two `unsafe { }` procs, the aligned grow and the typed
 `[]T` view over the bytes, and 2.7 adds a third that prints a builtin by its
 type name. Everything above them is checked: `kayan_get<T>` returns `?*T`,
 row copies are bounds-checked byte loops, the registry is
@@ -50,7 +50,7 @@ Nothing else. The world stays a value on `main`'s stack, procs take it as
 written anywhere: a pointer returned without a region points into what the
 caller passed, so the caller treats it as a borrow of the world and may not
 keep it past a change to the world. No `region` block, no `in R`, no
-`[trusted]`, no `[unsafe]`.
+`unsafe { }`, no `[unsafe]`.
 
 So the entity index as this course builds it, with handles, generations and a
 slot map over packed rows, is memory safe at compile time at the cost of two

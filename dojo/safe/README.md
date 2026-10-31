@@ -12,7 +12,7 @@ narrowed with `if (p)`. Each block's README says what else changed, where
 anything did: 7 (the arena hands out offsets), 12 (the region is the arena),
 13 (a system is kept behind a pointer into the region) and 6 (the playground
 only). The expected outputs are the originals, unchanged. The few procs
-marked `[trusted]` are named at the top of the file that holds them.
+marked `unsafe { }` are named at the top of the file that holds them.
 
 # The dojo
 

@@ -20,7 +20,7 @@
 // Safe subset. A table's columns are raw bytes addressed by a component's size
 // and alignment, which is the one thing rin's checker cannot type, so this
 // library is the trusted core of lessons 4, 5 and 6: the procs that allocate,
-// copy and reinterpret those bytes are marked [trusted], and their signatures
+// copy and reinterpret those bytes are marked unsafe { }, and their signatures
 // are the promise the lessons build on. What a lesson can hold is said in the
 // types: `?*T` where null is possible, `*const` where nothing is written, a
 // `[]T` cut to the rows in use. Everything that can be written in terms of

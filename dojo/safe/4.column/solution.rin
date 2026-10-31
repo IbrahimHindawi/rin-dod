@@ -2,7 +2,7 @@
 // the same size and alignment.
 //
 // Safe subset: a column is type erasure, so the five procs that touch its
-// bytes are [trusted]: column_make, column_push_zeroed, column_swap_remove,
+// bytes are unsafe { }: column_make, column_push_zeroed, column_swap_remove,
 // column_row and column_slice. Their signatures are the promise safe code
 // relies on: a row's slice has the row's length, the typed view has the
 // column's count, and a wrong type or row stops the program. column_len and

@@ -23,7 +23,7 @@
 // column grows, so a debugger can flip it mid-run too: stop on column_grow, set
 // it to 0 in the watch window, and continue.
 //
-// Safe subset: the column's bytes are touched by four [trusted] procs, as in
+// Safe subset: the column's bytes are touched by four unsafe { } procs, as in
 // the kata; the arena is the region `level`.
 
 import "std/print.rin"

@@ -3,7 +3,7 @@
 //
 // Start it with: python tools/dojo.py start column 1
 //
-// Safe subset: the five procs that touch the column's bytes are [trusted],
+// Safe subset: the five procs that touch the column's bytes are unsafe { },
 // column_slice among them; see solution.rin's note.
 
 import "std/cstd.rin"

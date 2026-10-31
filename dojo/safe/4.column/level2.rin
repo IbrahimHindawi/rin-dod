@@ -5,7 +5,7 @@
 //
 // Start it with: python tools/dojo.py start column 2
 //
-// Safe subset: the five procs that touch the column's bytes are [trusted];
+// Safe subset: the five procs that touch the column's bytes are unsafe { };
 // see solution.rin's note. In them you may cast, index a `^u8`, and call
 // memcpy and memset.
 

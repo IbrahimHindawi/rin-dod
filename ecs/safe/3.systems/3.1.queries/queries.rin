@@ -16,7 +16,7 @@
 // `level`, and every pointer kept in memory says so. The one thing the checker
 // cannot see through is the type-erased column: a run of bytes addressed by a
 // size and an alignment, read back as whatever type the signature says. That
-// core is nine small `[trusted]` procs, each with an honest signature; every
+// core is nine small `unsafe { }` procs, each with an honest signature; every
 // other proc in the file is checked. A table pointer no longer goes stale when
 // a table is made, because tables are allocated one by one and the world holds
 // pointers to them; a pointer into a column still does, and 3.3 is about that.

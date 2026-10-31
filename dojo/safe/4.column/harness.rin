@@ -20,8 +20,8 @@
 // stops the program, and so does a row past the end, and a harness that stops
 // can't go on to the next step. Try those by hand: they are in the README.
 //
-// Safe subset: the column is type erasure itself, so its core is [trusted] in
-// the kata, and this harness keeps two [trusted] helpers of its own, bytes_of
+// Safe subset: the column is type erasure itself, so its core is unsafe { } in
+// the kata, and this harness keeps two unsafe { } helpers of its own, bytes_of
 // and slice_address, which look at a value as bytes and at a slice's address.
 // Everything else here is checked; the bytes are copied and compared by
 // slices, with bounds, not by memcpy and memcmp.
