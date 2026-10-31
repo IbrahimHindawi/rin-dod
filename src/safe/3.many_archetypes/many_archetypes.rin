@@ -167,14 +167,14 @@ table_set: proc<T>(t: *table, row: u64, value: T) -> void = {
 }
 
 // Systems take columns, as in lesson 2. The loops that feed them are queries.
-move_system: proc(positions: noalias []position, velocities: []const velocity, dt: f32) -> void = {
+move_system: proc[unsafe](positions: noalias []position, velocities: []const velocity, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         positions[i].at.x += velocities[i].per_second.x * dt;
         positions[i].at.y += velocities[i].per_second.y * dt;
     }
 }
 
-regen_system: proc(healths: noalias []health, per_second: f32, dt: f32) -> void = {
+regen_system: proc[unsafe](healths: noalias []health, per_second: f32, dt: f32) -> void = {
     for (i: u64 = 0; i < healths.length; i += 1) {
         healths[i].points += per_second * dt;
         if (healths[i].points > healths[i].max) {
@@ -275,11 +275,11 @@ main: proc() -> i32 = {
                 // move_system takes []const velocity. Widening a call's result
                 // reads it twice, so rin wants it in a local first.
                 velocities: []velocity = column<velocity>(t);
-                move_system(column<position>(t), velocities, dt);
+                unsafe { move_system(column<position>(t), velocities, dt); }
             }
             if (table_matches(t, healing)) {
                 printfmt("    regen visits {}\n", t*.name);
-                regen_system(column<health>(t), 10.0, dt);
+                unsafe { regen_system(column<health>(t), 10.0, dt); }
             }
         }
         print_tables(tables);

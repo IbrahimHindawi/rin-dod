@@ -1081,20 +1081,20 @@ game: struct = {
 }
 
 // Kernels: plain loops over plain slices, as in 3.2.
-integrate: proc(ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
+integrate: proc[unsafe](ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
     for (i: u64 = 0; i < ps.length; i += 1) {
         ps[i].at.x += vs[i].per_second.x * dt;
         ps[i].at.y += vs[i].per_second.y * dt;
     }
 }
 
-burn: proc(hs: noalias []health, fires: []const burning, dt: f32) -> void = {
+burn: proc[unsafe](hs: noalias []health, fires: []const burning, dt: f32) -> void = {
     for (i: u64 = 0; i < hs.length; i += 1) {
         hs[i].points -= fires[i].per_second * dt;
     }
 }
 
-age: proc(ls: noalias []lifetime, dt: f32) -> void = {
+age: proc[unsafe](ls: noalias []lifetime, dt: f32) -> void = {
     for (i: u64 = 0; i < ls.length; i += 1) {
         ls[i].seconds -= dt;
     }
@@ -1148,7 +1148,7 @@ turret_system: proc(it: *kayan_iter) -> void = {
 }
 
 age_system: proc(it: *kayan_iter) -> void = {
-    age(kayan_slice<lifetime>(it*.table), it*.dt);
+    unsafe { age(kayan_slice<lifetime>(it*.table), it*.dt); }
 }
 
 expire_system: proc(it: *kayan_iter) -> void = {
@@ -1162,7 +1162,7 @@ expire_system: proc(it: *kayan_iter) -> void = {
 }
 
 move_system: proc(it: *kayan_iter) -> void = {
-    integrate(kayan_slice<position>(it*.table), kayan_slice<velocity>(it*.table), it*.dt);
+    unsafe { integrate(kayan_slice<position>(it*.table), kayan_slice<velocity>(it*.table), it*.dt); }
 }
 
 // A bullet within three quarters of a unit of a drone in its lane hits it. A
@@ -1213,7 +1213,7 @@ ignite_system: proc(it: *kayan_iter) -> void = {
 }
 
 burn_system: proc(it: *kayan_iter) -> void = {
-    burn(kayan_slice<health>(it*.table), kayan_slice<burning>(it*.table), it*.dt);
+    unsafe { burn(kayan_slice<health>(it*.table), kayan_slice<burning>(it*.table), it*.dt); }
 }
 
 // The entity and its values are copied out before the line is printed: a

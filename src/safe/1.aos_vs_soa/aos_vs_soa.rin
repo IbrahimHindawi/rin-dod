@@ -135,7 +135,7 @@ make_particle: proc(i: u64) -> particle = {
 // and clang-cl does not use C's type rules, so without it a float written
 // through ps might be the slice's own pointer or length. The loop would read
 // both again after every particle.
-move_aos: proc(ps: noalias []particle, dt: f32) -> void = {
+move_aos: proc[unsafe](ps: noalias []particle, dt: f32) -> void = {
     for (i: u64 = 0; i < ps.length; i += 1) {
         p: *particle = ps[i]&;
         p*.velocity.y += gravity * dt;
@@ -147,7 +147,7 @@ move_aos: proc(ps: noalias []particle, dt: f32) -> void = {
 
 // noalias: positions and velocities never overlap, so the compiler can work on
 // several particles at once without first checking that they don't.
-move_soa: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
+move_soa: proc[unsafe](positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         velocities[i].y += gravity * dt;
         positions[i].x += velocities[i].x * dt;
@@ -158,7 +158,7 @@ move_soa: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -
 
 // Every column it writes is noalias; vx and vz are only read. Each line of the
 // loop is one SIMD load, multiply, add and store over consecutive floats.
-move_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32,
+move_split: proc[unsafe](px: noalias []f32, py: noalias []f32, pz: noalias []f32,
                  vx: []const f32, vy: noalias []f32, vz: []const f32, dt: f32) -> void = {
     for (i: u64 = 0; i < px.length; i += 1) {
         vy[i] += gravity * dt;
@@ -244,15 +244,15 @@ main: proc(argc: i32, argv: ^^c8) -> i32 = {
 
     t0: f64 = seconds();
     for (s: u64 = 0; s < steps; s += 1) {
-        move_aos(aos, dt);
+        unsafe { move_aos(aos, dt); }
     }
     t1: f64 = seconds();
     for (s: u64 = 0; s < steps; s += 1) {
-        move_soa(soa*.positions, soa*.velocities, dt);
+        unsafe { move_soa(soa*.positions, soa*.velocities, dt); }
     }
     t2: f64 = seconds();
     for (s: u64 = 0; s < steps; s += 1) {
-        move_split(split*.px, split*.py, split*.pz, split*.vx, split*.vy, split*.vz, dt);
+        unsafe { move_split(split*.px, split*.py, split*.pz, split*.vx, split*.vy, split*.vz, dt); }
     }
     t3: f64 = seconds();
 

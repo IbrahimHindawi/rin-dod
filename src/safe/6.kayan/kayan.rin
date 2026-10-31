@@ -395,7 +395,7 @@ turret_system: proc(g: *game, c: *commands, dt: f32) -> void = {
 // A system is a query and a kernel. The query finds the tables; the kernel runs
 // over one table's columns. noalias is a parameter qualifier, so the loop has
 // to be in a proc of its own to get it.
-integrate: proc(ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
+integrate: proc[unsafe](ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
     for (i: u64 = 0; i < ps.length; i += 1) {
         ps[i].at.x += vs[i].per_second.x * dt;
         ps[i].at.y += vs[i].per_second.y * dt;
@@ -407,7 +407,7 @@ movement_system: proc(w: *kayan_world, dt: f32) -> void = {
     for (ti: u64 = 0; ti < w*.tables*.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w*.tables, ti);
         if (kayan_matches(t, q)) {
-            integrate(kayan_column<position>(t), kayan_column<velocity>(t), dt);
+            unsafe { integrate(kayan_column<position>(t), kayan_column<velocity>(t), dt); }
         }
     }
 }
@@ -470,7 +470,7 @@ collision_system: proc(g: *game, c: *commands) -> void = {
     }
 }
 
-burn: proc(hs: noalias []health, bs: []const burning, dt: f32) -> void = {
+burn: proc[unsafe](hs: noalias []health, bs: []const burning, dt: f32) -> void = {
     for (i: u64 = 0; i < hs.length; i += 1) {
         hs[i].points -= bs[i].per_second * dt;
     }
@@ -481,7 +481,7 @@ burning_system: proc(w: *kayan_world, dt: f32) -> void = {
     for (ti: u64 = 0; ti < w*.tables*.length; ti += 1) {
         t: *kayan_table = vec<kayan_table>at(w*.tables, ti);
         if (kayan_matches(t, q)) {
-            burn(kayan_column<health>(t), kayan_column<burning>(t), dt);
+            unsafe { burn(kayan_column<health>(t), kayan_column<burning>(t), dt); }
         }
     }
 }

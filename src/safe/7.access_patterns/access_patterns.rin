@@ -111,7 +111,7 @@ random_index: proc(n: u64) -> u32 = {
 // ---------------------------------------------------------------- stream
 // Every body, in order, the same math. noalias on what each kernel writes.
 
-integrate_aos: proc(bodies: noalias []body, dt: f32) -> void = {
+integrate_aos: proc[unsafe](bodies: noalias []body, dt: f32) -> void = {
     for (i: u64 = 0; i < bodies.length; i += 1) {
         b: *body = bodies[i]&;
         b*.velocity.y += gravity * dt;
@@ -121,7 +121,7 @@ integrate_aos: proc(bodies: noalias []body, dt: f32) -> void = {
     }
 }
 
-integrate_columns: proc(positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
+integrate_columns: proc[unsafe](positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         velocities[i].y += gravity * dt;
         positions[i].x += velocities[i].x * dt;
@@ -130,7 +130,7 @@ integrate_columns: proc(positions: noalias []vec3, velocities: noalias []vec3, d
     }
 }
 
-integrate_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32,
+integrate_split: proc[unsafe](px: noalias []f32, py: noalias []f32, pz: noalias []f32,
                       vx: []const f32, vy: noalias []f32, vz: []const f32, dt: f32) -> void = {
     for (i: u64 = 0; i < px.length; i += 1) {
         vy[i] += gravity * dt;
@@ -141,7 +141,7 @@ integrate_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32,
 }
 
 // The inner loop is eight floats per coordinate: one AVX register, or two SSE.
-integrate_blocks: proc(blocks: noalias []body_block, dt: f32) -> void = {
+integrate_blocks: proc[unsafe](blocks: noalias []body_block, dt: f32) -> void = {
     for (b: u64 = 0; b < blocks.length; b += 1) {
         k: *body_block = blocks[b]&;
         for (l: u64 = 0; l < 8; l += 1) {
@@ -159,7 +159,7 @@ integrate_blocks: proc(blocks: noalias []body_block, dt: f32) -> void = {
 // arithmetic is the same in every layout, in the same order, so the results
 // match to the bit.
 
-contacts_aos: proc(bodies: noalias []body, cs: []const contact) -> void = {
+contacts_aos: proc[unsafe](bodies: noalias []body, cs: []const contact) -> void = {
     for (c: u64 = 0; c < cs.length; c += 1) {
         p: *vec3 = bodies[cast(cs[c].a, u64)].position&;
         q: *vec3 = bodies[cast(cs[c].b, u64)].position&;
@@ -175,7 +175,7 @@ contacts_aos: proc(bodies: noalias []body, cs: []const contact) -> void = {
     }
 }
 
-contacts_columns: proc(positions: noalias []vec3, cs: []const contact) -> void = {
+contacts_columns: proc[unsafe](positions: noalias []vec3, cs: []const contact) -> void = {
     for (c: u64 = 0; c < cs.length; c += 1) {
         p: *vec3 = positions[cast(cs[c].a, u64)]&;
         q: *vec3 = positions[cast(cs[c].b, u64)]&;
@@ -191,7 +191,7 @@ contacts_columns: proc(positions: noalias []vec3, cs: []const contact) -> void =
     }
 }
 
-contacts_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32, cs: []const contact) -> void = {
+contacts_split: proc[unsafe](px: noalias []f32, py: noalias []f32, pz: noalias []f32, cs: []const contact) -> void = {
     for (c: u64 = 0; c < cs.length; c += 1) {
         a: u64 = cast(cs[c].a, u64);
         b: u64 = cast(cs[c].b, u64);
@@ -207,7 +207,7 @@ contacts_split: proc(px: noalias []f32, py: noalias []f32, pz: noalias []f32, cs
     }
 }
 
-contacts_blocks: proc(blocks: noalias []body_block, cs: []const contact) -> void = {
+contacts_blocks: proc[unsafe](blocks: noalias []body_block, cs: []const contact) -> void = {
     for (c: u64 = 0; c < cs.length; c += 1) {
         a: u64 = cast(cs[c].a, u64);
         b: u64 = cast(cs[c].b, u64);
@@ -344,23 +344,23 @@ main: proc(argc: i32, argv: ^^c8) -> i32 = {
     // stream, then lookup, for each layout in turn
     t: [9]f64 = {};
     t[0] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { integrate_aos(aos, dt); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { integrate_aos(aos, dt); } }
     t[1] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { contacts_aos(aos, cs); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { contacts_aos(aos, cs); } }
     t[2] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { integrate_columns(col*.positions, col*.velocities, dt); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { integrate_columns(col*.positions, col*.velocities, dt); } }
     t[3] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { contacts_columns(col*.positions, cs); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { contacts_columns(col*.positions, cs); } }
     t[4] = seconds();
     for (s: u64 = 0; s < steps; s += 1) {
-        integrate_split(spl*.px, spl*.py, spl*.pz, spl*.vx, spl*.vy, spl*.vz, dt);
+        unsafe { integrate_split(spl*.px, spl*.py, spl*.pz, spl*.vx, spl*.vy, spl*.vz, dt); }
     }
     t[5] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { contacts_split(spl*.px, spl*.py, spl*.pz, cs); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { contacts_split(spl*.px, spl*.py, spl*.pz, cs); } }
     t[6] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { integrate_blocks(blocks, dt); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { integrate_blocks(blocks, dt); } }
     t[7] = seconds();
-    for (s: u64 = 0; s < steps; s += 1) { contacts_blocks(blocks, cs); }
+    for (s: u64 = 0; s < steps; s += 1) { unsafe { contacts_blocks(blocks, cs); } }
     t[8] = seconds();
 
     printfmt("{} bodies, {} contacts, {} steps\n", body_count, contact_count, steps);

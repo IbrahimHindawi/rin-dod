@@ -94,7 +94,7 @@ spark_despawn: proc(t: *spark_table, row: u64) -> u64 = {
 // Systems. Each takes the columns it reads and writes, cut to the rows in use.
 // noalias on the column a system writes promises nothing else reaches it, so
 // the loop can be vectorized without runtime overlap checks.
-move_system: proc(positions: noalias []vec2, velocities: []const vec2, dt: f32) -> void = {
+move_system: proc[unsafe](positions: noalias []vec2, velocities: []const vec2, dt: f32) -> void = {
     for (i: u64 = 0; i < positions.length; i += 1) {
         positions[i].x += velocities[i].x * dt;
         positions[i].y += velocities[i].y * dt;
@@ -104,7 +104,7 @@ move_system: proc(positions: noalias []vec2, velocities: []const vec2, dt: f32) 
 // One slice, and still noalias: on Windows the slice arrives by reference, and
 // without the promise a float written through lives might be its own pointer
 // or length, so clang-cl reads both again after every element.
-age_system: proc(lives: noalias []f32, dt: f32) -> void = {
+age_system: proc[unsafe](lives: noalias []f32, dt: f32) -> void = {
     for (i: u64 = 0; i < lives.length; i += 1) {
         lives[i] -= dt;
     }
@@ -159,8 +159,8 @@ main: proc() -> i32 = {
     dt: f32 = 0.5;
     for (frame: i32 = 1; frame <= 4; frame += 1) {
         printfmt("frame {}\n", frame);
-        move_system(sparks*.positions[0..sparks*.count], sparks*.velocities[0..sparks*.count], dt);
-        age_system(sparks*.lives[0..sparks*.count], dt);
+        unsafe { move_system(sparks*.positions[0..sparks*.count], sparks*.velocities[0..sparks*.count], dt); }
+        unsafe { age_system(sparks*.lives[0..sparks*.count], dt); }
         expire_system(sparks);
         print_table(sparks);
     }

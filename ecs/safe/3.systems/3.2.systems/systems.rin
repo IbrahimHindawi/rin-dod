@@ -881,20 +881,20 @@ kayan_print_schedule: proc(w: *const kayan_world, systems: *const vec<*kayan_sch
 
 // Kernels: plain loops over plain slices, with components for elements.
 // noalias on what each one writes, as in lessons 1 to 7.
-integrate: proc(ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
+integrate: proc[unsafe](ps: noalias []position, vs: []const velocity, dt: f32) -> void = {
     for (i: u64 = 0; i < ps.length; i += 1) {
         ps[i].at.x += vs[i].per_second.x * dt;
         ps[i].at.y += vs[i].per_second.y * dt;
     }
 }
 
-burn: proc(hs: noalias []health, fires: []const burning, dt: f32) -> void = {
+burn: proc[unsafe](hs: noalias []health, fires: []const burning, dt: f32) -> void = {
     for (i: u64 = 0; i < hs.length; i += 1) {
         hs[i].points -= fires[i].per_second * dt;
     }
 }
 
-age: proc(ls: noalias []lifetime, dt: f32) -> void = {
+age: proc[unsafe](ls: noalias []lifetime, dt: f32) -> void = {
     for (i: u64 = 0; i < ls.length; i += 1) {
         ls[i].seconds -= dt;
     }
@@ -902,15 +902,15 @@ age: proc(ls: noalias []lifetime, dt: f32) -> void = {
 
 // Systems: the table's columns, handed to a kernel.
 move_system: proc(it: *kayan_iter) -> void = {
-    integrate(kayan_slice<position>(it*.table), kayan_slice<velocity>(it*.table), it*.dt);
+    unsafe { integrate(kayan_slice<position>(it*.table), kayan_slice<velocity>(it*.table), it*.dt); }
 }
 
 burn_system: proc(it: *kayan_iter) -> void = {
-    burn(kayan_slice<health>(it*.table), kayan_slice<burning>(it*.table), it*.dt);
+    unsafe { burn(kayan_slice<health>(it*.table), kayan_slice<burning>(it*.table), it*.dt); }
 }
 
 age_system: proc(it: *kayan_iter) -> void = {
-    age(kayan_slice<lifetime>(it*.table), it*.dt);
+    unsafe { age(kayan_slice<lifetime>(it*.table), it*.dt); }
 }
 
 spawn_turret: proc(w: *kayan_world, x: f32, y: f32) -> kayan_entity = {
