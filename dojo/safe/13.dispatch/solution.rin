@@ -112,7 +112,8 @@ schedule_run: proc(s: *schedule, c: *ctx) -> void = {
         e: *schedule_entry = vec<schedule_entry>at(s*.systems, i);
         if (e*.enabled) {
             e*.system*.run(c);
-            e*.calls += 1;
+            // The system may have registered another, so the entry is taken again.
+            vec<schedule_entry>at(s*.systems, i)*.calls += 1;
         }
     }
 }

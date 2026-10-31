@@ -177,7 +177,7 @@ scenario: proc(r: region level) -> void = {
 // Every leaf of a room, in the order its record lists them, and whether a
 // tool shows it. Leaf `i` is reached directly by the procs below, the
 // compiler doing the offsets: what the walk has to agree with.
-room_leaf_paths: [14]^const char = {
+room_leaf_paths: [14]str = {
     "door", "light.on", "light.power", "light.at.x", "light.at.y", "light.color.r", "light.color.g",
     "light.color.b", "light.flicker", "light.range", "corner.x", "corner.y", "draft.x", "draft.y",
 };
@@ -245,7 +245,7 @@ leaf_set_u8: proc(r: *room, i: u64, value: u8) -> void = {
 
 // What the fuzz run asks for by path: every leaf, then paths that name a
 // struct, or nothing.
-odd: [12]^const char = {
+odd: [12]str = {
     "light", "light.at", "draft", "corner.x.y", "light.at.z", "light.atx.x", "light.a.x", "lamp.power",
     "power", "door.x", "", "light.",
 };
@@ -305,7 +305,7 @@ random_room: proc(rng: *dojo_rng, r: *room) -> void = {
     }
 }
 
-pick_path: proc(rng: *dojo_rng) -> ^const char = {
+pick_path: proc(rng: *dojo_rng) -> str = {
     if (dojo_rng_below(rng, 2) == 0) {
         return room_leaf_paths[dojo_rng_below(rng, 14)];
     }
@@ -334,7 +334,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
                 random_room(rng&, m&);
                 bytes = m;
             } else if (roll < 40) {
-                path: ^const char = pick_path(rng&);
+                path: str = pick_path(rng&);
                 if (dojo_before(run, op)) {
                     printfmt("get_f32(\"{}\")\n", path);
                 }
@@ -350,7 +350,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
                     dojo_failed(run, op);
                 }
             } else if (roll < 70) {
-                path: ^const char = pick_path(rng&);
+                path: str = pick_path(rng&);
                 value: f32 = random_f32(rng&);
                 if (dojo_before(run, op)) {
                     printfmt("set_f32(\"{}\", {:.2})\n", path, cast(value, f64));

@@ -338,7 +338,8 @@ fuzz_type: proc<T>(run: *dojo_run, r: region level, f: *fmt, rng: *dojo_rng, op:
             for (row: u64 = 0; row < model*.length; row += 1) {
                 // Copies: the checker treats what goes into a generic call as
                 // changed by it, so the rows are compared as values.
-                shown: T = view[row];
+                row_view: []T = column_slice<T>(c);
+                shown: T = row_view[row];
                 want: T = vec<T>at(model, row)*;
                 if (!same_bytes(bytes_of<T>(shown&), bytes_of<T>(want&))) {
                     dojo_fail(run, n);
