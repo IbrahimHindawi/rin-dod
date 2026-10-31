@@ -145,8 +145,8 @@ dojo_fuzz: proc(run: *dojo_run) -> void = {
 // Set a breakpoint here, and run with --stop N.
 dojo_stopped_at: u64 = 0;
 
-dojo_stop_here: proc(op: u64) -> void = {
-    dojo_stopped_at = op;
+dojo_stop_here: proc(opcode: u64) -> void = {
+    dojo_stopped_at = opcode;
 }
 
 // Call before operation `op`. It returns 1 when the operation should be
@@ -154,14 +154,14 @@ dojo_stop_here: proc(op: u64) -> void = {
 // --trace, every operation is, so a crash shows the last one that started;
 // with --stop at this operation, it is, after dojo_stop_here has run, so a
 // breakpoint there lands just before it.
-dojo_before: proc(run: *dojo_run, op: u64) -> b32 = {
-    if (run*.stop == op) {
-        dojo_stop_here(op);
-        printfmt("stopped before operation {}: ", op);
+dojo_before: proc(run: *dojo_run, opcode: u64) -> b32 = {
+    if (run*.stop == opcode) {
+        dojo_stop_here(opcode);
+        printfmt("stopped before operation {}: ", opcode);
         return 1;
     }
     if (run*.trace != 0) {
-        printfmt("operation {}: ", op);
+        printfmt("operation {}: ", opcode);
         return 1;
     }
     return 0;
@@ -170,12 +170,12 @@ dojo_before: proc(run: *dojo_run, op: u64) -> b32 = {
 // A failure in the fuzz run, in three parts: dojo_fail starts the line, the
 // caller prints what went wrong and a newline, and dojo_failed says how to get
 // back here in the debugger and ends the run.
-dojo_fail: proc(run: *dojo_run, op: u64) -> void = {
-    printfmt("FAIL at operation {} (seed {}): ", op, run*.seed);
+dojo_fail: proc(run: *dojo_run, opcode: u64) -> void = {
+    printfmt("FAIL at operation {} (seed {}): ", opcode, run*.seed);
 }
 
-dojo_failed: proc(run: *dojo_run, op: u64) -> void = {
-    printfmt("    debug it: build/dojo/{}/harness --seed {} --stop {}\n", run*.block, run*.seed, op);
+dojo_failed: proc(run: *dojo_run, opcode: u64) -> void = {
+    printfmt("    debug it: build/dojo/{}/harness --seed {} --stop {}\n", run*.block, run*.seed, opcode);
     printfmt("    with a breakpoint on dojo_stop_here, which runs just before that operation\n");
     exit(1);
 }

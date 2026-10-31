@@ -115,8 +115,8 @@ schedule: struct = {
 // Where the system called `name` is, or count if it isn't there.
 schedule_find: proc(s: *schedule, name: ^const char) -> u64 = {
     for (i: u64 = 0; i < s*.count; i += 1) {
-        sys: ?*sys in level = s*.entries[i].system;
-        if (sys && name_is(sys*.name, name)) {
+        sys_entry: ?*sys in level = s*.entries[i].system;
+        if (sys_entry && name_is(sys_entry*.name, name)) {
             return i;
         }
     }
@@ -168,10 +168,10 @@ schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
 schedule_run: proc(s: *schedule, w: *world) -> void = {
     printfmt("    ran      ");
     for (i: u64 = 0; i < s*.count; i += 1) {
-        sys: ?*sys in level = s*.entries[i].system;
-        if (sys && s*.entries[i].enabled) {
-            sys*.run(w);
-            printfmt(" {}", sys*.name);
+        sys_entry: ?*sys in level = s*.entries[i].system;
+        if (sys_entry && s*.entries[i].enabled) {
+            sys_entry*.run(w);
+            printfmt(" {}", sys_entry*.name);
         }
     }
     printfmt("\n");
@@ -180,14 +180,14 @@ schedule_run: proc(s: *schedule, w: *world) -> void = {
 schedule_show: proc(s: *schedule) -> void = {
     printfmt("    schedule ");
     for (i: u64 = 0; i < s*.count; i += 1) {
-        sys: ?*sys in level = s*.entries[i].system;
-        if (!sys) {
+        sys_entry: ?*sys in level = s*.entries[i].system;
+        if (!sys_entry) {
             continue;
         }
         if (s*.entries[i].enabled) {
-            printfmt(" {}", sys*.name);
+            printfmt(" {}", sys_entry*.name);
         } else {
-            printfmt(" ({} off)", sys*.name);
+            printfmt(" ({} off)", sys_entry*.name);
         }
     }
     printfmt("\n");
