@@ -56,18 +56,18 @@ column: struct = {
     arena: ^memops_arena;
 }
 
-column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level = {
+column_make: proc(r: region level, size: u64, align: u64) -> *column in level = { unsafe {
     c: *column in level = new<column>(r);
     c*.arena = r;
     c*.size = size;
     c*.align = align;
     return c;
-}
+} }
 
 // A new block from the region, and the rows in use copied into it. The old
 // block stays in the region, unused: an arena frees everything at once, never
 // one allocation.
-column_grow: proc[trusted](c: *column) -> void = {
+column_grow: proc(c: *column) -> void = { unsafe {
     capacity: u64 = 4;
     if (c*.capacity > 0) {
         capacity = grow_by_doubling ? c*.capacity * 2 : c*.capacity + 1;
@@ -80,9 +80,9 @@ column_grow: proc[trusted](c: *column) -> void = {
     c*.grows += 1;
     c*.copied += c*.count;
     c*.capacity = capacity;
-}
+} }
 
-column_push_zeroed: proc[trusted](c: *column) -> u64 = {
+column_push_zeroed: proc(c: *column) -> u64 = { unsafe {
     if (c*.count == c*.capacity) {
         column_grow(c);
     }
@@ -90,19 +90,19 @@ column_push_zeroed: proc[trusted](c: *column) -> u64 = {
     c*.count += 1;
     memset(c*.data[row * c*.size]&, 0, c*.size);
     return row;
-}
+} }
 
-column_swap_remove: proc[trusted](c: *column, row: u64) -> void = {
+column_swap_remove: proc(c: *column, row: u64) -> void = { unsafe {
     last: u64 = c*.count - 1;
     if (row != last) {
         memcpy(c*.data[row * c*.size]&, c*.data[last * c*.size]&, c*.size);
     }
     c*.count = last;
-}
+} }
 
-column_row: proc[trusted](c: *const column, row: u64) -> []u8 = {
+column_row: proc(c: *const column, row: u64) -> []u8 = { unsafe {
     return c*.data[row * c*.size..(row + 1) * c*.size];
-}
+} }
 
 // Whether T can be the column's type: its size and its alignment. The kata
 // stops the program for a T that can't; this program wants to keep going.
@@ -112,10 +112,10 @@ column_fits: proc<T>(c: *const column) -> b32 = {
     return size == c*.size && align == c*.align;
 }
 
-column_slice: proc[trusted]<T>(c: *const column) -> []T = {
+column_slice: proc<T>(c: *const column) -> []T = { unsafe {
     raw: ^T = cast(c*.data, ^T);
     return raw[0..c*.count];
-}
+} }
 
 draw: proc(c: *column, f: *fmt) -> void = {
     printfmt("    capacity {}, {} rows in use, {} bytes of storage\n", c*.capacity, c*.count, c*.capacity * c*.size);

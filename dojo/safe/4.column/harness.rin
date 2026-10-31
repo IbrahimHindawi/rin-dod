@@ -104,16 +104,16 @@ sample_print: proc<vec4>(v: vec4) -> void = {
 
 // A value's bytes, as the column should hold them. Trusted: it looks at a T
 // as bytes, which is what this whole block is about.
-bytes_of: proc[trusted]<T>(value: *const T) -> []u8 = {
+bytes_of: proc<T>(value: *const T) -> []u8 = { unsafe {
     raw: ^u8 = cast(value, ^u8);
     size: u64 = sizeof(T);
     return raw[0..size];
-}
+} }
 
 // Where a slice's first element is, as a number, for the alignment check.
-slice_address: proc[trusted]<T>(s: []const T) -> u64 = {
+slice_address: proc<T>(s: []const T) -> u64 = { unsafe {
     return cast(cast(s.data, usize), u64);
-}
+} }
 
 same_bytes: proc(a: []u8, b: []u8) -> b32 = {
     if (a.length != b.length) {

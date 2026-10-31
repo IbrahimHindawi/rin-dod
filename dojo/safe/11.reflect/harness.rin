@@ -36,27 +36,27 @@ room: struct = { door: u8; light: lamp; corner: vec2; draft: vec2 @ "hidden"; }
 // ---------------------------------------------------------------------------
 
 // A value's bytes, as the compiler laid them out.
-lamp_bytes: proc[trusted](l: *lamp) -> []u8 = {
+lamp_bytes: proc(l: *lamp) -> []u8 = { unsafe {
     return cast(l, ^u8)[0..lamp<>.size];
-}
+} }
 
-room_bytes: proc[trusted](r: *room) -> []u8 = {
+room_bytes: proc(r: *room) -> []u8 = { unsafe {
     return cast(r, ^u8)[0..room<>.size];
-}
+} }
 
 // Character `i` of a C string: 0 at its end, and 0 past it too.
-walk_cstr_at: proc[trusted](s: ^const char, i: u64) -> c8 = {
+walk_cstr_at: proc(s: ^const char, i: u64) -> c8 = { unsafe {
     for (k: u64 = 0; k < i; k += 1) {
         if (s[k] == 0) {
             return 0;
         }
     }
     return s[i];
-}
+} }
 
 // Copy `src` into `dst` from `at`, keeping a zero after it; the index of
 // that zero. Stops early, with the zero, if `dst` is too short.
-walk_cstr_append: proc[trusted](dst: []c8, at: u64, src: ^const char) -> u64 = {
+walk_cstr_append: proc(dst: []c8, at: u64, src: ^const char) -> u64 = { unsafe {
     end: u64 = at;
     for (i: u64 = 0; src[i] != 0 && end + 1 < dst.length; i += 1) {
         dst[end] = src[i];
@@ -66,18 +66,18 @@ walk_cstr_append: proc[trusted](dst: []c8, at: u64, src: ^const char) -> u64 = {
         dst[end] = 0;
     }
     return end;
-}
+} }
 
 // The f32 whose four bytes start at `at`.
-walk_read_f32: proc[trusted](bytes: []const u8, at: u64) -> f32 = {
+walk_read_f32: proc(bytes: []const u8, at: u64) -> f32 = { unsafe {
     field: []const u8 = bytes[at..at + 4];
     return cast(field[0]&, *const f32)*;
-}
+} }
 
-walk_write_f32: proc[trusted](bytes: []u8, at: u64, value: f32) -> void = {
+walk_write_f32: proc(bytes: []u8, at: u64, value: f32) -> void = { unsafe {
     field: []u8 = bytes[at..at + 4];
     cast(field[0]&, *f32)* = value;
-}
+} }
 
 // ---------------------------------------------------------------------------
 // The scenario

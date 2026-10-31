@@ -33,14 +33,14 @@ level: region;
 
 // argv is C's: `^^c8` with no lengths. Trusted, because strcmp reads to the
 // terminator and the checker cannot see that argv's strings have one.
-has_flag: proc[trusted](argc: i32, argv: ^^c8, flag: ^const c8) -> b32 = {
+has_flag: proc(argc: i32, argv: ^^c8, flag: ^const c8) -> b32 = { unsafe {
     for (i: i32 = 1; i < argc; i += 1) {
         if (strcmp(argv[i], flag) == 0) {
             return 1;
         }
     }
     return 0;
-}
+} }
 
 body_count: u64 = 1048576;
 contact_count: u64 = 1048576;

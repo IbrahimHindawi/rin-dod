@@ -117,7 +117,7 @@ kayan_mask_of: proc<T>() -> u64 = {
 // The world and its lists, in the region. Trusted: the world holds raw
 // pointers (the tables' columns), and such a value is only made by a proc
 // that vouches for it.
-kayan_world_make: proc[trusted](r: region level) -> *kayan_world in level = {
+kayan_world_make: proc(r: region level) -> *kayan_world in level = { unsafe {
     w: *kayan_world in level = new<kayan_world>(r, {
         .tables = vec<kayan_table>make(r, 8),
         .by_signature = hashmap<u64, u32>make(r),
@@ -126,11 +126,11 @@ kayan_world_make: proc[trusted](r: region level) -> *kayan_world in level = {
     });
     w*.arena = r;
     return w;
-}
+} }
 
 // Trusted: writes a field of the world, which the checker reserves for the
 // struct's own procs.
-kayan_register: proc[trusted](w: *kayan_world, id: u32, info: *const reflect in permanent) -> void = {
+kayan_register: proc(w: *kayan_world, id: u32, info: *const reflect in permanent) -> void = { unsafe {
     if (id >= 64) {
         printfmt("kayan: component id {} is past the 64 a signature can hold\n", id);
         exit(1);
@@ -139,7 +139,7 @@ kayan_register: proc[trusted](w: *kayan_world, id: u32, info: *const reflect in 
     if (id + 1 > w*.component_count) {
         w*.component_count = id + 1;
     }
-}
+} }
 
 // The reflect record of a registered component. Stops the program for an id
 // that was never registered, so callers get a `*const`, not a `?*const`.
@@ -169,7 +169,7 @@ kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table = {
 // Double the table's columns. The old columns stay in the arena unused: an
 // arena does not free single allocations, and these lessons accept the waste.
 // Trusted: raw pushes with the component's alignment, and memcpy.
-kayan_table_grow: proc[trusted](w: *kayan_world, t: *kayan_table) -> void = {
+kayan_table_grow: proc(w: *kayan_world, t: *kayan_table) -> void = { unsafe {
     capacity: u64 = t*.capacity == 0 ? 16 : t*.capacity * 2;
     entities: ^kayan_entity = cast(memops_arena_push_zero(w*.arena[0]&,
         sizeof(kayan_entity) * capacity, alignof(kayan_entity)), ^kayan_entity);
@@ -189,11 +189,11 @@ kayan_table_grow: proc[trusted](w: *kayan_world, t: *kayan_table) -> void = {
         }
     }
     t*.capacity = capacity;
-}
+} }
 
 // The table for a signature, made the first time anything needs it. Trusted:
 // it appends to the table list and writes the world's map.
-kayan_table_for: proc[trusted](w: *kayan_world, signature: u64) -> u32 = {
+kayan_table_for: proc(w: *kayan_world, signature: u64) -> u32 = { unsafe {
     found: ?*u32 = hashmap<u64, u32>get(w*.by_signature, signature);
     if (found) {
         return found*;
@@ -210,10 +210,10 @@ kayan_table_for: proc[trusted](w: *kayan_world, signature: u64) -> u32 = {
     _ = vec<kayan_table>push(w*.tables, t);
     _ = hashmap<u64, u32>set(w*.by_signature, signature, index);
     return index;
-}
+} }
 
 // A new row with zeroed components, owned by `e`. Trusted: memset of raw bytes.
-kayan_table_add_row: proc[trusted](w: *kayan_world, t: *kayan_table, e: kayan_entity) -> u64 = {
+kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> u64 = { unsafe {
     if (t*.count == t*.capacity) {
         kayan_table_grow(w, t);
     }
@@ -227,12 +227,12 @@ kayan_table_add_row: proc[trusted](w: *kayan_world, t: *kayan_table, e: kayan_en
     }
     t*.count += 1;
     return row;
-}
+} }
 
 // Swap-remove: the last row moves into `row`, and the slot of the entity that
 // moved is told its new row. This is the line lesson 2 could not write.
 // Trusted: memcpy of raw bytes.
-kayan_table_remove_row: proc[trusted](w: *kayan_world, t: *kayan_table, row: u64) -> void = {
+kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void = { unsafe {
     last: u64 = t*.count - 1;
     if (row != last) {
         for (id: u32 = 0; id < w*.component_count; id += 1) {
@@ -246,7 +246,7 @@ kayan_table_remove_row: proc[trusted](w: *kayan_world, t: *kayan_table, row: u64
         vec<kayan_slot>at(w*.slots, cast(moved.index, u64))*.row = cast(row, u32);
     }
     t*.count = last;
-}
+} }
 
 // Trusted only for the `*const` promise: a checked proc taking a pointer to a
 // table would be assumed able to move its rows, and every column slice the
@@ -259,7 +259,7 @@ kayan_matches: proc(t: *const kayan_table, q: kayan_query) -> b32 = {
 // have is a bug in the caller, so it stops the program. Trusted: the cast from
 // bytes to T. The slice is a borrow of the table, good until a row is added or
 // removed; the checker enforces that at the caller.
-kayan_column: proc[trusted]<T>(t: *const kayan_table) -> []T = {
+kayan_column: proc<T>(t: *const kayan_table) -> []T = { unsafe {
     id: u32 = kayan_id_of<T>();
     if (t*.columns[id] == null) {
         printfmt("kayan: table {} has no column for component {}\n", t*.signature, id);
@@ -267,12 +267,12 @@ kayan_column: proc[trusted]<T>(t: *const kayan_table) -> []T = {
     }
     raw: ^T = cast(t*.columns[id], ^T);
     return raw[0..t*.count];
-}
+} }
 
 // Trusted: a slice over the raw entities column.
-kayan_table_entities: proc[trusted](t: *const kayan_table) -> []kayan_entity = {
+kayan_table_entities: proc(t: *const kayan_table) -> []kayan_entity = { unsafe {
     return t*.entities[0..t*.count];
-}
+} }
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -291,7 +291,7 @@ kayan_alive: proc(w: *const kayan_world, e: kayan_entity) -> b32 = {
 // Trusted: it writes the world's live count and may grow a table, which moves
 // columns; the signature says so by taking `*kayan_world`, so the caller's
 // column slices are dead after it.
-kayan_spawn: proc[trusted](w: *kayan_world, signature: u64) -> kayan_entity = {
+kayan_spawn: proc(w: *kayan_world, signature: u64) -> kayan_entity = { unsafe {
     e: kayan_entity = {};
     if (!vec<u32>is_empty(w*.free)) {
         e.index = vec<u32>pop(w*.free);
@@ -310,11 +310,11 @@ kayan_spawn: proc[trusted](w: *kayan_world, signature: u64) -> kayan_entity = {
     slot*.row = cast(row, u32);
     w*.live += 1;
     return e;
-}
+} }
 
 // A dead handle reports `dead`, so despawning twice is harmless. Trusted: it
 // removes a row and writes the live count.
-kayan_despawn: proc[trusted](w: *kayan_world, e: kayan_entity) -> kayan_status = {
+kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = { unsafe {
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
@@ -324,7 +324,7 @@ kayan_despawn: proc[trusted](w: *kayan_world, e: kayan_entity) -> kayan_status =
     _ = vec<u32>push(w*.free, e.index);
     w*.live -= 1;
     return kayan_status.ok;
-}
+} }
 
 kayan_signature: proc(w: *const kayan_world, e: kayan_entity) -> u64 = {
     if (!kayan_alive(w, e)) {
@@ -337,7 +337,7 @@ kayan_signature: proc(w: *const kayan_world, e: kayan_entity) -> u64 = {
 // Move `e` to the table for `signature`. Components both tables have are
 // copied; components only the new table has start zeroed; components only the
 // old table has are dropped. Trusted: memcpy between columns.
-kayan_move: proc[trusted](w: *kayan_world, e: kayan_entity, signature: u64) -> kayan_status = {
+kayan_move: proc(w: *kayan_world, e: kayan_entity, signature: u64) -> kayan_status = { unsafe {
     if (!kayan_alive(w, e)) {
         return kayan_status.dead;
     }
@@ -362,7 +362,7 @@ kayan_move: proc[trusted](w: *kayan_world, e: kayan_entity, signature: u64) -> k
     slot*.table = to_index;
     slot*.row = cast(to_row, u32);
     return kayan_status.ok;
-}
+} }
 
 // e's T, or null if e is dead or has no T: a `?*T`, so the caller tests it.
 // The row is checked against the rows in use, so a slot pointing past the end
@@ -395,7 +395,7 @@ kayan_set: proc<T>(w: *kayan_world, e: kayan_entity, value: T) -> b32 = {
 // e's component `id` as its bytes, or an empty slice if e is dead or has no
 // such component. For tools that work from reflection records rather than from
 // types, like lesson 5's inspector. Trusted: a slice over raw column bytes.
-kayan_get_bytes: proc[trusted](w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 = {
+kayan_get_bytes: proc(w: *const kayan_world, e: kayan_entity, id: u32) -> []u8 = { unsafe {
     none: []u8 = {};
     if (!kayan_alive(w, e) || id >= w*.component_count) {
         return none;
@@ -409,7 +409,7 @@ kayan_get_bytes: proc[trusted](w: *const kayan_world, e: kayan_entity, id: u32) 
     column: []u8 = t*.columns[id][0..t*.count * size];
     row: u64 = cast(slot*.row, u64);
     return column[row * size..(row + 1) * size];
-}
+} }
 
 // Give e a T, moving it to a new table if it did not have one. Checked: it is
 // written in terms of move and set.

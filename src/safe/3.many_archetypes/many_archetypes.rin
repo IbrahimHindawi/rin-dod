@@ -106,8 +106,8 @@ components_check: proc() -> void = {
 // Trusted: the columns are raw bytes with the component's alignment, which is
 // an arena push the checker cannot type. The table itself is made here too,
 // since a struct holding raw pointers is only ever made by a trusted proc.
-table_create: proc[trusted](r: region level, name: ^const c8, components: []const component,
-                            capacity: u64) -> *table in level = {
+table_create: proc(r: region level, name: ^const c8, components: []const component,
+                            capacity: u64) -> *table in level = { unsafe {
     t: *table in level = new<table>(r);
     t*.name = name;
     t*.capacity = capacity;
@@ -118,7 +118,7 @@ table_create: proc[trusted](r: region level, name: ^const c8, components: []cons
         t*.columns[c] = cast(memops_arena_push_zero(r, info*.size * capacity, info*.align), ^u8);
     }
     return t;
-}
+} }
 
 table_has: proc(t: *const table, c: component) -> b32 = {
     return (t*.signature & bit(c)) != 0;
@@ -130,7 +130,7 @@ table_matches: proc(t: *const table, q: query) -> b32 = {
 
 // A new row with every component zeroed. The caller fills it in. Trusted: it
 // writes the table's count and memsets a row of raw bytes.
-table_add_row: proc[trusted](t: *table) -> u64 = {
+table_add_row: proc(t: *table) -> u64 = { unsafe {
     if (t*.count == t*.capacity) {
         printfmt("table {} is full\n", t*.name);
         exit(1);
@@ -144,14 +144,14 @@ table_add_row: proc[trusted](t: *table) -> u64 = {
     }
     t*.count += 1;
     return row;
-}
+} }
 
 // The rows in use of T's column. Asking a table for a column it does not have
 // is a bug in the caller, so it stops the program rather than return nothing.
 // Trusted: this is the cast from bytes to T, and the promise is that the slice
 // returned has exactly count elements of T. The slice is a borrow of the
 // table: good until a row is added or removed.
-column: proc[trusted]<T>(t: *const table) -> []T = {
+column: proc<T>(t: *const table) -> []T = { unsafe {
     c: component = component_of<T>();
     if (t*.columns[c] == null) {
         printfmt("table {} has no {} column\n", t*.name, component_info[c]*.name);
@@ -159,7 +159,7 @@ column: proc[trusted]<T>(t: *const table) -> []T = {
     }
     raw: ^T = cast(t*.columns[c], ^T);
     return raw[0..t*.count];
-}
+} }
 
 table_set: proc<T>(t: *table, row: u64, value: T) -> void = {
     values: []T = column<T>(t);

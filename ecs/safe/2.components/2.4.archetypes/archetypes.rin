@@ -93,13 +93,13 @@ kayan_column_init: proc(c: *kayan_column, info: *const reflect) -> void = {
     c*.align = info*.align;
 }
 
-kayan_column_grow: proc[trusted](r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = {
+kayan_column_grow: proc(r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = { unsafe {
     bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
     if (count > 0) {
         memcpy(bytes, c*.data.data, c*.size * count);
     }
     c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
-}
+} }
 
 kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
     for (i: u64 = 0; i < c*.size; i += 1) {
@@ -113,7 +113,7 @@ kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
     }
 }
 
-kayan_column_slice: proc[trusted]<T>(c: *const kayan_column, count: u64) -> []T in level = {
+kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = { unsafe {
     if (c*.size != sizeof(T)) {
         printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
         exit(1);
@@ -124,7 +124,7 @@ kayan_column_slice: proc[trusted]<T>(c: *const kayan_column, count: u64) -> []T 
     }
     raw: ^T = cast(c*.data.data, ^T);
     return cast(raw[0..count], []T in level);
-}
+} }
 
 // ---------------------------------------------------------------------------
 // The table

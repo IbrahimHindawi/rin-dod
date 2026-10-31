@@ -31,11 +31,11 @@ column: struct = {
 
 // An empty column of rows `size` bytes long, aligned to `align`, in region r.
 // Stops the program unless align is a power of two from 1 to 16.
-column_make: proc[trusted](r: region level, size: u64, align: u64) -> *column in level = {
+column_make: proc(r: region level, size: u64, align: u64) -> *column in level = { unsafe {
     c: *column in level = new<column>(r);
     c*.arena = r;
     return c;
-}
+} }
 
 column_len: proc(c: *const column) -> u64 = {
     return 0;
@@ -48,23 +48,23 @@ column_capacity: proc(c: *const column) -> u64 = {
 
 // A new zeroed row at the end; returns its row number. A full column grows
 // first, by at least half.
-column_push_zeroed: proc[trusted](c: *column) -> u64 = {
+column_push_zeroed: proc(c: *column) -> u64 = { unsafe {
     return 0;
-}
+} }
 
 // The last row's bytes move into `row`, and the column is one row shorter.
-column_swap_remove: proc[trusted](c: *column, row: u64) -> void = {
+column_swap_remove: proc(c: *column, row: u64) -> void = {
 }
 
 // One row's bytes. Stops the program past the rows in use.
-column_row: proc[trusted](c: *const column, row: u64) -> []u8 = {
+column_row: proc(c: *const column, row: u64) -> []u8 = { unsafe {
     none: []u8 = {};
     return none;
-}
+} }
 
 // The rows in use as T's. Stops the program unless T has the column's size
 // and alignment.
-column_slice: proc[trusted]<T>(c: *const column) -> []T = {
+column_slice: proc<T>(c: *const column) -> []T = { unsafe {
     none: []T = {};
     return none;
-}
+} }

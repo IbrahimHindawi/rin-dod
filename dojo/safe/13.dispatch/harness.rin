@@ -96,7 +96,7 @@ pool_names: [12]^const char = {
 
 // Trusted because safe code may not hand out a proc pointer from a proc: the
 // checker takes it for the address of a local.
-pool_run: proc[trusted](id: u64) -> system_proc = {
+pool_run: proc(id: u64) -> system_proc = { unsafe {
     if (id == 0) { return input_system; }
     if (id == 1) { return think_system; }
     if (id == 2) { return move_system; }
@@ -109,7 +109,7 @@ pool_run: proc[trusted](id: u64) -> system_proc = {
     if (id == 9) { return draw_system; }
     if (id == 10) { return net_system; }
     return save_system;
-}
+} }
 
 pool_find: proc(name: ^const char) -> u64 = {
     for (i: u64 = 0; i < 12; i += 1) {
