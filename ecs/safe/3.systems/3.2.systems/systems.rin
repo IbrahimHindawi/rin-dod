@@ -91,11 +91,13 @@ kayan_heap: struct = {
     arena: ^memops_arena;
 }
 
-kayan_heap_make: proc(r: region R) -> *kayan_heap in R = { unsafe {
-    h: *kayan_heap in R = cast(memops_arena_push_zero(r, sizeof(kayan_heap), alignof(kayan_heap)), *kayan_heap in R);
-    h*.arena = r;
-    return h;
-} }
+kayan_heap_make: proc(r: region R) -> *kayan_heap in R = {
+    unsafe {
+        h: *kayan_heap in R = cast(memops_arena_push_zero(r, sizeof(kayan_heap), alignof(kayan_heap)), *kayan_heap in R);
+        h*.arena = r;
+        return h;
+    }
+}
 
 // One component's values for every row of a table, as bytes: `size` of them
 // a row, `capacity` rows allocated (the table knows how many are in use).
@@ -105,39 +107,47 @@ kayan_column: struct = {
     align: u64;
 }
 
-kayan_column_make: proc(h: *kayan_heap in level, info: *const reflect in permanent) -> *kayan_column in level = { unsafe {
-    c: *kayan_column in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(kayan_column), alignof(kayan_column)), *kayan_column in level);
-    c*.size = info*.size;
-    c*.align = info*.align;
-    return c;
-} }
+kayan_column_make: proc(h: *kayan_heap in level, info: *const reflect in permanent) -> *kayan_column in level = {
+    unsafe {
+        c: *kayan_column in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(kayan_column), alignof(kayan_column)), *kayan_column in level);
+        c*.size = info*.size;
+        c*.align = info*.align;
+        return c;
+    }
+}
 
 // Room for `capacity` rows, the first `count` copied over. The old storage is
 // left in the region: a slice taken before the grow still points at valid
 // memory, and stale values.
-kayan_column_grow: proc(h: *kayan_heap, c: *kayan_column, count: u64, capacity: u64) -> void = { unsafe {
-    data: ^u8 = cast(memops_arena_push_zero(h*.arena[0]&, c*.size * capacity, c*.align), ^u8);
-    if (count > 0) {
-        memcpy(data, c*.data, c*.size * count);
+kayan_column_grow: proc(h: *kayan_heap, c: *kayan_column, count: u64, capacity: u64) -> void = {
+    unsafe {
+        data: ^u8 = cast(memops_arena_push_zero(h*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+        if (count > 0) {
+            memcpy(data, c*.data, c*.size * count);
+        }
+        c*.data = data;
     }
-    c*.data = data;
-} }
+}
 
 // One row's bytes. The caller keeps the row in range: the table's count.
-kayan_column_bytes: proc(c: *const kayan_column, row: u64) -> []u8 = { unsafe {
-    return c*.data[row * c*.size..(row + 1) * c*.size];
-} }
+kayan_column_bytes: proc(c: *const kayan_column, row: u64) -> []u8 = {
+    unsafe {
+        return c*.data[row * c*.size..(row + 1) * c*.size];
+    }
+}
 
 // The column as T's rows, `count` of them. The size check is what makes the
 // typed view honest: T is the type the column was made for.
-kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T = { unsafe {
-    if (c*.size != sizeof(T)) {
-        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
-        exit(1);
+kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T = {
+    unsafe {
+        if (c*.size != sizeof(T)) {
+            printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+            exit(1);
+        }
+        raw: ^T = cast(c*.data, ^T);
+        return raw[0..count];
     }
-    raw: ^T = cast(c*.data, ^T);
-    return raw[0..count];
-} }
+}
 
 // Copying and zeroing a row are loops over the row's bytes: checked code.
 kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
@@ -180,13 +190,15 @@ kayan_table: struct = {
 
 // A zeroed table in the region, with an empty entities vec: the world fills
 // in the signature and the columns.
-kayan_table_new: proc(h: *kayan_heap in level) -> *kayan_table in level = { unsafe {
-    t: *kayan_table in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(kayan_table), alignof(kayan_table)), *kayan_table in level);
-    v: *vec<kayan_entity> in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(vec<kayan_entity>), alignof(vec<kayan_entity>)), *vec<kayan_entity> in level);
-    v*.arena = h*.arena;
-    t*.entities = v;
-    return t;
-} }
+kayan_table_new: proc(h: *kayan_heap in level) -> *kayan_table in level = {
+    unsafe {
+        t: *kayan_table in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(kayan_table), alignof(kayan_table)), *kayan_table in level);
+        v: *vec<kayan_entity> in level = cast(memops_arena_push_zero(h*.arena[0]&, sizeof(vec<kayan_entity>), alignof(vec<kayan_entity>)), *vec<kayan_entity> in level);
+        v*.arena = h*.arena;
+        t*.entities = v;
+        return t;
+    }
+}
 
 // The world: the registry, the slots and free list, and every table, with a
 // map from signature to table index so finding one is a lookup, not a search.
@@ -299,9 +311,11 @@ kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> 
 // on `*const kayan_table` may move the rows and drops every slice taken from
 // it. A trusted proc's `*const` is a promise, and these two keep it: they
 // read. With that, a system holds two or three columns of one table at once.
-kayan_entities: proc(t: *const kayan_table) -> []kayan_entity = { unsafe {
-    return vec<kayan_entity>items(t*.entities);
-} }
+kayan_entities: proc(t: *const kayan_table) -> []kayan_entity = {
+    unsafe {
+        return vec<kayan_entity>items(t*.entities);
+    }
+}
 
 // 1.4's swap-remove, for every column: the last row is copied over `row`, and
 // the slot of the entity that owned the last row is told where it went.
@@ -326,17 +340,19 @@ kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void
 // Asking for a component the table does not have is a bug, so it stops. The
 // slice is good until the table grows: the checker does not see through the
 // column, so that is kept by hand, and 3.3 makes it a rule.
-kayan_slice: proc<T>(t: *const kayan_table) -> []T = { unsafe {
-    id: u32 = kayan_id_of<T>();
-    c: option<*kayan_column in level> = t*.columns[id];
-    if (!c) {
-        printfmt("kayan: the table has no column for component {}\n", id);
-        exit(1);
-        none: []T = {};
-        return none;
+kayan_slice: proc<T>(t: *const kayan_table) -> []T = {
+    unsafe {
+        id: u32 = kayan_id_of<T>();
+        c: option<*kayan_column in level> = t*.columns[id];
+        if (!c) {
+            printfmt("kayan: the table has no column for component {}\n", id);
+            exit(1);
+            none: []T = {};
+            return none;
+        }
+        return kayan_column_slice<T>(c, t*.count);
     }
-    return kayan_column_slice<T>(c, t*.count);
-} }
+}
 
 kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table in level = {
     return vec<*kayan_table in level>at(w*.tables, cast(index, u64))*;
@@ -653,17 +669,19 @@ kayan_indent: proc(depth: u32) -> void = {
 
 // One value of a builtin type, read from its bytes by its type's name. The
 // read is a cast of the bytes, so this is the inspector's one trusted proc.
-kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = { unsafe {
-    if (reflect_cstr_equal(type_name, "f32")) {
-        printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
-    } else if (reflect_cstr_equal(type_name, "u32")) {
-        printfmt("{}", cast(at[0]&, *const u32)*);
-    } else if (reflect_cstr_equal(type_name, "i32")) {
-        printfmt("{}", cast(at[0]&, *const i32)*);
-    } else {
-        printfmt("<{}>", type_name);
+kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {
+    unsafe {
+        if (reflect_cstr_equal(type_name, "f32")) {
+            printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
+        } else if (reflect_cstr_equal(type_name, "u32")) {
+            printfmt("{}", cast(at[0]&, *const u32)*);
+        } else if (reflect_cstr_equal(type_name, "i32")) {
+            printfmt("{}", cast(at[0]&, *const i32)*);
+        } else {
+            printfmt("<{}>", type_name);
+        }
     }
-} }
+}
 
 // Every field of a struct whose bytes are `base`, nested structs indented
 // under their field. A field's bytes are cut from `base` by its offset and
@@ -820,12 +838,14 @@ kayan_system: struct = {
     run: kayan_system_proc;
 }
 
-kayan_system_make: proc(r: region level, name: ^const char, run: kayan_system_proc) -> *kayan_system in level = { unsafe {
-    s: *kayan_system in level = cast(memops_arena_push_zero(r, sizeof(kayan_system), alignof(kayan_system)), *kayan_system in level);
-    s*.name = name;
-    s*.run = run;
-    return s;
-} }
+kayan_system_make: proc(r: region level, name: ^const char, run: kayan_system_proc) -> *kayan_system in level = {
+    unsafe {
+        s: *kayan_system in level = cast(memops_arena_push_zero(r, sizeof(kayan_system), alignof(kayan_system)), *kayan_system in level);
+        s*.name = name;
+        s*.run = run;
+        return s;
+    }
+}
 
 // A system in the schedule: which system, the query that finds its tables,
 // and what it has run over so far. `tables` and `rows` count the calls.

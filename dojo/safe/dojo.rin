@@ -79,64 +79,72 @@ dojo_run: struct = {
 }
 
 // Trusted: it walks a C string to its terminator.
-dojo_parse_u64: proc(text: ^const c8, out: *u64) -> b32 = { unsafe {
-    value: u64 = 0;
-    i: u64 = 0;
-    while (text[i] >= '0' && text[i] <= '9') {
-        value = value * 10 + cast(text[i] - '0', u64);
-        i += 1;
+dojo_parse_u64: proc(text: ^const c8, out: *u64) -> b32 = {
+    unsafe {
+        value: u64 = 0;
+        i: u64 = 0;
+        while (text[i] >= '0' && text[i] <= '9') {
+            value = value * 10 + cast(text[i] - '0', u64);
+            i += 1;
+        }
+        out* = value;
+        return i > 0 && text[i] == 0;
     }
-    out* = value;
-    return i > 0 && text[i] == 0;
-} }
+}
 
 // Trusted: argv is C's array of C strings. The run lives in the region the
 // harness opened, since it holds the block's name, a C string, and a struct
 // with one of those is kept through a pointer in safe code.
-dojo_run_init: proc(r: region R, argc: i32, argv: ^^c8, block: ^const char, title: ^const char) -> *dojo_run in R = { unsafe {
-    run: *dojo_run in R = new<dojo_run>(r);
-    run*.block = block;
-    run*.seed = 1;
-    run*.ops = 20000;
-    for (i: i32 = 1; i < argc; i += 2) {
-        value: u64 = 0;
-        if (i + 1 >= argc || !dojo_parse_u64(argv[i + 1], value&)) {
-            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
-            exit(2);
+dojo_run_init: proc(r: region R, argc: i32, argv: ^^c8, block: ^const char, title: ^const char) -> *dojo_run in R = {
+    unsafe {
+        run: *dojo_run in R = new<dojo_run>(r);
+        run*.block = block;
+        run*.seed = 1;
+        run*.ops = 20000;
+        for (i: i32 = 1; i < argc; i += 2) {
+            value: u64 = 0;
+            if (i + 1 >= argc || !dojo_parse_u64(argv[i + 1], value&)) {
+                printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+                exit(2);
+            }
+            if (strcmp(argv[i], "--seed") == 0) {
+                run*.seed = value;
+            } else if (strcmp(argv[i], "--ops") == 0) {
+                run*.ops = value;
+            } else if (strcmp(argv[i], "--stop") == 0) {
+                run*.stop = value;
+            } else if (strcmp(argv[i], "--trace") == 0) {
+                run*.trace = value;
+            } else {
+                printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+                exit(2);
+            }
         }
-        if (strcmp(argv[i], "--seed") == 0) {
-            run*.seed = value;
-        } else if (strcmp(argv[i], "--ops") == 0) {
-            run*.ops = value;
-        } else if (strcmp(argv[i], "--stop") == 0) {
-            run*.stop = value;
-        } else if (strcmp(argv[i], "--trace") == 0) {
-            run*.trace = value;
-        } else {
-            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
-            exit(2);
-        }
+        printfmt("dojo: {}\n", title);
+        return run;
     }
-    printfmt("dojo: {}\n", title);
-    return run;
-} }
+}
 
 // Are two C strings the same text? Safe code cannot call strcmp, which is
 // C's; this is the one place that does, for the katas that keep names.
-dojo_cstr_equal: proc(a: ^const char, b: ^const char) -> b32 = { unsafe {
-    return strcmp(a, b) == 0;
-} }
+dojo_cstr_equal: proc(a: ^const char, b: ^const char) -> b32 = {
+    unsafe {
+        return strcmp(a, b) == 0;
+    }
+}
 
 // A step of the scenario: what was done, what came back, and what should have.
 // Printed when it matches; the end of the run when it does not. Trusted: it
 // compares two C strings.
-dojo_same: proc(what: ^const char, got: ^const char, want: ^const char) -> void = { unsafe {
-    if (strcmp(got, want) != 0) {
-        printfmt("FAIL in the scenario: {} gave {}, it should give {}\n", what, got, want);
-        exit(1);
+dojo_same: proc(what: ^const char, got: ^const char, want: ^const char) -> void = {
+    unsafe {
+        if (strcmp(got, want) != 0) {
+            printfmt("FAIL in the scenario: {} gave {}, it should give {}\n", what, got, want);
+            exit(1);
+        }
+        printfmt("    {}: {}\n", what, got);
     }
-    printfmt("    {}: {}\n", what, got);
-} }
+}
 
 dojo_fuzz: proc(run: *dojo_run) -> void = {
     printfmt("fuzz: {} operations from seed {}, checked after each\n", run*.ops, run*.seed);

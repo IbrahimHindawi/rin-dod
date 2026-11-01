@@ -26,13 +26,15 @@ schedule_system: struct = {
     run: system_proc;
 }
 
-schedule_system_make: proc(r: region level, name: ^const char, run: system_proc) -> *schedule_system in level = { unsafe {
-    s: *schedule_system in level = cast(memops_arena_push_zero(r, sizeof(schedule_system), alignof(schedule_system)),
-        *schedule_system in level);
-    s*.name = name;
-    s*.run = run;
-    return s;
-} }
+schedule_system_make: proc(r: region level, name: ^const char, run: system_proc) -> *schedule_system in level = {
+    unsafe {
+        s: *schedule_system in level = cast(memops_arena_push_zero(r, sizeof(schedule_system), alignof(schedule_system)),
+            *schedule_system in level);
+        s*.name = name;
+        s*.run = run;
+        return s;
+    }
+}
 
 // A system in the schedule: which, whether it runs, and how many times
 // schedule_run has called it.

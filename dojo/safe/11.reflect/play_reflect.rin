@@ -37,46 +37,58 @@ lamp: struct = { on: u8; power: f32; at: vec2; flicker: f32 @ "hidden"; }
 // Bytes and C strings, which safe code cannot touch by itself
 // ---------------------------------------------------------------------------
 
-read_f32: proc(row: []const u8, at: u64) -> f32 = { unsafe {
-    field: []const u8 = row[at..at + 4];
-    return cast(field[0]&, *const f32)*;
-} }
+read_f32: proc(row: []const u8, at: u64) -> f32 = {
+    unsafe {
+        field: []const u8 = row[at..at + 4];
+        return cast(field[0]&, *const f32)*;
+    }
+}
 
-write_f32: proc(row: []u8, at: u64, value: f32) -> void = { unsafe {
-    field: []u8 = row[at..at + 4];
-    cast(field[0]&, *f32)* = value;
-} }
+write_f32: proc(row: []u8, at: u64, value: f32) -> void = {
+    unsafe {
+        field: []u8 = row[at..at + 4];
+        cast(field[0]&, *f32)* = value;
+    }
+}
 
-bytes_of: proc(l: *lamp) -> []u8 = { unsafe {
-    return cast(l, ^u8)[0..lamp<>.size];
-} }
+bytes_of: proc(l: *lamp) -> []u8 = {
+    unsafe {
+        return cast(l, ^u8)[0..lamp<>.size];
+    }
+}
 
 // Character `i` of a C string: 0 at its end, and past it.
-cstr_at: proc(s: ^const char, i: u64) -> c8 = { unsafe {
-    for (k: u64 = 0; k < i; k += 1) {
-        if (s[k] == 0) {
-            return 0;
+cstr_at: proc(s: ^const char, i: u64) -> c8 = {
+    unsafe {
+        for (k: u64 = 0; k < i; k += 1) {
+            if (s[k] == 0) {
+                return 0;
+            }
         }
+        return s[i];
     }
-    return s[i];
-} }
+}
 
 // Copy `src` into `dst` from `at`, with a zero after it; the index of the
 // zero.
-cstr_append: proc(dst: []c8, at: u64, src: ^const char) -> u64 = { unsafe {
-    end: u64 = at;
-    for (i: u64 = 0; src[i] != 0 && end + 1 < dst.length; i += 1) {
-        dst[end] = src[i];
-        end += 1;
+cstr_append: proc(dst: []c8, at: u64, src: ^const char) -> u64 = {
+    unsafe {
+        end: u64 = at;
+        for (i: u64 = 0; src[i] != 0 && end + 1 < dst.length; i += 1) {
+            dst[end] = src[i];
+            end += 1;
+        }
+        dst[end] = 0;
+        return end;
     }
-    dst[end] = 0;
-    return end;
-} }
+}
 
 // Zero-ended text as a C string, to print.
-cstr: proc(text: []const c8) -> ^const char = { unsafe {
-    return cast(text[0]&, ^const char);
-} }
+cstr: proc(text: []const c8) -> ^const char = {
+    unsafe {
+        return cast(text[0]&, ^const char);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // The walk

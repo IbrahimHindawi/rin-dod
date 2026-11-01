@@ -98,13 +98,15 @@ kayan_column_init: proc(c: *kayan_column, info: *const reflect) -> void = {
     c*.align = info*.align;
 }
 
-kayan_column_grow: proc(r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = { unsafe {
-    bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
-    if (count > 0) {
-        memcpy(bytes, c*.data.data, c*.size * count);
+kayan_column_grow: proc(r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = {
+    unsafe {
+        bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
+        if (count > 0) {
+            memcpy(bytes, c*.data.data, c*.size * count);
+        }
+        c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
     }
-    c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
-} }
+}
 
 kayan_column_copy_row: proc(c: *kayan_column, to: u64, from: u64) -> void = {
     for (i: u64 = 0; i < c*.size; i += 1) {
@@ -126,18 +128,20 @@ kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
     }
 }
 
-kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = { unsafe {
-    if (c*.size != sizeof(T)) {
-        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
-        exit(1);
+kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = {
+    unsafe {
+        if (c*.size != sizeof(T)) {
+            printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+            exit(1);
+        }
+        if (count * c*.size > c*.data.length) {
+            printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / c*.size);
+            exit(1);
+        }
+        raw: ^T = cast(c*.data.data, ^T);
+        return cast(raw[0..count], []T in level);
     }
-    if (count * c*.size > c*.data.length) {
-        printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / c*.size);
-        exit(1);
-    }
-    raw: ^T = cast(c*.data.data, ^T);
-    return cast(raw[0..count], []T in level);
-} }
+}
 
 // ---------------------------------------------------------------------------
 // The table
@@ -592,21 +596,23 @@ kayan_indent: proc(depth: u32) -> void = {
 // One value of a builtin type, read from its bytes by its type's name. The
 // bytes are reinterpreted, which is why this is trusted; it checks there are
 // enough of them first.
-kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = { unsafe {
-    if (at.length < 4) {
-        printfmt("<{} bytes>", at.length);
-        return;
+kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {
+    unsafe {
+        if (at.length < 4) {
+            printfmt("<{} bytes>", at.length);
+            return;
+        }
+        if (strcmp(type_name, "f32") == 0) {
+            printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
+        } else if (strcmp(type_name, "u32") == 0) {
+            printfmt("{}", cast(at[0]&, *const u32)*);
+        } else if (strcmp(type_name, "i32") == 0) {
+            printfmt("{}", cast(at[0]&, *const i32)*);
+        } else {
+            printfmt("<{}>", type_name);
+        }
     }
-    if (strcmp(type_name, "f32") == 0) {
-        printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
-    } else if (strcmp(type_name, "u32") == 0) {
-        printfmt("{}", cast(at[0]&, *const u32)*);
-    } else if (strcmp(type_name, "i32") == 0) {
-        printfmt("{}", cast(at[0]&, *const i32)*);
-    } else {
-        printfmt("<{}>", type_name);
-    }
-} }
+}
 
 // Every field of a struct whose bytes are `base`, nested structs indented
 // under their field. A field's bytes are cut from `base` by its offset and

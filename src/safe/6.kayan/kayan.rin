@@ -123,11 +123,13 @@ apply_result: struct = {
 }
 
 // A buffer in the frame region. Trusted: it holds the arena as a raw pointer.
-commands_make: proc(r: region frame) -> *commands in frame = { unsafe {
-    c: *commands in frame = new<commands>(r, { .list = vec<command>make(r, 64) });
-    c*.arena = r;
-    return c;
-} }
+commands_make: proc(r: region frame) -> *commands in frame = {
+    unsafe {
+        c: *commands in frame = new<commands>(r, { .list = vec<command>make(r, 64) });
+        c*.arena = r;
+        return c;
+    }
+}
 
 commands_record: proc(c: *commands, cmd: command) -> void = {
     _ = vec<command>push(c*.list, cmd);
@@ -136,29 +138,35 @@ commands_record: proc(c: *commands, cmd: command) -> void = {
 // A copy of `value` in the frame region, kept until the buffer is applied, as
 // the bytes the component's column will receive. Trusted: the view of a T as
 // bytes.
-commands_payload: proc<T>(c: *commands, value: T) -> []u8 in frame = { unsafe {
-    copy: *T = cast(memops_arena_push(c*.arena[0]&, sizeof(T), alignof(T)), *T);
-    copy* = value;
-    bytes: ^u8 = cast(copy, ^u8);
-    return cast(bytes[0..sizeof(T)], []u8 in frame);
-} }
+commands_payload: proc<T>(c: *commands, value: T) -> []u8 in frame = {
+    unsafe {
+        copy: *T = cast(memops_arena_push(c*.arena[0]&, sizeof(T), alignof(T)), *T);
+        copy* = value;
+        bytes: ^u8 = cast(copy, ^u8);
+        return cast(bytes[0..sizeof(T)], []u8 in frame);
+    }
+}
 
 // Trusted: it counts in a field of the buffer, which the checker reserves for
 // the struct's own procs.
-commands_spawn: proc(c: *commands, signature: u64) -> u32 = { unsafe {
-    cmd: command = { .kind = command_kind.spawn, .signature = signature, .pending = c*.spawned };
-    c*.spawned += 1;
-    commands_record(c, cmd);
-    return cmd.pending;
-} }
+commands_spawn: proc(c: *commands, signature: u64) -> u32 = {
+    unsafe {
+        cmd: command = { .kind = command_kind.spawn, .signature = signature, .pending = c*.spawned };
+        c*.spawned += 1;
+        commands_record(c, cmd);
+        return cmd.pending;
+    }
+}
 
 // Room for the handles of this frame's spawns, in the frame. Trusted: a raw
 // push.
-commands_spawned: proc(c: *commands) -> []kayan_entity in frame = { unsafe {
-    raw: ^kayan_entity = cast(memops_arena_push_zero(c*.arena[0]&,
-        sizeof(kayan_entity) * cast(c*.spawned, u64), alignof(kayan_entity)), ^kayan_entity);
-    return cast(raw[0..cast(c*.spawned, u64)], []kayan_entity in frame);
-} }
+commands_spawned: proc(c: *commands) -> []kayan_entity in frame = {
+    unsafe {
+        raw: ^kayan_entity = cast(memops_arena_push_zero(c*.arena[0]&,
+            sizeof(kayan_entity) * cast(c*.spawned, u64), alignof(kayan_entity)), ^kayan_entity);
+        return cast(raw[0..cast(c*.spawned, u64)], []kayan_entity in frame);
+    }
+}
 
 // T must be in the pending spawn's signature: the spawn decides the table.
 commands_set_spawned: proc<T>(c: *commands, pending: u32, value: T) -> void = {
@@ -181,18 +189,20 @@ commands_despawn: proc(c: *commands, e: kayan_entity) -> void = {
 
 // Copy a payload into e's component. Returns 0 if e has no such component.
 // Trusted: memcpy into raw column bytes, checked for length.
-write_component: proc(w: *kayan_world, e: kayan_entity, id: u32, payload: []const u8) -> b32 = { unsafe {
-    target: []u8 = kayan_get_bytes(w, e, id);
-    if (target.length == 0) {
-        return 0;
+write_component: proc(w: *kayan_world, e: kayan_entity, id: u32, payload: []const u8) -> b32 = {
+    unsafe {
+        target: []u8 = kayan_get_bytes(w, e, id);
+        if (target.length == 0) {
+            return 0;
+        }
+        if (payload.length < target.length) {
+            printfmt("write_component: payload of {} bytes for a component of {}\n", payload.length, target.length);
+            exit(1);
+        }
+        memcpy(target[0]&, payload[0]&, target.length);
+        return 1;
     }
-    if (payload.length < target.length) {
-        printfmt("write_component: payload of {} bytes for a component of {}\n", payload.length, target.length);
-        exit(1);
-    }
-    memcpy(target[0]&, payload[0]&, target.length);
-    return 1;
-} }
+}
 
 // Every command, in the order it was recorded. The frame region ends right
 // after, in main, which frees every command and payload at once.

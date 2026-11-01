@@ -73,47 +73,63 @@ indent: proc(depth: u32) -> void = {
 // Trusted for the `*const` promise: a checked proc taking a pointer to a
 // record would be assumed able to change what it points at, and the caller's
 // other pointers into the same record would be dead after the call.
-is_type: proc(field: *const reflect_field, name: ^const char) -> b32 = { unsafe {
-    return reflect_cstr_equal(field*.type, name);
-} }
+is_type: proc(field: *const reflect_field, name: ^const char) -> b32 = {
+    unsafe {
+        return reflect_cstr_equal(field*.type, name);
+    }
+}
 
 // std's reflect_field_is_array is a checked proc, so the same applies to it;
 // this is its body, promised not to move anything.
-is_array: proc(field: *const reflect_field) -> b32 = { unsafe {
-    return field*.kind == reflect_field_kind_array || field*.array_count > 0;
-} }
+is_array: proc(field: *const reflect_field) -> b32 = {
+    unsafe {
+        return field*.kind == reflect_field_kind_array || field*.array_count > 0;
+    }
+}
 
 // The trusted core: bytes read as a builtin, or written as one. The C types
 // behind the names are fixed by rin, so reading through a pointer of the right
 // width is exact; each checks that the bytes are at least that wide.
-bytes_as_f32: proc(at: []const u8) -> f32 = { unsafe {
-    if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
-    return cast(at[0]&, *const f32)*;
-} }
-bytes_as_u32: proc(at: []const u8) -> u32 = { unsafe {
-    if (at.length < sizeof(u32)) { printfmt("inspector: too few bytes for a u32\n"); exit(1); }
-    return cast(at[0]&, *const u32)*;
-} }
-bytes_as_i32: proc(at: []const u8) -> i32 = { unsafe {
-    if (at.length < sizeof(i32)) { printfmt("inspector: too few bytes for an i32\n"); exit(1); }
-    return cast(at[0]&, *const i32)*;
-} }
-bytes_set_f32: proc(at: []u8, value: f32) -> void = { unsafe {
-    if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
-    cast(at[0]&, *f32)* = value;
-} }
+bytes_as_f32: proc(at: []const u8) -> f32 = {
+    unsafe {
+        if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
+        return cast(at[0]&, *const f32)*;
+    }
+}
+bytes_as_u32: proc(at: []const u8) -> u32 = {
+    unsafe {
+        if (at.length < sizeof(u32)) { printfmt("inspector: too few bytes for a u32\n"); exit(1); }
+        return cast(at[0]&, *const u32)*;
+    }
+}
+bytes_as_i32: proc(at: []const u8) -> i32 = {
+    unsafe {
+        if (at.length < sizeof(i32)) { printfmt("inspector: too few bytes for an i32\n"); exit(1); }
+        return cast(at[0]&, *const i32)*;
+    }
+}
+bytes_set_f32: proc(at: []u8, value: f32) -> void = {
+    unsafe {
+        if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
+        cast(at[0]&, *f32)* = value;
+    }
+}
 // Up to `at.length` bytes of text, printed as they are: a [N]c8 field.
-print_text: proc(at: []const u8) -> void = { unsafe {
-    printf("%.*s", cast(at.length, i32), cast(at.data, ^const c8));
-} }
+print_text: proc(at: []const u8) -> void = {
+    unsafe {
+        printf("%.*s", cast(at.length, i32), cast(at.data, ^const c8));
+    }
+}
 // A C string into a fixed array: up to dst.length - 1 characters, the rest
 // zero, so a shorter label does not keep the tail of a longer one.
-cstr_into: proc(dst: []c8, text: ^const c8) -> void = { unsafe {
-    for (i: u64 = 0; i < dst.length; i += 1) { dst[i] = 0; }
-    for (i: u64 = 0; i + 1 < dst.length && text[i] != 0; i += 1) {
-        dst[i] = text[i];
+cstr_into: proc(dst: []c8, text: ^const c8) -> void = {
+    unsafe {
+        for (i: u64 = 0; i < dst.length; i += 1) { dst[i] = 0; }
+        for (i: u64 = 0; i + 1 < dst.length && text[i] != 0; i += 1) {
+            dst[i] = text[i];
+        }
     }
-} }
+}
 
 // One value of a builtin type.
 print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {

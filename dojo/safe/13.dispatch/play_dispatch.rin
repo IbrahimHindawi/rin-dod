@@ -89,18 +89,22 @@ sys: struct = {
     run: system_proc;
 }
 
-system_make: proc(r: region level, name: ^const char, run: system_proc) -> *sys in level = { unsafe {
-    s: *sys in level = cast(memops_arena_push_zero(r, sizeof(sys), alignof(sys)), *sys in level);
-    s*.name = name;
-    s*.run = run;
-    return s;
-} }
+system_make: proc(r: region level, name: ^const char, run: system_proc) -> *sys in level = {
+    unsafe {
+        s: *sys in level = cast(memops_arena_push_zero(r, sizeof(sys), alignof(sys)), *sys in level);
+        s*.name = name;
+        s*.run = run;
+        return s;
+    }
+}
 
 // Are two names the same text? strcmp is C's, so safe code calls it through
 // this.
-name_is: proc(a: ^const char, b: ^const char) -> b32 = { unsafe {
-    return strcmp(a, b) == 0;
-} }
+name_is: proc(a: ^const char, b: ^const char) -> b32 = {
+    unsafe {
+        return strcmp(a, b) == 0;
+    }
+}
 
 schedule_entry: struct = {
     system: option<*sys in level>;
