@@ -24,8 +24,8 @@
 // all one way or the other; stop on that line, set it to 0 in the watch window,
 // and continue.
 //
-// Safe subset: the world and the buffer live in the region `level`, opened in
-// main, where the original had an arena.
+// The world and the buffer live in the region `level`, opened in
+// main.
 
 import "std/print.rin"
 import "std/memops.rin"

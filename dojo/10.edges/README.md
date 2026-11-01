@@ -51,7 +51,8 @@ of entities a frame, that's the difference.
 
 ## Do reps: the kata
 
-You write `graph`. The move that adds a component:
+You write `graph`, made in the region `level`, with `nodes` a
+`*vec<graph_node> in level`. The move that adds a component:
 
 ```rin
 graph_with: proc(g: *graph, node: u32, id: u32) -> u32 = {
@@ -59,7 +60,7 @@ graph_with: proc(g: *graph, node: u32, id: u32) -> u32 = {
     if ((signature & graph_bit(id)) != 0) {
         return node;
     }
-    edge: u32 = vec<graph_node>at(g*.nodes&, cast(node, u64))*.add[id];
+    edge: u32 = vec<graph_node>at(g*.nodes, cast(node, u64))*.add[id];
     if (edge != 0) {
         g*.hits += 1;
         return edge - 1;
@@ -67,16 +68,17 @@ graph_with: proc(g: *graph, node: u32, id: u32) -> u32 = {
     to: u32 = graph_find_or_make(g, signature | graph_bit(id));
     // graph_find_or_make can make a node, and the vec can move them all to
     // grow, so both pointers are taken after it.
-    vec<graph_node>at(g*.nodes&, cast(node, u64))*.add[id] = to + 1;
-    vec<graph_node>at(g*.nodes&, cast(to, u64))*.remove[id] = node + 1;
+    vec<graph_node>at(g*.nodes, cast(node, u64))*.add[id] = to + 1;
+    vec<graph_node>at(g*.nodes, cast(to, u64))*.remove[id] = node + 1;
     return to;
 }
 ```
 
-and its mirror, `graph_without`, plus `graph_init` (node 0 is the empty
-signature), `graph_signature`, `graph_len`, `graph_lookups` (moves that
-searched) and `graph_hits` (moves that followed an edge). The edges are
-stored as one more than the node, so a zeroed node knows none, 64 each way:
+and its mirror, `graph_without`, plus `graph_make(r)` (node 0 is the empty
+signature, and level 2's version leaves that node to you), `graph_signature`,
+`graph_len`, `graph_lookups` (moves that searched) and `graph_hits` (moves
+that followed an edge). The edges are stored as one more than the node, so a
+zeroed node knows none, 64 each way:
 
 ```rin
 graph_node: struct = {
@@ -109,13 +111,16 @@ neither. The seeds give the same runs as rust-dod's dojo.
 **rin notes.** The comment in `graph_with` is the one to remember: a pointer
 into `nodes` taken before `graph_find_or_make` can point at memory the vec
 has moved out of, so the edges are written through fresh pointers after it.
-That's dojo 8's lesson, and 2.6's tables have the same comment.
+Here the checker holds you to it: keep one across that call, and it says `'n'
+may be stale: 'g.nodes', which it was taken from, has been changed since; take
+it again`. That's dojo 8's lesson, and 2.6 has the same comment over its slots.
 
 **Level 4, variations.** The same harness, different insides:
 
-- **One hash map of edges**, `hashmap<u64, u32>` keyed by `node * 128 + id *
-  2 + adding`, instead of two 64-wide arrays per node. Which takes less
-  memory with 300 tables, and which is faster to follow?
+- **One hash map of edges**, a `*hashmap<u64, u32> in level` from
+  `hashmap<u64, u32>make(r)`, keyed by `node * 128 + id * 2 + adding`, instead
+  of two 64-wide arrays per node. Which takes less memory with 300 tables, and
+  which is faster to follow?
 - **A hash map for the slow path**: `graph_find_or_make` searches every node.
   Keep a `hashmap<u64, u32>` from signature to node, as
   [2.4](../../ecs/docs/2.4_archetypes.md) does, or build one in dojo 9.
@@ -140,6 +145,6 @@ says which operation and seed:
         with a breakpoint on dojo_stop_here, which runs just before that operation
 
 That's a bit made in 32 bits, `1 shl id` on a `u32`: bit 63 lands on bit 31.
-Run the harness under your debugger with those arguments and a breakpoint on
-`dojo_stop_here`, and step into the move. `--sanitize` reports the shift
-itself, as undefined behaviour.
+rin masks a shift's amount to the width of what it shifts, so nothing is
+undefined and `--sanitize` stays quiet. Run the harness under your debugger with
+those arguments and a breakpoint on `dojo_stop_here`, and step into the move.

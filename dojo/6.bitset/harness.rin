@@ -11,8 +11,8 @@
 // answers every question one id at a time. Ids go up to 63, so a shift done
 // in 32 bits shows.
 //
-// Safe subset: the scenario and the fuzz run get the region `level` and make
-// one fmt buffer each in it, where the original formatted into local arrays.
+// The scenario and the fuzz run get the region `level` and make
+// one fmt buffer each in it.
 
 import "../dojo.rin"
 

@@ -1,8 +1,7 @@
 // The reference: a free list, and a generation per index.
 //
-// Safe subset: the handles live in the region `level` and so do their two
-// vecs; handles_make builds them there, where the original's handles_init took
-// an arena.
+// The handles live in the region `level` and so do their two
+// vecs; handles_make builds them there.
 
 import "std/memops.rin"
 import "std/vec.rin"

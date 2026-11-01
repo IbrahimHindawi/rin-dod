@@ -49,6 +49,10 @@ does not help: there are no four neighbours to load at once.
   It is split cut into pieces of eight, with the pieces of one body kept near
   each other. The usual name is AoSoA, an array of structs of arrays.
 
+As in lesson 1, the arena is the region `level`, every array is a slice that
+names it, and each loop is a `proc[unsafe]` kernel so that it can take `noalias`,
+called from inside `unsafe { }`.
+
 The program prints how many 64-byte cache lines one body's position sits in:
 
     cache lines one lookup touches: aos 1.000, columns 1.125, split 3.000, blocks 2.000
@@ -57,57 +61,67 @@ A 12-byte `vec3` crosses a line boundary 2 times in 16, hence 1.125. In
 split, x, y and z are in three different arrays. In a block, x and y share a
 line and z is in the next.
 
+The program works that out from byte offsets within an array, as if each array
+began on a line. `new_slice` aligns to the element, not to the line, so nothing
+promises that. In this build most arrays do start on a line, `positions` and
+`velocities` start 32 bytes into one, and the counts from the real addresses come
+out the same. A promise would take an arena push with an alignment of 64, which is
+`unsafe`.
+
 ## Measured
 
-Release, clang `-O2`, best of three runs, on the 2.8 GHz Xeon these lessons
-were checked on: 4 MB of L2, 33 MB of L3. The body count was changed in the
-generated C for the first and last columns. At 65,536 bodies each layout fits
-in L2; at the lesson's 1,048,576 each is about the size of L3; at 8,388,608
-each is 192 to 256 MB and comes from RAM.
+Release, clang on Windows (`clang -O2` and clang-cl `/O2`, which make the same
+loops) on one core, best of at least three runs, on a Ryzen 9 9950X3D: 1 MB of L2
+a core and 96 MB of L3. The body count, the contact count and the steps were
+changed in the source for the first and last columns. At 16,384 bodies each layout
+fits in L2; at the lesson's 1,048,576 each is 24 to 32 MB and sits in L3; at
+8,388,608 each is 192 to 256 MB and comes mostly from RAM.
 
 **Stream, ns per body:**
 
-| layout | 65,536 | 1,048,576 | 8,388,608 |
+| layout | 16,384 | 1,048,576 | 8,388,608 |
 |---|---|---|---|
-| aos | 1.67 | 4.20 | 4.09 |
-| columns | 1.68 | 2.08 | 2.88 |
-| split | 0.93 | **1.30** | **1.66** |
-| blocks | **0.70** | 1.62 | 2.79 |
+| aos | 0.48 | 0.57 | 1.26 |
+| columns | 0.67 | 0.62 | 0.93 |
+| split | 0.33 | 0.43 | **0.76** |
+| blocks | **0.14** | **0.29** | 0.88 |
 
 **Lookup, ns per contact:**
 
-| layout | 65,536 | 1,048,576 | 8,388,608 |
+| layout | 16,384 | 1,048,576 | 8,388,608 |
 |---|---|---|---|
-| aos | 5.03 | 26.27 | 50.35 |
-| columns | **3.42** | **11.94** | **40.35** |
-| split | 6.54 | 28.22 | 95.01 |
-| blocks | 5.98 | 25.70 | 61.20 |
+| aos | **1.05** | 1.76 | 10.20 |
+| columns | **1.05** | **1.72** | **7.25** |
+| split | 1.67 | 2.72 | 11.01 |
+| blocks | 1.62 | 2.67 | 14.00 |
 
-clang with `-mavx2 -mfma` and gcc `-O3` agree on the main points: split
-streams fastest from RAM, columns look up fastest at every size, and split
-looks up slowest from RAM. Where two numbers are within about 20 percent, the
-order changes from build to build; gcc `-O3`, for one, streamed columns
-fastest at a million bodies. The machine is shared; expect about 20 percent
-noise.
+clang-cl with `/arch:AVX2` agrees on the main points: split streams fastest from
+RAM, and columns look up fastest. So does gcc `-O3` on the lookups. On the stream
+it does not, with the checks on: it leaves split unvectorized, as in lesson 1, and
+split streams slowest from RAM, at 1.86 ns. With `-DRIN_NO_BOUNDS_CHECKS` it is
+fastest again, at 0.80. Where two numbers are within about 20 percent, the order
+changes from build to build. The machine was busy, and everything on it shares
+that L3: lookups at a million bodies came out up to three times slower in unlucky
+runs.
 
 What it says:
 
-- **Split wins the stream and loses the lookup.** From RAM it streams 1.7
-  times faster than columns, and looks up 2.4 times slower: three lines a
-  body instead of one.
-- **Columns win the lookup everywhere** and come second or third in the
-  stream. AoS also has one line a body, but its bodies are 32 bytes, so the
-  same lookups spread over more memory. At a million bodies, columns'
-  positions are 12 MB and sit comfortably in L3; AoS spreads them over
-  32 MB, about all of it.
-- **Blocks are the compromise.** In L2 they streamed fastest of all, and a
-  little behind split at a million bodies. They look up better than split at
-  every size. From RAM their stream fell back to about columns' speed on this
-  machine, which I have not explained.
-- **Out of cache, a lookup costs ten to fifty times a streamed body.** From
-  RAM, 40 to 95 ns a contact against 2 to 4 ns a body. Turning lookups into something closer to
-  a stream, by sorting contacts or walking space in order, usually saves
-  more than any layout choice.
+- **Split wins the stream from RAM and loses the lookup.** There it streams 1.2
+  times faster than columns, and looks up 1.5 times slower: three lines a body
+  instead of one.
+- **Columns win the lookup once the data leaves the cache,** and tie with AoS
+  before that, since both have about one line a body. From RAM, columns'
+  positions are 100 MB, about all of L3, while AoS spreads the same lookups over
+  256 MB. In the stream they are slowest in cache: lesson 1 showed why a `vec3`
+  fights the registers.
+- **Blocks are the compromise, mostly in the stream.** In cache they streamed
+  fastest of all, more than twice split's speed in L2. From RAM they fall a little
+  behind split. They look up no better than split: two lines a body instead of
+  three did not show here.
+- **Out of cache, a lookup costs about ten times a streamed body.** From RAM, 7 to
+  14 ns a contact against about 1 ns a body. Turning lookups into something closer
+  to a stream, by sorting contacts or walking space in order, usually saves more
+  than any layout choice.
 
 ## What the compiler makes of it
 
@@ -121,12 +135,20 @@ clang-cl `/O2`, Windows x64, from the object file:
 | `integrate_blocks` | 8 | 37 | 0 |
 | `integrate_split`, `/arch:AVX2` | 8 | 14 | 0 |
 | `integrate_blocks`, `/arch:AVX2` | 8 | 14 | 0 |
-| `contacts_columns` | 1 contact | 25 | 0 |
-| `contacts_split` | 1 contact | 32 | 0 |
+| `contacts_columns` | 1 contact | 29 | 0 |
+| `contacts_split` | 1 contact | 44 | 0 |
 
 Blocks vectorize as cleanly as split: the inner loop over eight lanes is a
 fixed-size loop over consecutive floats, which compilers turn into whole
 registers. The contact loops are one contact a pass in every layout.
+
+Bounds checks are on in all of these, and the stream loops are as they would be
+without them, as lesson 1 explains. The contact loops are where the checks stay.
+A contact's two indexes come out of data, so nothing can prove them in range, and
+each index stays a compare and a branch per use: `contacts_columns` would be 25
+instructions without them, `contacts_split` 32. It hardly shows in the time, since
+the trip to memory is most of a lookup. With `-DRIN_NO_BOUNDS_CHECKS` the lookup
+table moves by about 10 percent from RAM and not at all in cache.
 
 ## In between
 

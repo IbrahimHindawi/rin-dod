@@ -14,9 +14,9 @@
 // been updated over. After every update the query must list exactly the
 // matching tables, in order, and have looked at each table once.
 //
-// Safe subset: the region `level` is the arena. The list of tables, the
+// The region `level` is the arena. The list of tables, the
 // queries and the models all live in it; a query that is replaced is a new
-// one made in the region, where the original re-initialized it in place.
+// one made in the region.
 
 import "../dojo.rin"
 

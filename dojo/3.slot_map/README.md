@@ -45,15 +45,16 @@ mesh's texture.
 
 ## Do reps: the kata
 
-You write `slot_map`. Its two-step lookup:
+You write `slot_map`, made in the region `level`, with its four arrays each a
+`*vec<...> in level`. Its two-step lookup:
 
 ```rin
-slot_map_get: proc(m: *slot_map, h: dojo_handle) -> *u64 = {
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64 in level> = {
     if (!slot_map_contains(m, h)) {
         return null;
     }
-    row: u32 = vec<slot_map_slot>at(m*.slots&, cast(h.index, u64))*.row;
-    return vec<u64>at(m*.values&, cast(row, u64));
+    row: u32 = vec<slot_map_slot>at(m*.slots, cast(h.index, u64))*.row;
+    return vec<u64>at(m*.values, cast(row, u64));
 }
 ```
 
@@ -67,9 +68,10 @@ slot_map_insert: proc(m: *slot_map, value: u64) -> dojo_handle = {
 slot_map_remove: proc(m: *slot_map, h: dojo_handle) -> option<u64> = {
 ```
 
-plus `slot_map_init`, `slot_map_contains`, `slot_map_len`, `slot_map_values`
-(the packed values, in row order) and `slot_map_handles` (`handles[row]` owns
-`values[row]`). `dojo_handle` comes from `dojo/dojo.rin`, as in dojo 1.
+plus `slot_map_make(r)`, `slot_map_contains`, `slot_map_len`,
+`slot_map_values` (the packed values, in row order, a `[]u64 in level`) and
+`slot_map_handles` (`handles[row]` owns `values[row]`, a `[]dojo_handle in
+level`). `dojo_handle` comes from `dojo/dojo.rin`, as in dojo 1.
 
 | level | you write | target |
 |---|---|---|
@@ -92,10 +94,12 @@ never alive again) and dojo 2's for the rows (packed, each row's handle
 holding that row's value). The seeds give the same runs as rust-dod's dojo.
 
 **rin notes.** As in dojo 2, `slot_map_remove` gives back std's `option<u64>`
-and `slot_map_get` returns a pointer, null for a dead handle, to read or to
-change the value; Rust's kata has `get` and `get_mut`. A zeroed handle, `{}`,
-is never alive, since generations start at 1, and the scenario checks that
-too.
+and `slot_map_get` returns an `option<*u64 in level>`, a pointer that is null
+for a dead handle and tested before use, to read or to change the value;
+Rust's kata has `get` and `get_mut`. The `in level` is there, and on the two
+slices, because the checker refuses a result that comes out of a vec in
+`level` and doesn't say so. A zeroed handle, `{}`, is never alive, since
+generations start at 1, and the scenario checks that too.
 
 **Level 4, variations.** The same harness, different insides:
 
@@ -105,7 +109,7 @@ too.
 - **One look at the slot**: `slot_map_remove` without `slot_map_contains`:
   fetch the slot once, check its generation, and use it. How many times does
   the reference look the slot up?
-- **`slot_map_retain(m, keep)`**, with `keep` a `proc(h: dojo_handle, value:
+- **`slot_map_retain(m, keep)`**, with `keep` a `*proc(h: dojo_handle, value:
   u64) -> b32`: remove every value it rejects, in one pass, keeping the rows
   packed. Which way should the loop walk? (Not checked by the harness; write
   your own test.)

@@ -2,7 +2,7 @@
 //
 // Start it with: python tools/dojo.py start edges 1
 //
-// Safe subset: the graph lives in the region `level`, made by graph_make.
+// The graph lives in the region `level`, made by graph_make.
 
 import "std/vec.rin"
 // The harness: it has main, and runs the procs below, so with it this file

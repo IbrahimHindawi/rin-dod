@@ -2,7 +2,7 @@
 // first time it's seen, and the same id every time after. The lookup is an
 // open-addressing hash table of ids, kept by hand.
 //
-// Safe subset: the interner lives in the region `level`, made by
+// The interner lives in the region `level`, made by
 // interner_make; when the table grows, its vec is refilled in place.
 
 import "std/vec.rin"

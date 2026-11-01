@@ -3,7 +3,7 @@
 //
 // Start it with: python tools/dojo.py start reflect 1
 //
-// Safe subset: the lists come back in a region the caller names, and the
+// The lists come back in a region the caller names, and the
 // bytes and C strings are reached through the harness's trusted helpers,
 // walk_read_f32, walk_write_f32, walk_cstr_at and walk_cstr_append.
 

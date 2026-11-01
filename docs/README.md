@@ -5,7 +5,8 @@ ECS. These go underneath it, to the memory and the machine code:
 
 - **Lesson 1, aos vs soa.** The same particles in three layouts: what a loop
   fetches per cache line, what `noalias` promises the compiler, which loops
-  it vectorizes, and how to check that in the assembly.
+  it vectorizes, what the bounds checks cost, and how to check that in the
+  assembly.
 - **Lessons 2 to 6** build an archetype ECS again, compressed into five
   steps, and end with a small game. They came first and move fast. After the
   course, read them as a recap, or as a second take on the same design.
@@ -13,8 +14,8 @@ ECS. These go underneath it, to the memory and the machine code:
   import it unchanged.
 - **Lesson 7, layout follows access.** Four layouts under streams and under
   random lookups, timed, and how an ECS decides where each component lives.
-- **Lesson 0, from kayan**, reviews the original C kayan: what these lessons
-  kept from it, what they changed, and why.
+- **Lesson 0, from kayan**, reviews the C kayan these lessons started from:
+  what they kept from it, what they changed, and why.
 
 | | lesson | about |
 |---|---|---|
@@ -35,6 +36,14 @@ output against the code: every lesson prints what it does, step by step. The
 guides here give the background that doesn't fit in a file header, and end
 with exercises.
 
-Timings only mean something in a Release build. Debug checks every slice
-index. Lesson 1's guide shows how to build one, and what to look for in the
+Every lesson is in rin's safe subset. The memory they share lives in a region,
+`level`, that `main` opens; the checker follows every pointer into it. Two
+things it cannot follow stay in code marked for it: `unsafe { }` blocks over
+raw bytes, and `proc[unsafe]` kernels that make a `noalias` promise, which are
+called from inside `unsafe { }`.
+
+Timings only mean something in a Release build. Debug does not optimize, and
+every slice index is a function call. Release keeps the bounds checks: they
+run in every build, because the safety rules rest on them. Lesson 1's guide
+shows how to build one, what the checks cost, and what to look for in the
 disassembly.

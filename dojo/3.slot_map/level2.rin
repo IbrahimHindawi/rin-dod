@@ -46,7 +46,7 @@ slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32 = {
 
 // Handle, slot, row, value: the value to read or to change, or null if h is
 // dead.
-slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64> = {
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64 in level> = {
     return null;
 }
 

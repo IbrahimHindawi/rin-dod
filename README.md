@@ -19,15 +19,14 @@ courses and a dojo:
 There is no renderer, no window and no library: only data, and the loops
 that stream it.
 
-**Every program is also here in rin's safe subset**, under `ecs/safe`,
-`src/safe`, `includes/safe` and `dojo/safe`: the same lessons, katas and
-playgrounds, printing the same expected output, checked by the compiler's
-`regions` branch with its memory-safety rules on and run clean under the
-sanitizers. 23039 lines, 1444 procs, 134 of them `[trusted]`: the type-erased
-byte columns, the arena-level allocation inside the shared library, reading
-`argv`, and `strcmp`; everything else is checked. Each `safe` folder has a
-README on what the port changed, and the header of each file names its
-trusted procs. `tools/check.py` runs both versions.
+All of it is written in rin's safe subset. `rin` checks every program with its
+memory-safety rules on, the default on its `regions` branch, and every program
+prints its expected output and runs clean under AddressSanitizer and UBSan
+(`tools/check.py`). Memory is regions: `level: region;`, fields that say
+`*vec<T> in level`, lookups that return `option<*T>`. What the checker cannot
+see stays in small `unsafe { }` blocks and `proc[unsafe]` kernels: the
+type-erased byte columns, the `noalias` promises, and reading `argv`. The
+`main` branch keeps the earlier unsafe version of the course.
 
 ## Build an ECS
 
@@ -114,34 +113,39 @@ a recap of the course. [docs/README.md](docs/README.md) has more.
 
 ## Build and run
 
-Needs the rin compiler with `noalias` (rin `5413d4e` or later; `rin.exe` from
-`rin-windows-x64`, through `RIN_HOME` or `PATH`), CMake, Ninja, clang-cl and
-the Windows SDK.
+Needs a rin compiler built from rin's `regions` branch (`rin.exe` with its
+`std` beside it, through `RIN_HOME` or `PATH`), CMake, Ninja, clang-cl and the
+Windows SDK.
 
     rin build
     build\cmake\ids.exe
 
-Every chapter and lesson is its own program, named after its file. Or compile
-one by hand: rin writes C, and any C compiler does the rest, with rin's
-folder and its `std` on the include path:
+Every chapter and lesson is its own program, named after its file, and so is
+each dojo playground. Or compile one by hand: rin writes C, and any C compiler
+does the rest, with rin's folder and its `std` on the include path:
 
     rin compile ecs/src/2.components/2.4.archetypes/archetypes.rin -o archetypes.c
     clang -std=c11 -g -I <rin> -I <rin>/std archetypes.c -o archetypes
 
-`python tools/check.py` builds every program with clang and warnings as
+On Windows that last line warns about `fopen`; `-D_CRT_SECURE_NO_WARNINGS`
+quiets it, as `build.rin` does.
+
+`rin compile` refuses a program that breaks a safety rule, so a program that
+builds has been checked. `rin check file.rin` does the checking alone.
+
+`python tools/check.py` finds rin through `RIN`, then `RIN_HOME`, then `PATH`,
+and its `std` beside it. It builds every program with clang and warnings as
 errors, runs it, and compares what it prints with its `.expected` file.
 `--sanitize` adds AddressSanitizer and UBSan, `--bless` rewrites the expected
 files after a deliberate change, and a word filters the programs.
-`tools/check_snippets.py` checks that every sample in the ECS guides is in
-its program:
+`tools/check_snippets.py` checks that every sample in the ECS guides and the
+dojo's READMEs is in its program:
 
     python tools/check.py ecs
     python tools/check.py kayan --sanitize
     python tools/check_snippets.py
 
-The checker also works on Linux. There it relaxes `-Wformat` only: rin's
-`printfmt` and std `print` write `%llu` for `u64`, which is `unsigned long`
-on 64-bit Linux.
+The checker also works on Linux, with `CC=gcc` or clang and a rin built there.
 
 ## Reading it in a browser
 
@@ -161,15 +165,21 @@ program or a guide run `python tools/site.py` to bring it up to date.
           ...
         2.components/
         3.systems/
+        README.md               what the safe subset asks of each part
       docs/                     a guide a chapter: steps, output, exercises
       README.md                 the course on its own
     src/                        the advanced lessons, one folder each
+      1.aos_vs_soa/
+        aos_vs_soa.rin          the program
+        aos_vs_soa.expected     what it prints
+      ...
     includes/
       kayan.rin                 lesson 4's world, used by lessons 5 and 6
     docs/                       the advanced lessons' guides
     dojo/
       1.free_list/              a block: README, playground, harness, levels, solution
       ...
+      README.md                 how the dojo works
       dojo.rin                  what every harness shares
     website/
       index.html                everything as one page: guide, code, output
@@ -180,6 +190,7 @@ program or a guide run `python tools/site.py` to bring it up to date.
       site.py                   rebuild website/index.html from the repo
       dojo.py                   start, run and time the dojo's katas
     build.rin                   the program list, for `rin build`
+    task-8910.md                the backlog: lessons 8, 9 and 10
 
 ## License
 

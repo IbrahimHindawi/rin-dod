@@ -2,7 +2,7 @@
 // remembers, per component, the node one add or one remove away, once a move
 // has looked it up.
 //
-// Safe subset: the graph lives in the region `level`, made by graph_make.
+// The graph lives in the region `level`, made by graph_make.
 
 import "std/vec.rin"
 // The harness: it has main, and runs the procs below, so with it this file

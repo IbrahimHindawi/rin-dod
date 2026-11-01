@@ -2,7 +2,7 @@
 //
 // Start it with: python tools/dojo.py start index 1
 //
-// Safe subset: the list lives in the region `level`; a pointer into its nodes
+// The list lives in the region `level`; a pointer into its nodes
 // is a borrow, which the checker ends at the next call that may move them.
 
 import "std/vec.rin"

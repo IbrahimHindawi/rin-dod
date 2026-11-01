@@ -11,10 +11,10 @@
 //                                          replaces, returning the old value
 //   sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64>
 //                                          keeps the rows packed
-//   sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64>    null if id has no value
+//   sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64 in level>    null if id has no value
 //   sparse_set_len: proc(s: *sparse_set) -> u64
-//   sparse_set_values: proc(s: *sparse_set) -> []u64         packed, in row order
-//   sparse_set_ids: proc(s: *sparse_set) -> []u32            ids[row] owns values[row]
+//   sparse_set_values: proc(s: *sparse_set) -> []u64 in level         packed, in row order
+//   sparse_set_ids: proc(s: *sparse_set) -> []u32 in level            ids[row] owns values[row]
 
 import "std/memops.rin"
 import "std/vec.rin"

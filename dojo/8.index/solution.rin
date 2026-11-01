@@ -1,7 +1,7 @@
 // The reference: a doubly linked list whose nodes live in one vec and link to
 // each other by index, so the vec can grow and move without breaking a link.
 //
-// Safe subset: the list lives in the region `level`; a pointer into its nodes
+// The list lives in the region `level`; a pointer into its nodes
 // is a borrow, which the checker ends at the next call that may move them.
 
 import "std/vec.rin"

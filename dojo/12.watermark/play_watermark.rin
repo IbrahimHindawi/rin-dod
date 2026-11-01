@@ -24,7 +24,7 @@
 // global, read on every update, so a debugger can flip it mid-run too: stop
 // on `query_update`, set it to 0 in the watch window, and continue.
 //
-// Safe subset: a query is named by its place in `query_names`, since a struct
+// A query is named by its place in `query_names`, since a struct
 // holding a C string is not a value safe code may write to, and the two
 // queries are shown one after the other instead of through an array of
 // pointers.

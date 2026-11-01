@@ -3,7 +3,7 @@
 //
 // Start it with: python tools/dojo.py start watermark 1
 //
-// Safe subset: the query lives in the region `level`, made by query_make,
+// The query lives in the region `level`, made by query_make,
 // and its list of tables grows there.
 
 import "std/vec.rin"

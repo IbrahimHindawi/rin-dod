@@ -51,23 +51,24 @@ packed array invites, and the reason the back-reference exists.
 
 ## Do reps: the kata
 
-You write `sparse_set`. The heart of it is `sparse_set_remove`:
+You write `sparse_set`, made in the region `level`, with `values`, `ids` and
+`rows` each a `*vec<...> in level`. The heart of it is `sparse_set_remove`:
 
 ```rin
 sparse_set_remove: proc(s: *sparse_set, id: u32) -> option<u64> = {
     if (sparse_set_get(s, id) == null) {
         return option<u64>none();
     }
-    entry: *u32 = vec<u32>at(s*.rows&, cast(id, u64));
+    entry: *u32 = vec<u32>at(s*.rows, cast(id, u64));
     row: u64 = cast(entry* - 1, u64);
     entry* = 0;
-    value: u64 = vec<u64>at(s*.values&, row)*;
-    last_value: u64 = vec<u64>pop(s*.values&);
-    last_id: u32 = vec<u32>pop(s*.ids&);
-    if (row < s*.values.length) {
-        vec<u64>at(s*.values&, row)* = last_value;
-        vec<u32>at(s*.ids&, row)* = last_id;
-        vec<u32>at(s*.rows&, cast(last_id, u64))* = cast(row, u32) + 1;
+    value: u64 = vec<u64>at(s*.values, row)*;
+    last_value: u64 = vec<u64>pop(s*.values);
+    last_id: u32 = vec<u32>pop(s*.ids);
+    if (row < s*.values*.length) {
+        vec<u64>at(s*.values, row)* = last_value;
+        vec<u32>at(s*.ids, row)* = last_id;
+        vec<u32>at(s*.rows, cast(last_id, u64))* = cast(row, u32) + 1;
     }
     return option<u64>some(value);
 }
@@ -82,11 +83,12 @@ sparse_set_insert: proc(s: *sparse_set, id: u32, value: u64) -> option<u64> = {
 ```
 
 ```rin
-sparse_set_get: proc(s: *sparse_set, id: u32) -> *u64 = {
+sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64 in level> = {
 ```
 
-plus `sparse_set_init`, `sparse_set_len`, `sparse_set_values` (the packed
-values, in row order) and `sparse_set_ids` (`ids[row]` owns `values[row]`).
+plus `sparse_set_make(r)`, `sparse_set_len`, `sparse_set_values` (the packed
+values, in row order, a `[]u64 in level`) and `sparse_set_ids` (`ids[row]` owns
+`values[row]`, a `[]u32 in level`).
 
 | level | you write | target |
 |---|---|---|
@@ -106,16 +108,23 @@ rust-dod's dojo.
 
 **rin notes.** Where Rust's kata returns `Option<T>` and has `get_mut`, this
 one uses std's `option<u64>` for what `insert` and `remove` give back (the old
-value, or none), and one `sparse_set_get` that returns a pointer to the value,
-null for none, to read or to change, the way `kayan_get<T>` does in the
-course. `rows[id]` holds the row plus one, so a new entry, 0, means "no row",
-and growing `rows` is appending zeros.
+value, or none), and one `sparse_set_get` that returns an `option<*u64 in
+level>`, a pointer to the value, null for none, to read or to change, the way
+`kayan_get<T>` does in the course. The caller tests it, `if (current)`, before
+using it. The `in level` is there, on `sparse_set_values` and `sparse_set_ids`
+too, because the pointer comes out of a vec in `level`, and the checker
+refuses a result that doesn't say so. `rows[id]` holds the row plus one, so a
+new entry, 0, means "no row", and growing `rows` is appending zeros.
 
 **Level 4, variations.** The same harness, different insides:
 
 - **Pages:** `rows` split into pages of 64 ids, each page made only when an
-  id in it gets a value: a `vec<^u32>` of pages, null for a page not made yet.
-  A big id no longer means a big `rows`. This is what EnTT does.
+  id in it gets a value. A big id no longer means a big `rows`. This is what
+  EnTT does, with a pointer per page, null for a page not made yet. Here
+  `sparse_set_insert` has no region to make a page in, and a struct can't keep
+  one, so a page is a struct holding `[64]u32` in a `vec` of pages, and a
+  `vec<u32>` by page number holds one more than its place there, 0 for a page
+  not made yet.
 - **A sentinel:** `rows[id]` holds the row itself, with `0xFFFFFFFF` for "no
   row". What does growing `rows` cost now?
 - **A flag:** a second `vec<b32>`, `has_row`, beside `rows`. Compare the
@@ -145,6 +154,6 @@ gives the operation and the seed:
         with a breakpoint on dojo_stop_here, which runs just before that operation
 
 Run the harness under your debugger with those arguments and a breakpoint on
-`dojo_stop_here` (`gdb --args build/dojo/swap_remove/harness --seed 1 --stop 64`,
-then `break dojo_stop_here`, `run`). It stops just before the operation that
-fails; step out and into your code.
+`dojo_stop_here` (`gdb --args build/dojo/swap_remove/harness --seed 1 --stop
+64`, then `break dojo_stop_here`, `run`). It stops just before the operation
+that fails; step out and into your code.

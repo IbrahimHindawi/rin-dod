@@ -20,7 +20,7 @@
 // stops the program, and so does a row past the end, and a harness that stops
 // can't go on to the next step. Try those by hand: they are in the README.
 //
-// Safe subset: the column is type erasure itself, so its core is unsafe { } in
+// The column is type erasure itself, so its core is unsafe { } in
 // the kata, and this harness keeps two unsafe { } helpers of its own, bytes_of
 // and slice_address, which look at a value as bytes and at a slice's address.
 // Everything else here is checked; the bytes are copied and compared by
@@ -33,6 +33,12 @@ rgb: struct = {
     r: u8;
     g: u8;
     b: u8;
+}
+
+// A column's rows are structs, as components are: reflection answers whether a
+// struct is plain data, and has no record for a bare number.
+word: struct = {
+    value: u32;
 }
 
 vec3: struct = {
@@ -51,7 +57,7 @@ vec4: struct[align(16)] = {
 // For each row type: its name, how to make one from the random numbers, and
 // how to print one. The generic fuzz run calls these by type.
 sample_name: proc<rgb>() -> ^const char = { return "rgb, 3 bytes aligned to 1"; }
-sample_name: proc<u32>() -> ^const char = { return "u32, 4 bytes aligned to 4"; }
+sample_name: proc<word>() -> ^const char = { return "u32, 4 bytes aligned to 4"; }
 sample_name: proc<vec3>() -> ^const char = { return "vec3, 12 bytes aligned to 4"; }
 sample_name: proc<vec4>() -> ^const char = { return "vec4, 16 bytes aligned to 16"; }
 
@@ -65,8 +71,8 @@ sample_make: proc<rgb>(r: *dojo_rng) -> rgb = {
     return { .r = cast(n & 255, u8), .g = cast((n shr 8) & 255, u8), .b = cast((n shr 16) & 255, u8) };
 }
 
-sample_make: proc<u32>(r: *dojo_rng) -> u32 = {
-    return cast(dojo_rng_next(r), u32);
+sample_make: proc<word>(r: *dojo_rng) -> word = {
+    return { .value = cast(dojo_rng_next(r), u32) };
 }
 
 sample_make: proc<vec3>(r: *dojo_rng) -> vec3 = {
@@ -90,8 +96,8 @@ sample_print: proc<rgb>(v: rgb) -> void = {
     printfmt("rgb({}, {}, {})", v.r, v.g, v.b);
 }
 
-sample_print: proc<u32>(v: u32) -> void = {
-    printfmt("{}", v);
+sample_print: proc<word>(v: word) -> void = {
+    printfmt("{}", v.value);
 }
 
 sample_print: proc<vec3>(v: vec3) -> void = {
@@ -375,7 +381,7 @@ fuzz: proc(run: *dojo_run, r: region level) -> void = {
     op: u64 = 0;
     share: u64 = run*.ops / 4;
     fuzz_type<rgb>(run, r, f, rng&, op&, share);
-    fuzz_type<u32>(run, r, f, rng&, op&, share);
+    fuzz_type<word>(run, r, f, rng&, op&, share);
     fuzz_type<vec3>(run, r, f, rng&, op&, share);
     fuzz_type<vec4>(run, r, f, rng&, op&, run*.ops - 3 * share);
     dojo_pass();

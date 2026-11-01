@@ -3,7 +3,7 @@
 // moves it back. It's called bump, since the arena every lesson uses already
 // has the name: memops_arena.
 //
-// Safe subset: the bytes are a slice made in the region `level`, and a push
+// The bytes are a slice made in the region `level`, and a push
 // hands out an offset into them, which the caller writes through
 // bump_bytes(b)[offset]. The original handed out an address; see README.md.
 

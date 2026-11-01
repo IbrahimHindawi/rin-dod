@@ -20,7 +20,7 @@
 // so a debugger can flip it mid-run too: stop on the first `set` in main, set
 // it to 0 in the watch window, and continue.
 //
-// Safe subset: the few things safe code can't do, read four bytes as an f32,
+// The few things safe code can't do, read four bytes as an f32,
 // index a C string, see a struct as bytes, are the trusted procs at the top,
 // each a line or two. The walk itself is safe: it asks the record for field i
 // with reflect_field_at, which says when it is past the end.
@@ -40,14 +40,16 @@ lamp: struct = { on: u8; power: f32; at: vec2; flicker: f32 @ "hidden"; }
 read_f32: proc(row: []const u8, at: u64) -> f32 = {
     unsafe {
         field: []const u8 = row[at..at + 4];
-        return cast(field[0]&, *const f32)*;
+        value: f32 = 0.0;
+        memcpy(value&, field.data, 4);
+        return value;
     }
 }
 
 write_f32: proc(row: []u8, at: u64, value: f32) -> void = {
     unsafe {
         field: []u8 = row[at..at + 4];
-        cast(field[0]&, *f32)* = value;
+        memcpy(field.data, value&, 4);
     }
 }
 
@@ -86,7 +88,15 @@ cstr_append: proc(dst: []c8, at: u64, src: ^const char) -> u64 = {
 // Zero-ended text as a C string, to print.
 cstr: proc(text: []const c8) -> ^const char = {
     unsafe {
-        return cast(text[0]&, ^const char);
+        // Only with its terminator: whoever reads this reads up to it.
+        for (i: u64 = 0; i < text.length; i += 1) {
+            if (text[i] == 0) {
+                return cast(text[0]&, ^const char);
+            }
+        }
+        printfmt("cstr: {} bytes and no terminator\n", text.length);
+        exit(1);
+        return "";
     }
 }
 

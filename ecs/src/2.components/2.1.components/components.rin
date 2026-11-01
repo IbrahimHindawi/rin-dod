@@ -16,8 +16,7 @@
 //
 // No entities in this chapter. 2.3 puts the two halves together.
 //
-// This is the chapter in rin's safe subset. The one change from the original:
-// the registry's slots are `option<*const reflect in permanent>`. A reflect record is
+// The registry's slots are `option<*const reflect in permanent>`. A reflect record is
 // data the compiler wrote into the program, so it lives in `permanent`, the
 // region of the whole program; and a slot nobody registered is null, so the
 // type says so and every read tests it.

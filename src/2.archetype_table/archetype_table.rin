@@ -20,9 +20,10 @@
 // walks the rows backwards, so the row swapped into a hole has already been
 // looked at this frame.
 //
-// Safe subset: the arena is the region `level`; the table is made in it and
-// its columns are slices that name it. No trusted proc anywhere: the checker
-// sees every line of this lesson.
+// The arena is the region `level`; the table is made in it and
+// its columns are slices that name it. The two kernels are `proc[unsafe]`, because
+// `noalias` is a promise the checker cannot check: each call says `unsafe`, and the
+// checker sees every other line of this lesson.
 
 import "std/print.rin"
 

@@ -8,6 +8,34 @@ position and velocity split one step further into six arrays of `f32`, one per
 coordinate (split). Sixty steps of movement run over each, and the program
 checks that all three end with the same positions.
 
+## Where the particles live
+
+All three layouts are in one region. A region is an arena the compiler can see:
+
+    level: region;
+
+Each array is a slice, and a slice kept in memory says which region holds its
+elements:
+
+    particles: struct = {
+        positions: []vec3 in level;
+        velocities: []vec3 in level;
+        ...
+    }
+
+`main` opens the region, and `new_slice` is an arena push that keeps the length:
+
+    level: region = {
+    aos: []particle in level = new_slice<particle>(level, particle_count);
+    soa: *particles in level = new<particles>(level, {
+        .positions = new_slice<vec3>(level, particle_count),
+        ...
+    });
+
+Everything lives exactly as long as that block. Nothing is freed one at a time,
+and the checker will not let a pointer into `level` outlive the closing brace.
+The movement procs take plain slices and know nothing about any of this.
+
 ## What the loop fetches
 
 Memory reaches the CPU in 64-byte cache lines. A loop that reads 24 bytes of
@@ -47,11 +75,11 @@ file:
 - **Split** is what SIMD wants. Each line of `move_split` becomes one load of
   four consecutive floats, one multiply, one add, one store:
 
-      movups (%r11,%rdi,4), %xmm4     four vx
-      movups (%rcx,%rdi,4), %xmm5     four px
+      movups (%r10,%rsi,4), %xmm4     four vx
+      movups (%r8,%rsi,4), %xmm5      four px
       mulps  %xmm1, %xmm4             vx * dt
       addps  %xmm5, %xmm4             px + vx * dt
-      movups %xmm4, (%rcx,%rdi,4)     four px back
+      movups %xmm4, (%r8,%rsi,4)      four px back
 
 A layout is right for SIMD when its vector loop is mostly full-width loads,
 math and stores. When it is mostly `movss`, `unpcklps` and `shufps`, the data
@@ -62,45 +90,88 @@ wrong for a loop that reaches particles by index, where x, y and z in three
 arrays are three trips to memory instead of one. Lesson 7 measures both kinds
 of loop over four layouts.
 
+## The bounds checks
+
+Every `positions[i]` is bounds checked, in every build, Release included. The
+safety rules rest on it, so it does not hang on `NDEBUG`. A check is a compare
+and a branch to a call that never returns, in the middle of a loop that wants
+to do four particles at once, so you would expect it to cost the vector loop.
+
+On clang it does not. The table above is with the checks on, and the passes
+are the same with them off. The compiler sees that the loop runs `i` up to
+`px.length`, works out before the loop how many full passes fit inside every
+column's length, runs the vector loop for those with no checks in it, and
+leaves the rest to a one-at-a-time loop that does check. A column shorter than
+`px` stops the program there, with a message. What the checks add to
+`move_split` is around the loop: 257 instructions in the whole proc instead of
+79, and 27 in the one-at-a-time loop instead of 17.
+
+gcc does not do this for `move_soa` or `move_split`. With the checks on,
+`-fopt-info-vec` reports no vector loop over either, and split, the layout
+that needs one most, is its slowest. `-DRIN_NO_BOUNDS_CHECKS` removes the checks
+and brings the vector loop back, as the timings below show. A program built that
+way has given up rin's guarantee. Try 8 is the other way, which keeps it.
+
 ## Timings
 
-`--time` prints how long each layout took. Release builds, best of five runs,
-on the 2.8 GHz Xeon these lessons were checked on, ms:
+`--time` prints how long each layout took. Release builds on one core, best of
+five runs, on a Ryzen 9 9950X3D: 1 MB of L2 a core and 96 MB of L3. clang-cl 22 on
+Windows, gcc 16 under WSL on the same machine. Each run did ten times the work
+and is divided by ten, because `clock()` on Windows ticks in milliseconds. ms for
+sixty steps:
 
 | build | AoS | SoA | split |
 |---|---|---|---|
-| clang `-O2` | 49.6 | 26.9 | 16.5 |
-| clang `-O3` | 47.5 | 26.7 | 15.9 |
-| clang `-O2 -mavx2 -mfma` | 47.9 | 18.6 | 13.0 |
-| gcc `-O3` | 34.2 | 13.7 | 14.2 |
-| gcc `-O2` | 46.1 | 21.3 | 44.3 |
+| clang-cl `/O2` | 12.2 | 10.8 | 6.7 |
+| clang-cl `/O2 /arch:AVX2` | 9.8 | 7.2 | 5.5 |
+| gcc `-O3` | 31.4 | 11.6 | 26.5 |
+| gcc `-O2` | 12.5 | 11.2 | 27.5 |
+| gcc `-O3 -DRIN_NO_BOUNDS_CHECKS` | 55.4 | 9.0 | 4.8 |
+| gcc `-O2 -DRIN_NO_BOUNDS_CHECKS` | 9.9 | 8.5 | 4.4 |
+
+The clang-cl rows do not change with `-DRIN_NO_BOUNDS_CHECKS`, beyond the noise,
+and clang `-O3` is the same as `-O2`.
 
 The same loops with 8,192 particles, so everything stays in L2, and 1,920
 steps so the work is the same:
 
 | build | AoS | SoA | split |
 |---|---|---|---|
-| clang `-O2` | 24.1 | 25.6 | 11.9 |
-| clang `-O2 -mavx2 -mfma` | 28.6 | 17.8 | 6.5 |
-| gcc `-O3` | 12.7 | 12.0 | 8.9 |
+| clang-cl `/O2` | 11.8 | 9.9 | 4.5 |
+| clang-cl `/O2 /arch:AVX2` | 9.2 | 5.7 | 3.9 |
+| gcc `-O3` | 30.7 | 11.6 | 10.6 |
+| gcc `-O3 -DRIN_NO_BOUNDS_CHECKS` | 53.4 | 8.9 | 2.7 |
 
-- **In cache, split is the only layout SIMD helps much.** SoA and AoS come out
-  about even in L2 on clang, as the instruction counts say they should.
-- **From the 6 MB case, SoA's smaller footprint shows.** That machine has 33 MB
-  of L3, so the data stays in cache between steps, but SoA and split still
-  move a third of the bytes AoS does.
-- **gcc `-O2` does not vectorize across particles at all,** so split, with six
-  streams and nothing gained for them, is its slowest layout. gcc users want
-  `-O3`. clang-cl, rin's default, is the clang rows.
+And with 2,097,152 particles and 7.5 steps' worth, so the work is the same again.
+AoS, at 143 MB, no longer fits in L3:
 
-The machine is shared; expect about 20 percent noise between runs. Debug
-numbers are not worth comparing: every `positions[i]` is bounds checked
-there.
+| build | AoS | SoA | split |
+|---|---|---|---|
+| clang-cl `/O2` | 27.9 | 10.8 | 7.9 |
+| clang-cl `/O2 /arch:AVX2` | 28.0 | 8.2 | 6.0 |
+
+- **In cache, split is the only layout SSE helps much.** SoA and AoS come out
+  about even in L2 on clang-cl, as the instruction counts say they should.
+  AVX2's eight-float registers help SoA too.
+- **Out of cache, the bytes show.** At 262,144 particles all three sit in this
+  machine's 96 MB of L3, and AoS fetching three times the bytes costs little. At
+  2,097,152, AoS has left L3 and takes more than twice as long, while SoA and
+  split, at 50 MB, are where they were. How much the layout matters here depends
+  on the size of the cache you run on.
+- **gcc's AoS at `-O3` is the odd one.** Two and a half to five times its `-O2`,
+  and it is the loop vectorizer: `-fno-tree-loop-vectorize` brings it back to about
+  12 ms. It vectorizes the loop with 8-byte vectors, and I have not explained why
+  that is so slow on this machine.
+
+The machine was busy; expect about 20 percent noise between runs, more for AoS,
+which came out up to twice as slow in unlucky runs. Debug numbers are not worth
+comparing: nothing is optimized there, and every check is a function call.
 
 For a Release build, set `build_type` to `"Release"` in `build.rin` and run
-`rin build` again. Release defines `NDEBUG`, which compiles the bounds checks
-out. Or compile the C that `tools/check.py` leaves in `build/check/aos_vs_soa/`
-with `-O2 -DNDEBUG`.
+`rin build` again. Release optimizes and defines `NDEBUG`, and the checks stay.
+To take them out, add `"RIN_NO_BOUNDS_CHECKS"` to `build_defines`, or compile the
+C that `tools/check.py` leaves in `build/check/aos_vs_soa/` with
+`-O2 -DRIN_NO_BOUNDS_CHECKS`.
 
 ## The parameter list is the data
 
@@ -119,22 +190,48 @@ small arrays.
 As far as the C compiler can tell, two `[]vec3` slices could overlap. So
 before it works on several particles at once, it checks at run time that the
 two are apart, and keeps a one-at-a-time copy of the loop for when they are
-not. `noalias` on a parameter promises that, for the call, nothing else
-reaches the memory behind it. The check and the second copy go away.
+not, or it does not vectorize at all. `noalias` on a parameter promises that,
+for the call, nothing else reaches the memory behind it. The check and the
+second copy go away.
+
+**It is a promise the checker cannot keep**, so it lives in code marked for it.
+A proc with a `noalias` parameter is `proc[unsafe]`:
+
+    move_soa: proc[unsafe](positions: noalias []vec3, velocities: noalias []vec3, dt: f32) -> void = {
+
+and a call to it sits in `unsafe { }`:
+
+    unsafe { move_soa(soa*.positions, soa*.velocities, dt); }
+
+Take the `[unsafe]` off and rin stops:
+
+    noalias is a promise to the C optimiser that the checker cannot keep: it belongs on a 'proc[unsafe]'
+
+So the three movement kernels are outside what the checker vouches for. That is
+the trade, and it is yours to make per kernel: take off both `noalias` and
+`[unsafe]`, and the same loop is checked like everything else, at the cost below.
 
 The SoA loop without and with it, Release, ms:
 
 | build | without `noalias` | with `noalias` |
 |---|---|---|
-| gcc `-O3` | 31.7 | 13.4 |
-| gcc `-O2` | 20.5 | 21.3 |
-| clang `-O2` | 26.3 | 26.5 |
+| clang-cl `/O2` | 23.2 | 10.8 |
+| clang-cl `/O2 -DRIN_NO_BOUNDS_CHECKS` | 10.8 | 10.8 |
+| clang `-O2`, Linux | 9.9 | 11.0 |
+| gcc `-O3` | 11.8 | 11.6 |
+| gcc `-O3 -DRIN_NO_BOUNDS_CHECKS` | 9.1 | 9.0 |
 
-- **gcc `-O3`** is where it shows. Without the promise, its checked vector
-  loop was slower than not vectorizing at all (21 ms with
-  `-fno-tree-loop-vectorize`), and the SoA loop lost to the AoS one.
-- **clang** vectorized the loop either way. Its check runs once per call, so
-  removing it saves nothing that shows here.
+- **clang-cl** is where it shows. Without the promise it does not vectorize
+  `move_soa` at all, and with the checks on it reads both slices from memory
+  on every pass: one particle, 47 instructions. Without the checks it is 26
+  instructions and costs what the vector loop does, since four `vec3`s gain
+  little from SSE anyway.
+- **clang on Linux** vectorized the loop either way. Without the promise it
+  checks once per call, so removing the check saves nothing that shows here.
+- **gcc** puts the loop behind a run-time check only when the bounds checks are
+  gone and it vectorizes at all: "loop versioned for vectorization because of
+  possible aliasing". The promise removes the check, and it does not show here
+  either.
 
 **On Windows, one slice needs it too.** `move_aos` has a single slice, which
 cannot overlap another, and it still takes `noalias`. Windows passes a slice
@@ -143,27 +240,32 @@ type rules to decide what can overlap (it matches MSVC). So, without the
 promise, a float written through `ps` might be the slice's own pointer or
 length, and the loop reads both again after every particle:
 
-    mov   r8,qword ptr [rcx]                   ps.data, every particle
-    movss xmm2,dword ptr [gravity]             gravity, every particle
+    movq   (%rcx), %r8                         ps.data, every particle
     ...
-    cmp   rdx,qword ptr [rcx+8]                ps.length, every particle
+    cmpq   0x8(%rcx), %rdx                     ps.length, every particle
 
 With `noalias` the compiler gets the pointer and the length once, in
-registers, and the loop is 16 instructions instead of 19.
+registers, and the loop is 16 instructions instead of 18.
 
-**And `gravity` is `static`.** A global that other files could reach is, to
-gcc, something a write through a slice might change, even through a
-`noalias` one, so gcc `-O3` put a run-time check in front of `move_split`'s
-vector loop. `gravity: static f32` keeps it to this file, nothing takes its
-address, and the check goes away. Passing it as a parameter would do the same.
+**And `gravity` is a `const`.** rin computes a constant and hands C the number,
+so the loops say `-(9.8f)` and there is no variable for a write to change:
 
-The promise is checked in Debug. Pass `soa.positions` as both arguments to
-`move_soa` and the Debug build stops before the loop runs:
+    gravity: static const f32 = -9.8;
 
-    aos_vs_soa.rin:138: noalias parameters 'positions' and 'velocities' overlap
+A plain global is different. `gravity: f32 = -9.8;` is something other files
+could reach, and to gcc that is something a write through a slice might change,
+even through a `noalias` one, so gcc `-O3` without the bounds checks puts a
+run-time check in front of `move_split`'s vector loop. `static f32` keeps it to
+this file, nothing takes its address, and the check goes away. Passing it as a
+parameter would do the same, which is what `dt` does.
 
-A Release build does not check. It runs on, and the lesson prints
-`same result: no`.
+The promise is checked at run time, in every build. Pass `soa*.positions` as both
+arguments to `move_soa` and the program stops before the loop runs:
+
+    aos_vs_soa.rin:153: noalias parameters 'positions' and 'velocities' overlap
+
+That is one check per call, not per particle. Only `-DRIN_NO_BOUNDS_CHECKS` turns
+it off. That build runs on, and the lesson prints `same result: no`.
 
 ## Fused multiply-add
 
@@ -195,10 +297,20 @@ small loops each touch a few fields.
 4. Store the split columns in blocks of eight, `{ x: [8]f32; y: [8]f32; ... }`,
    and write the loop over blocks. Each block is a whole AVX register per
    coordinate, and a particle's coordinates stay near each other.
-5. Remove `noalias` from `move_soa` and build Release with gcc `-O3`. Compare
-   `--time`, then compile with `-fopt-info-vec` and find "loop versioned for
-   vectorization because of possible aliasing".
-6. Remove `static` from `gravity`, build with gcc `-O3 -fopt-info-vec`, and
-   find the same message for `move_split`.
-7. Pass `soa.positions` as both arguments to `move_soa`. Run it in Debug,
-   then in Release.
+5. Remove `noalias` from `move_soa` and build Release with gcc
+   `-O3 -DRIN_NO_BOUNDS_CHECKS`. Compare `--time`, then compile with
+   `-fopt-info-vec` and find "loop versioned for vectorization because of
+   possible aliasing". Then take off `[unsafe]` and the `unsafe { }` around its
+   call, and read what clang-cl makes of a kernel the checker can vouch for.
+6. Change `gravity` to a plain `gravity: f32 = -9.8;`, build with gcc
+   `-O3 -DRIN_NO_BOUNDS_CHECKS -fopt-info-vec`, and find the same message for
+   `move_split`. Then make it `static f32`.
+7. Pass `soa*.positions` as both arguments to `move_soa`. Run it in Debug, in
+   Release, then with `-DRIN_NO_BOUNDS_CHECKS`.
+8. Get gcc's vector loop back with the checks on. At the top of `move_split`,
+   cut every column to one length, `ys: []f32 = py[0..px.length];` and so on,
+   and loop over those. gcc can now see that one bound covers them all, and it
+   vectorizes, behind an overlap check, since the cuts carry no `noalias`. Split
+   goes from 26.5 ms to about 8 on gcc `-O3`, a column that is too short stops
+   the program at the cut, before the first particle, and nothing has been given
+   up.

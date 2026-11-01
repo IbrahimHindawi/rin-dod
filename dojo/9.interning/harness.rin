@@ -15,7 +15,7 @@
 // first interned, and never change; find must agree with intern; and key(id)
 // must give the key back.
 //
-// Safe subset: the interner and the model live in the region `level`.
+// The interner and the model live in the region `level`.
 
 import "std/hashmap.rin"
 import "../dojo.rin"

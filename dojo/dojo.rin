@@ -3,10 +3,9 @@
 // how a failure is reported. It also holds the two types the katas take as
 // given: a handle, and a status.
 //
-// This is the safe-subset dojo: every kata and harness here checks with rin's
-// safety rules on. The one difference from dojo/dojo.rin is the handful of
-// procs marked unsafe { } below: they read the command line and compare C
-// strings, which is C's business and not the checker's.
+// Every kata and harness here checks with rin's safety rules on. The handful of
+// procs marked unsafe { } below read the command line and compare C strings, which
+// is C's business and not the checker's.
 //
 // The harnesses import it, and so does every kata file that uses a handle or
 // a status:
@@ -19,12 +18,10 @@ import "std/vec.rin"
 import "std/fmt.rin"
 
 // The one region every kata lives in: the harness opens it in main and hands
-// it to the scenario and the fuzz run, which make their kata in it. The arena
-// the originals passed around is this region.
+// it to the scenario and the fuzz run, which make their kata in it.
 //
 // `frame` is one step shorter: a region a harness opens and closes many times
-// over a run, once per game frame or fuzz step, where the originals cleared a
-// scratch arena. Blocks 5 and 11 use it. It is declared here, not in the
+// over a run, once per game frame or fuzz step. Blocks 5 and 11 use it. It is declared here, not in the
 // harness that uses it, because a nested region must be declared right after
 // its enclosing one, and an imported file's declarations come after the
 // importer's own.

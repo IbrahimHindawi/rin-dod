@@ -14,7 +14,7 @@
 // a move along a known edge is a hit, any other move that changes the
 // signature is one lookup, and a move that changes nothing is neither.
 //
-// Safe subset: the graph and the model live in the region `level`; the
+// The graph and the model live in the region `level`; the
 // scenario formats into one fmt buffer made there.
 
 import "../dojo.rin"

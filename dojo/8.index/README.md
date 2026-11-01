@@ -11,7 +11,7 @@ pointer says where the node is in memory, so it still points at the old
 place, and nothing tells you.
 
 That's the whole idea, and it's everywhere in data-oriented code: an ECS
-keeps tables by index because making a table can move the others, a mesh
+keeps an entity's row by number because a growing column moves its rows, a mesh
 keeps triangles as three vertex indices, a scene graph keeps a parent index.
 A freed node goes on a free list and is used again before the vec grows, as
 in dojo 1.
@@ -21,11 +21,13 @@ and ends at the tail; each node's `prev` is the node before it; and a node's
 index names it from the moment it's made until it's removed, however many
 times the vec moves in between.
 
-In the course: [2.4](../../ecs/docs/2.4_archetypes.md) keeps tables by index,
-because making a table can grow the `tables` vec and move every table. It's
-why a pointer into [2.2](../../ecs/docs/2.2_columns.md)'s columns goes stale
-when a column grows, and why [2.5](../../ecs/docs/2.5_typed_access.md) says to
-keep handles and borrow pointers only to use them.
+In the course: [2.4](../../ecs/docs/2.4_archetypes.md) keeps an entity's table
+and row as numbers in its slot. It's why a pointer into
+[2.2](../../ecs/docs/2.2_columns.md)'s columns goes stale when a column grows,
+and why [2.5](../../ecs/docs/2.5_typed_access.md) says to keep handles and
+borrow pointers only to use them. The tables themselves are level pointers in
+a vec, so the vec can grow without moving a table: the other way out, for a
+thing that never has to move.
 
 ## Watch it: the playground
 
@@ -33,7 +35,7 @@ keep handles and borrow pointers only to use them.
 
 Memory in the playground is an array of 16 cells, small enough to see whole
 in a debugger, and the list takes 2 cells of it, then 4, then 8. It keeps node
-`b` two ways: by its index, and by a pointer to its node. Then the list fills
+`b` two ways: by its index, and by a `*node` to its cell. Then the list fills
 up and moves, and the program writes to `b`:
 
 ```
@@ -61,33 +63,42 @@ old copy, and the list never sees it:
         verify: node 1 holds 20, but the program last wrote 21 to it
 
 Nothing crashes, and AddressSanitizer stays quiet too: the old copy is still
-memory the program owns, as an arena's old blocks are until the arena is
-cleared. The write is simply lost.
+memory the program owns, as a region's old blocks are until the region ends. The
+write is simply lost. The checker lets the playground keep that pointer because
+its cells are a fixed array inside the list, so to it nothing has moved. In the
+kata the nodes are in a vec, and it won't.
 
 ## Do reps: the kata
 
-You write `list`. The idea is in `list_remove`: the two neighbours link to
-each other, past the node, and the node's index goes on the free list:
+You write `list`, made in the region `level`, with `nodes` and `free` each a
+`*vec<...> in level`. The idea is in `list_remove`: the two neighbours link to
+each other, past the node, and the node's index goes on the free list. The
+node's fields are read first, and it is marked free, before the calls that touch
+other nodes, since each of those ends what `n` may be used for:
 
 ```rin
 list_remove: proc(l: *list, node: u32) -> option<u64> = {
-    n: *list_node = list_live(l, node);
-    if (n == null) {
+    n: option<*list_node> = list_live(l, node);
+    if (!n) {
         return option<u64>none();
     }
-    if (n*.prev != list_none) {
-        list_at(l, n*.prev)*.next = n*.next;
+    prev: u32 = n*.prev;
+    next: u32 = n*.next;
+    value: u64 = n*.value;
+    n*.alive = 0;
+    if (prev != list_none) {
+        list_at(l, prev)*.next = next;
     } else {
-        l*.head = n*.next;
+        l*.head = next;
     }
-    if (n*.next != list_none) {
-        list_at(l, n*.next)*.prev = n*.prev;
+    if (next != list_none) {
+        list_at(l, next)*.prev = prev;
     } else {
-        l*.tail = n*.prev;
+        l*.tail = prev;
     }
 ```
 
-and the kata holds itself to the playground's lesson, in
+and the playground's lesson is one the checker holds you to, in
 `list_insert_after`:
 
 ```rin
@@ -97,10 +108,10 @@ and the kata holds itself to the playground's lesson, in
 list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
 ```
 
-plus `list_init`, `list_push_back`, `list_push_front`, `list_get`,
-`list_len`, and the links to walk the list by: `list_head`, `list_tail`,
-`list_next` and `list_prev`. A link past either end is `list_none`, the
-largest u32, which no node ever gets.
+plus `list_make(r)`, which sets `head` and `tail` to `list_none`,
+`list_push_back`, `list_push_front`, `list_get`, `list_len`, and the links to
+walk the list by: `list_head`, `list_tail`, `list_next` and `list_prev`. A
+link past either end is `list_none`, the largest u32, which no node ever gets.
 
 | level | you write | target |
 |---|---|---|
@@ -122,20 +133,29 @@ is made. The seeds give the same runs as rust-dod's dojo.
 
 **rin notes.** Rust's kata has `Option<u32>` links; here a link is a `u32`,
 and `list_none` stands for none, as `UINT32_MAX` would in C. `list_get`
-returns a pointer, null for a node not in the list, to read or to change the
-value; Rust's kata has `get` and `get_mut`.
+returns an `option<*u64 in level>`, a pointer that is null for a node not in
+the list and tested before use, to read or to change the value; Rust's kata
+has `get` and `get_mut`. Helpers that hand out a node say the same, `list_at`
+a `*list_node in level` and `list_live` an `option<*list_node in level>`. The
+checker refuses a result that comes out of a vec in `level` and doesn't say
+so.
 
 **Level 4, variations.** The same harness, different insides:
 
 - **The free list through the nodes**: a freed node's `next` is the next
   free node, and the list keeps `first_free: u32`. No `free` vec.
-- **A pointer kept across `list_take`**, which fails on purpose: in
+- **A pointer kept across `list_take`**, which fails on purpose, twice: in
   `list_insert_after`, take `list_live(l, node)` once, before `list_take`,
-  and write through it after. Which operation does the harness stop at, and
-  where did the write go? Then put it back.
-- **A list walker**: `list_each(l, visit)`, with `visit` a
-  `proc(node: u32, value: u64) -> void`, called head to tail. (Not checked by
-  the harness; write your own test.)
+  and write through it after. The checker stops it first: `'n' may be stale:
+  'l', which it was taken from, has been changed since; take it again`. Now
+  declare it `n: option<*list_node in level>`, a pointer good for as long as the
+  region, which is true: the old block is still there. It builds. Which
+  operation does the harness stop at, and where did the write go? Then put it
+  back.
+- **A list walker**: `list_each(l, visit)`, with `visit` a `*proc(node: u32,
+  value: u64) -> void`, called head to tail. Read the next link before you
+  call it: the checker counts a call through a proc pointer as one that may
+  change the list. (Not checked by the harness; write your own test.)
 
 ## When it fails
 
@@ -146,7 +166,7 @@ value; Rust's kata has `get` and `get_mut`.
 A link pointing somewhere it shouldn't is usually a node from the free list
 that kept its old links, or a neighbour that wasn't told about a change: an
 insert at the tail that didn't move the tail, a remove that fixed `next` but
-not `prev`, or a write through a pointer taken before the nodes moved. Run the
+not `prev`, or a write through a pointer kept `in level` past a move. Run the
 harness under your debugger with those arguments and a breakpoint on
 `dojo_stop_here`, which runs just before that operation, and look at the nodes
 the message names.

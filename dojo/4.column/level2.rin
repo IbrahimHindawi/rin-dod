@@ -5,13 +5,15 @@
 //
 // Start it with: python tools/dojo.py start column 2
 //
-// Safe subset: the five procs that touch the column's bytes are unsafe { };
-// see solution.rin's note. In them you may cast, index a `^u8`, and call
-// memcpy and memset.
+// Keep the bytes in `data`, and most of this is checked: `slice<u8>copy` and
+// `slice<u8>zero` do the work. Only taking an aligned block from the arena and
+// viewing bytes as T need unsafe { }; see solution.rin's note.
 
 import "std/cstd.rin"
 import "std/print.rin"
 import "std/memops.rin"
+import "std/slice.rin"
+import "std/reflect.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
 import "harness.rin"
@@ -19,7 +21,7 @@ import "harness.rin"
 column: struct = {
     // `count` rows of `size` bytes each, packed from the start, in a block
     // from the region aligned to `align`, with room for `capacity` rows.
-    data: ^u8;
+    data: []u8 in level;
     size: u64;
     align: u64;
     count: u64;
@@ -51,9 +53,7 @@ column_capacity: proc(c: *const column) -> u64 = {
 // A new zeroed row at the end; returns its row number. A full column grows
 // first, by at least half.
 column_push_zeroed: proc(c: *column) -> u64 = {
-    unsafe {
-        return 0;
-    }
+    return 0;
 }
 
 // The last row's bytes move into `row`, and the column is one row shorter.
@@ -61,18 +61,14 @@ column_swap_remove: proc(c: *column, row: u64) -> void = {
 }
 
 // One row's bytes. Stops the program past the rows in use.
-column_row: proc(c: *const column, row: u64) -> []u8 = {
-    unsafe {
-        none: []u8 = {};
-        return none;
-    }
+column_row: proc(c: *column, row: u64) -> []u8 in level = {
+    none: []u8 in level = {};
+    return none;
 }
 
 // The rows in use as T's. Stops the program unless T has the column's size
-// and alignment.
-column_slice: proc<T>(c: *const column) -> []T = {
-    unsafe {
-        none: []T = {};
-        return none;
-    }
+// and alignment and is plain data, `reflect_is_plain(T<>&)`.
+column_slice: proc<T>(c: *const column) -> []T in level = {
+    none: []T in level = {};
+    return none;
 }

@@ -20,7 +20,7 @@
 // it's used, so a debugger can flip it mid-run too: stop on the first `query`
 // in main, set it to 0 in the watch window, and continue.
 //
-// Safe subset: a kind is named by its place in `kind_names`, as a component
+// A kind is named by its place in `kind_names`, as a component
 // is by its place in `names`, because a struct holding a C string is not a
 // value safe code may write to.
 

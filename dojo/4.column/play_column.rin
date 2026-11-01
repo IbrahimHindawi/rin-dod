@@ -23,12 +23,15 @@
 // column grows, so a debugger can flip it mid-run too: stop on column_grow, set
 // it to 0 in the watch window, and continue.
 //
-// Safe subset: the column's bytes are touched by four unsafe { } procs, as in
-// the kata; the arena is the region `level`.
+// As in the kata, most of it is checked: the bytes are a `[]u8`. Only keeping the
+// arena, taking an aligned block and viewing bytes as T need unsafe { }. The arena
+// is the region `level`.
 
 import "std/print.rin"
 import "std/memops.rin"
 import "std/fmt.rin"
+import "std/slice.rin"
+import "std/reflect.rin"
 
 grow_by_doubling: b32 = 1;
 
@@ -39,13 +42,19 @@ vec2: struct = {
     y: f32;
 }
 
+// A column's rows are structs, as components are: reflection answers whether a
+// struct is plain data, and has no record for a bare number.
+word: struct = {
+    value: u32;
+}
+
 // 8 bytes, like a vec2, but aligned to 1.
 bytes8: struct = {
     b: [8]u8;
 }
 
 column: struct = {
-    data: ^u8;
+    data: []u8 in level;
     size: u64;
     align: u64;
     count: u64;
@@ -70,48 +79,43 @@ column_make: proc(r: region level, size: u64, align: u64) -> *column in level = 
 // block stays in the region, unused: an arena frees everything at once, never
 // one allocation.
 column_grow: proc(c: *column) -> void = {
-    unsafe {
-        capacity: u64 = 4;
-        if (c*.capacity > 0) {
-            capacity = grow_by_doubling ? c*.capacity * 2 : c*.capacity + 1;
-        }
-        data: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
-        if (c*.count > 0) {
-            memcpy(data, c*.data, c*.size * c*.count);
-        }
-        c*.data = data;
-        c*.grows += 1;
-        c*.copied += c*.count;
-        c*.capacity = capacity;
+    capacity: u64 = 4;
+    if (c*.capacity > 0) {
+        capacity = grow_by_doubling ? c*.capacity * 2 : c*.capacity + 1;
     }
+    unsafe {
+        raw: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+        bytes: []u8 in level = cast(raw[0..c*.size * capacity], []u8 in level);
+        kept: u64 = c*.size * c*.count;
+        slice<u8>copy(bytes[0..kept], c*.data[0..kept]);
+        c*.data = bytes;
+    }
+    c*.grows += 1;
+    c*.copied += c*.count;
+    c*.capacity = capacity;
 }
 
 column_push_zeroed: proc(c: *column) -> u64 = {
-    unsafe {
-        if (c*.count == c*.capacity) {
-            column_grow(c);
-        }
-        row: u64 = c*.count;
-        c*.count += 1;
-        memset(c*.data[row * c*.size]&, 0, c*.size);
-        return row;
+    if (c*.count == c*.capacity) {
+        column_grow(c);
     }
+    row: u64 = c*.count;
+    c*.count += 1;
+    slice<u8>zero(column_row(c, row));
+    return row;
 }
 
 column_swap_remove: proc(c: *column, row: u64) -> void = {
-    unsafe {
-        last: u64 = c*.count - 1;
-        if (row != last) {
-            memcpy(c*.data[row * c*.size]&, c*.data[last * c*.size]&, c*.size);
-        }
-        c*.count = last;
+    last: u64 = c*.count - 1;
+    if (row != last) {
+        moved: []u8 = column_row(c, last);
+        slice<u8>copy(column_row(c, row), moved);
     }
+    c*.count = last;
 }
 
-column_row: proc(c: *const column, row: u64) -> []u8 = {
-    unsafe {
-        return c*.data[row * c*.size..(row + 1) * c*.size];
-    }
+column_row: proc(c: *column, row: u64) -> []u8 in level = {
+    return c*.data[row * c*.size..(row + 1) * c*.size];
 }
 
 // Whether T can be the column's type: its size and its alignment. The kata
@@ -122,10 +126,29 @@ column_fits: proc<T>(c: *const column) -> b32 = {
     return size == c*.size && align == c*.align;
 }
 
-column_slice: proc<T>(c: *const column) -> []T = {
+column_slice: proc<T>(c: *const column) -> []T in level = {
+    size: u64 = sizeof(T);
+    align: u64 = alignof(T);
+    if (size != c*.size || align != c*.align) {
+        printfmt("column: a column of {}-byte rows aligned to {} read as a type of {} bytes aligned to {}\n",
+            c*.size, c*.align, size, align);
+        exit(1);
+    }
+    if (!reflect_is_plain(T<>&)) {
+        printfmt("column: a column holds plain data, and this {}-byte type is not\n", size);
+        exit(1);
+    }
+    if (c*.count > c*.data.length / size) {
+        printfmt("column: {} rows in use and room for {}\n", c*.count, c*.data.length / size);
+        exit(1);
+    }
     unsafe {
-        raw: ^T = cast(c*.data, ^T);
-        return raw[0..c*.count];
+        if (cast(c*.data.data, usize) % align != 0) {
+            printfmt("column: the bytes are not aligned to {}\n", align);
+            exit(1);
+        }
+        raw: ^T = cast(c*.data.data, ^T);
+        return cast(raw[0..c*.count], []T in level);
     }
 }
 
@@ -186,11 +209,11 @@ main: proc() -> i32 = {
         printfmt("    as u32: {}, a u32 is 4 bytes and these rows are 8\n", refused(column_fits<u32>(c)));
         printfmt("    as bytes8: {}, the size is right, but it is aligned to 1, not 4\n", refused(column_fits<bytes8>(c)));
 
-        big: *column in level = column_make(level, sizeof(u32), alignof(u32));
+        big: *column in level = column_make(level, sizeof(word), alignof(word));
         for (i: u32 = 0; i < 1000; i += 1) {
             row: u64 = column_push_zeroed(big);
-            values: []u32 = column_slice<u32>(big);
-            values[row] = i;
+            values: []word = column_slice<word>(big);
+            values[row].value = i;
         }
         if (grow_by_doubling) {
             printfmt("1000 pushes into a u32 column, growing by doubling\n");
@@ -199,9 +222,9 @@ main: proc() -> i32 = {
         }
         printfmt("    {} grows, {} rows copied to make room\n", big*.grows, big*.copied);
         sum: u32 = 0;
-        values: []u32 = column_slice<u32>(big);
+        values: []word = column_slice<word>(big);
         for (i: u64 = 0; i < values.length; i += 1) {
-            sum += values[i];
+            sum += values[i].value;
         }
         printfmt("    and the rows are all there: they add up to {}\n", sum);
     }

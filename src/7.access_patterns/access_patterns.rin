@@ -20,8 +20,9 @@
 // them all. No layout is best at both; the program prints how many cache lines
 // a lookup touches in each, and with `--time` how long each loop takes.
 //
-// Safe subset: as in lesson 1, the arena is the region `level` and every array
-// is a slice that names it. One trusted proc, `has_flag`, reads argv.
+// As in lesson 1, the arena is the region `level` and every array
+// is a slice that names it. The kernels are `proc[unsafe]`, for `noalias`, and one
+// other proc has an unsafe block: `has_flag` reads argv.
 
 cinclude "time.h"
 import "std/print.rin"
@@ -94,9 +95,8 @@ split: struct = {
     vz: []f32 in level;
 }
 
-// The original pushed each array cache-line aligned. new_slice aligns to the
-// element; the line counts below are computed from byte offsets within an
-// array, not from addresses, so they are the same either way.
+// new_slice aligns to the element. The line counts below are computed from byte
+// offsets within an array, as if it started on a line, not from addresses.
 
 random_state: u64 = 12345;
 
@@ -232,7 +232,7 @@ contacts_blocks: proc[unsafe](blocks: noalias []body_block, cs: []const contact)
 // ---------------------------------------------------------------- measuring
 
 // How many 64-byte lines hold one body's x, y and z, given each one's byte
-// offset from a line-aligned start. Each float is 4 bytes at a multiple of 4,
+// offset from the start of a line. Each float is 4 bytes at a multiple of 4,
 // so none of them crosses a line on its own.
 lines_for: proc(x: u64, y: u64, z: u64) -> u64 = {
     lx: u64 = x / 64;
@@ -255,7 +255,7 @@ lines_per_lookup: proc(layout: u32) -> f64 = {
             base: u64 = i * sizeof(vec3);
             total += lines_for(base, base + 4, base + 8);
         } else if (layout == 2) {
-            // three separate line-aligned arrays: never the same line
+            // three separate arrays: counted as never the same line
             total += 3;
         } else {
             base: u64 = (i / 8) * sizeof(body_block) + (i % 8) * 4;

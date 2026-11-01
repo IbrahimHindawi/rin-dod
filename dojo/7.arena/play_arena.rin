@@ -21,7 +21,7 @@
 // mid-run too: stop on bump_push, set it to 0 in the watch window, and
 // continue.
 //
-// Safe subset: a push hands out an offset into the arena's bytes, not an
+// A push hands out an offset into the arena's bytes, not an
 // address, and the program writes its letters through `b*.bytes[offset]`,
 // which is bounds-checked. The original handed out an address and wrote
 // through it with memset; see README.md.

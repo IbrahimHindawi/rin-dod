@@ -1,16 +1,6 @@
 # 12. A watermark
 
-`dojo/safe/12.watermark/play_watermark.rin`
-
-**This is the safe-subset port.** The arena the original passed to
-`query_init` is the region `level` here: `query_make(r: region level, all,
-none)` makes the query and its list of tables in the region, and the
-harness's own list of tables and its models live there too. A query the fuzz
-run replaces is a new one made in the region, where the original
-re-initialized it in place; the old one stays in `level` until the run ends,
-which is what an arena does. `query_update` takes `[]const u64`, since it
-only reads the signatures. The watermark itself, the kata's one idea, is
-unchanged.
+`dojo/12.watermark/play_watermark.rin`
 
 A query keeps the list of tables it matches, so a system doesn't search for
 them every frame. Tables are only ever **added, at the end**, and never
@@ -74,11 +64,10 @@ You write `query`:
 
 ```rin
 query: struct = {
-    arena: *memops_arena;
     all: u64;
     none: u64;
     // The tables that match, by index, in the order they were found.
-    tables: vec<u32>;
+    tables: *vec<u32> in level;
     // The watermark: tables 0 to checked - 1 have been looked at.
     checked: u64;
     // How many tables query_update has looked at, ever. With the watermark,
@@ -87,15 +76,17 @@ query: struct = {
 }
 ```
 
-and its update, which is given the world's tables as their signatures:
+and its update, which is given the world's tables as their signatures, a
+`[]const u64`, since it only reads them:
 
 ```rin
-query_update: proc(q: *query, signatures: []u64) -> void = {
+query_update: proc(q: *query, signatures: []const u64) -> void = {
 ```
 
-plus `query_init(q, arena, all, none)`, `query_tables` (the matching tables,
-in increasing order), `query_checked` and `query_scanned`. A table matches
-when its signature has every bit of `all` and no bit of `none`.
+plus `query_make(r, all, none)`, which makes the query and its list of tables
+in the region `level`, `query_tables` (the matching tables, in increasing
+order, a `[]u32 in level`), `query_checked` and `query_scanned`. A table
+matches when its signature has every bit of `all` and no bit of `none`.
 
 | level | you write | target |
 |---|---|---|
@@ -107,14 +98,15 @@ when its signature has every bit of `all` and no bit of `none`.
     python tools/dojo.py watermark
 
 The harness runs the playground's steps as a scenario, then 20,000 random
-operations: tables made with random signatures, four queries with random
-masks updated at random, and now and then one replaced by a new query, which
-must start from nothing. A model keeps, for each query, the tables that match
-among the ones it has been updated over. After every update the query must
-have checked the whole list, list exactly the model's tables, and have
-scanned each table once. Some `none` masks have two bits, so "none of these"
-and "not all of these" give different answers. The seeds give the same runs
-as rust-dod's dojo.
+operations: tables made with random signatures, four queries with random masks
+updated at random, and now and then one replaced by a new query, which must
+start from nothing. The new one is made in the region, and the old one stays
+in `level` until the run ends, which is what an arena does. A model keeps, for
+each query, the tables that match among the ones it has been updated over.
+After every update the query must have checked the whole list, list exactly
+the model's tables, and have scanned each table once. Some `none` masks have
+two bits, so "none of these" and "not all of these" give different answers.
+The seeds give the same runs as rust-dod's dojo.
 
 **Level 4, variations.** The same harness, different insides:
 

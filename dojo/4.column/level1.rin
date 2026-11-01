@@ -3,12 +3,14 @@
 //
 // Start it with: python tools/dojo.py start column 1
 //
-// Safe subset: the five procs that touch the column's bytes are unsafe { },
-// column_slice among them; see solution.rin's note.
+// Most of a column is checked code. The cast is the one part of column_slice
+// that needs unsafe { }; see solution.rin's note.
 
 import "std/cstd.rin"
 import "std/print.rin"
 import "std/memops.rin"
+import "std/slice.rin"
+import "std/reflect.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
 import "harness.rin"
@@ -16,7 +18,7 @@ import "harness.rin"
 column: struct = {
     // `count` rows of `size` bytes each, packed from the start, in a block
     // from the region aligned to `align`, with room for `capacity` rows.
-    data: ^u8;
+    data: []u8 in level;
     size: u64;
     align: u64;
     count: u64;
@@ -29,11 +31,11 @@ column: struct = {
 // A column holds alignments 1 to 16 that are powers of two; anything else
 // stops the program.
 column_make: proc(r: region level, size: u64, align: u64) -> *column in level = {
+    if (align == 0 || align > 16 || (align & (align - 1)) != 0) {
+        printfmt("column: a column holds alignments 1 to 16 that are powers of two, not {}\n", align);
+        exit(1);
+    }
     unsafe {
-        if (align == 0 || align > 16 || (align & (align - 1)) != 0) {
-            printfmt("column: a column holds alignments 1 to 16 that are powers of two, not {}\n", align);
-            exit(1);
-        }
         c: *column in level = new<column>(r);
         c*.arena = r;
         c*.size = size;
@@ -51,61 +53,69 @@ column_capacity: proc(c: *const column) -> u64 = {
     return c*.capacity;
 }
 
-// A new row at the end, zeroed; returns its row number. A full column doubles
-// first: a new block from the region, the rows copied into it. The old block
-// stays in the region, unused, and a slice taken before still points into it.
-column_push_zeroed: proc(c: *column) -> u64 = {
+// Room for more rows: a new block from the region, the rows copied into it. The
+// old block stays in the region, unused, and a slice taken before still points
+// into it. Slicing checks both ends, so the copy cannot run off either block.
+column_grow: proc(c: *column) -> void = {
+    capacity: u64 = c*.capacity == 0 ? 4 : c*.capacity * 2;
     unsafe {
-        if (c*.count == c*.capacity) {
-            capacity: u64 = c*.capacity == 0 ? 4 : c*.capacity * 2;
-            data: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
-            if (c*.count > 0) {
-                memcpy(data, c*.data, c*.size * c*.count);
-            }
-            c*.data = data;
-            c*.capacity = capacity;
-        }
-        row: u64 = c*.count;
-        c*.count += 1;
-        memset(c*.data[row * c*.size]&, 0, c*.size);
-        return row;
+        raw: ^u8 = cast(memops_arena_push_zero(c*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+        bytes: []u8 in level = cast(raw[0..c*.size * capacity], []u8 in level);
+        kept: u64 = c*.size * c*.count;
+        slice<u8>copy(bytes[0..kept], c*.data[0..kept]);
+        c*.data = bytes;
     }
+    c*.capacity = capacity;
+}
+
+// A new row at the end, zeroed; returns its row number. A full column doubles
+// first.
+column_push_zeroed: proc(c: *column) -> u64 = {
+    if (c*.count == c*.capacity) {
+        column_grow(c);
+    }
+    row: u64 = c*.count;
+    c*.count += 1;
+    slice<u8>zero(column_row(c, row));
+    return row;
 }
 
 // The last row's bytes move into `row`, and the column is one row shorter.
 column_swap_remove: proc(c: *column, row: u64) -> void = {
-    unsafe {
-        if (row >= c*.count) {
-            printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
-            exit(1);
-        }
-        last: u64 = c*.count - 1;
-        if (row != last) {
-            memcpy(c*.data[row * c*.size]&, c*.data[last * c*.size]&, c*.size);
-        }
-        c*.count = last;
+    if (row >= c*.count) {
+        printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
+        exit(1);
     }
+    last: u64 = c*.count - 1;
+    if (row != last) {
+        moved: []u8 = column_row(c, last);
+        slice<u8>copy(column_row(c, row), moved);
+    }
+    c*.count = last;
 }
 
 // One row's bytes. A row past the rows in use stops the program.
-column_row: proc(c: *const column, row: u64) -> []u8 = {
-    unsafe {
-        if (row >= c*.count) {
-            printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
-            exit(1);
-        }
-        return c*.data[row * c*.size..(row + 1) * c*.size];
+column_row: proc(c: *column, row: u64) -> []u8 in level = {
+    if (row >= c*.count) {
+        printfmt("column: row {} is past the {} rows in use\n", row, c*.count);
+        exit(1);
     }
+    return c*.data[row * c*.size..(row + 1) * c*.size];
 }
 
-// The rows in use as T's. Only a T of the column's size and alignment: the
-// column can't know the type, but it can refuse every type that can't be the
-// one it was made for.
-column_slice: proc<T>(c: *const column) -> []T = {
-    unsafe {
-        // Level 1: the typed view. Turn the column's bytes into T's, and stop the
-        // program, with a message, for any T that can't be the column's type.
-        none: []T = {};
-        return none;
-    }
+// The rows in use as T's: the one place bytes become a type, so it takes nothing
+// on trust. T must have the column's size and alignment: the column can't know
+// the type, but it can refuse every type that can't be the one it was made for.
+// T must be plain data: any bytes are then a valid T, so a wrong type of the right
+// shape gives wrong numbers, never a bad pointer. And the rows must fit in the
+// bytes, on an address T may live at.
+column_slice: proc<T>(c: *const column) -> []T in level = {
+    // Level 1: the typed view. Turn the column's bytes into T's, and stop the
+    // program, with a message, for any T that can't be the column's type or
+    // isn't plain data, `reflect_is_plain(T<>&)`, and unless the rows fit in the
+    // bytes, on an address T may live at. The harness never lies to a column, so
+    // it won't catch the last two missing: test them yourself. The address and
+    // the cast are the only things here that need unsafe { }.
+    none: []T in level = {};
+    return none;
 }

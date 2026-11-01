@@ -1,11 +1,6 @@
 # 6. Bitsets
 
-`dojo/safe/6.bitset/play_bitset.rin`
-
-**This is the safe-subset port.** The kata is unchanged: bitsets are plain
-values. In the playground a kind is named by its place in `kind_names`, as a
-component is by its place in `names`, because a struct holding a C string is
-not a value safe code may write to.
+`dojo/6.bitset/play_bitset.rin`
 
 A set of small numbers, 0 to 63, fits in one `u64`: bit `id` is set when `id`
 is in the set. An ECS keeps what each kind of entity is made of this way, a
@@ -56,7 +51,9 @@ Read it by columns: a kind matches when it has a 1 under every 1 of `all`,
 and a 0 under every 1 of `none`. Then the drone is frozen and the ghost
 thaws, one bit each, and the same query gives a different answer. Each kind
 keeps its ids twice, as a signature and as a `b32` per id, and `verify`
-checks the fast answer against the slow one after every step.
+checks the fast answer against the slow one after every step. A kind is named
+by its place in `kind_names`, as a component is by its place in `names`, because
+a struct holding a C string is not a value safe code may write to.
 
 Step through it: break on `matches`, and watch `set & wanted` in the watch
 window, in binary. Then flip the switch at the top, `all_not_any`, to `0` and
@@ -74,7 +71,9 @@ which question you meant.
 
 ## Do reps: the kata
 
-You write procs over a `u64`. The one with the idea in it:
+You write procs over a `u64`. Bitsets are plain values, so there's no region
+and no `_make` in this kata, and nothing for the checker to object to. The one
+with the idea in it:
 
 ```rin
 bitset_contains_all: proc(set: u64, wanted: u64) -> b32 = {
@@ -116,11 +115,13 @@ same runs as rust-dod's dojo.
 **rin notes.** rin binds `&` tighter than `==`, as Rust does, so
 `set & wanted == wanted` means what it says; in C it would be
 `set & (wanted == wanted)`. The reference keeps the parentheses anyway, for
-anyone reading it with C eyes. And rin gives a bare `1` the type its result
-is going to, so in a proc that returns a `u64`, `1 shl id` is already a 64-bit
-shift. The 32-bit bug needs a `u32` on the left, `one: u32 = 1; one shl id`,
-and `--sanitize` names it: UBSan reports a shift exponent too large for a
-32-bit type.
+anyone reading it with C eyes. And a bare `1` is an `i32`, which rin won't turn
+into a `u64` for you: `return 1 shl id;` is refused, `implicit conversion from
+'i32' to 'u64' changes sign`, so the reference writes `1'u64 shl cast(id, u64)`.
+The 32-bit bug needs a `u32` on the left, `one: u32 = 1; cast(one shl id, u64)`.
+rin masks a shift's amount to the width of what it shifts, so nothing there is
+undefined and `--sanitize` has nothing to report: id 63 lands on bit 31, and the
+harness is what catches it.
 
 **Level 4, variations.** The same harness, different insides:
 

@@ -25,13 +25,13 @@
 // no way to do either: its entity id was a running count, and nothing recorded
 // where an entity lived.
 //
-// The world itself is in includes/safe/kayan.rin, which lessons 5 and 6 use as
+// The world itself is in includes/kayan.rin, which lessons 5 and 6 use as
 // it is. This program walks through what it does and prints each step.
 //
-// Safe subset: nothing in this file is trusted. The world is made in the
+// Nothing in this file is unsafe. The world is made in the
 // region `level` and handed around as `*kayan_world`; `kayan_get` returns
 // `option<*T>`, so every read tests it, and `kayan_set` writes a component the same
-// way. The library is the trusted core; see its header.
+// way. The library holds the small unsafe core; see its header.
 
 import "../../includes/kayan.rin"
 

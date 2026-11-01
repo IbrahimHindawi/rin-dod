@@ -3,7 +3,7 @@
 //
 // Start it with: python tools/dojo.py start interning 1
 //
-// Safe subset: the interner lives in the region `level`, made by
+// The interner lives in the region `level`, made by
 // interner_make; when the table grows, its vec is refilled in place.
 
 import "std/vec.rin"

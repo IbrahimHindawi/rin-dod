@@ -1,7 +1,7 @@
 // The reference: a query that remembers how far down the list of tables it has
 // looked, and looks only past that.
 //
-// Safe subset: the query lives in the region `level`, made by query_make,
+// The query lives in the region `level`, made by query_make,
 // and its list of tables grows there.
 
 import "std/vec.rin"

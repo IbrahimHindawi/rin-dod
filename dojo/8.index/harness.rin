@@ -15,7 +15,7 @@
 // The list grows to about a thousand nodes, so its vec moves many times, and
 // every node is checked by the index it was given.
 //
-// Safe subset: the list and the model live in the region `level`, and
+// The list and the model live in the region `level`, and
 // list_get hands back a nullable `option<*u64>`, narrowed with `if (p)`.
 
 import "../dojo.rin"

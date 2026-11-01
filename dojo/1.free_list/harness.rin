@@ -13,7 +13,7 @@
 // how kata.rin works inside, only that what it does is right, so any correct
 // design passes, including the level 4 variations.
 //
-// Safe subset: the arena is the region `level`, opened in main; the kata is
+// The arena is the region `level`, opened in main; the kata is
 // made in it with handles_make, and the model and the formatter live in it.
 
 import "../dojo.rin"

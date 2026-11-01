@@ -27,7 +27,7 @@
 // flip it too: stop on the first line of main, set it to 0 in the watch
 // window, and continue.
 //
-// Safe subset: a name and a proc pointer are both pointers without a region,
+// A name and a proc pointer are both pointers without a region,
 // so safe code cannot keep them in a struct by value. Each system is made in
 // the region `level` by system_make, trusted, and the schedule's array holds
 // pointers to them, with the enabled flag beside each. name_is, also trusted,

@@ -15,7 +15,7 @@
 // calls. After every operation the order and the counts must match, and every
 // run must log the model's enabled systems, in order.
 //
-// Safe subset: a C string and a proc pointer are both pointers without a
+// A C string and a proc pointer are both pointers without a
 // region, so a struct holding them is a carrier, which safe code cannot
 // write, hold by value or make with new. The log holds each system's number
 // in the pool instead of its name, and the pool is two tables, the names and

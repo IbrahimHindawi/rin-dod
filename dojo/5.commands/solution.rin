@@ -1,6 +1,6 @@
 // The reference: structural changes recorded now, applied later, in order.
 //
-// Safe subset: the buffer lives in the region `level`, made by commands_make;
+// The buffer lives in the region `level`, made by commands_make;
 // its two vecs grow into it.
 
 import "std/memops.rin"

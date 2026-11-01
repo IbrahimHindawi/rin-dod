@@ -1,19 +1,3 @@
-# The dojo, in the safe subset
-
-This directory is the dojo ported to rin's safe subset: the same thirteen
-blocks, harnesses, levels and playgrounds as [`dojo/`](../README.md), with
-the arena every harness passed around replaced by the region `level`, which
-each harness opens in `main` and hands to the scenario and the fuzz run.
-Blocks 5 and 11 also use the region `frame`, opened once per game frame or
-fuzz step. A kata is made in the region by its `_make` proc,
-`handles_make(r: region level) -> *handles in level`, where the original
-had an `_init`; a proc that may find nothing returns a nullable `option<*T>`,
-narrowed with `if (p)`. Each block's README says what else changed, where
-anything did: 7 (the arena hands out offsets), 12 (the region is the arena),
-13 (a system is kept behind a pointer into the region) and 6 (the playground
-only). The expected outputs are the originals, unchanged. The few procs
-marked `unsafe { }` are named at the top of the file that holds them.
-
 # The dojo
 
 An ECS is mostly a few small building blocks put together. None of them is
@@ -74,12 +58,50 @@ which seed, and how to stop just before it in a debugger.
 
 1. **One function** in an otherwise finished file: the one with the idea in
    it, usually the one people forget.
-2. **Every function body**, with the fields and signatures given.
+2. **Every function body**, with the fields and signatures given. A proc that
+   must return a real pointer or slice, a `_make` above all, has a body to
+   start from, since there's nothing shorter that compiles. Some of those are
+   finished, and some only make the vecs: read what the comment asks for.
 3. **A blank page**, with only a list of what the harness calls.
 4. **Variations**: the same harness, different insides, listed in each
    block's README.
 
 Each README gives a target time for levels 1 to 3.
+
+## In the safe subset
+
+Every kata, harness and playground here is checked by rin with its safety
+rules on, and so is your kata: `rin compile` refuses one that breaks them, and
+the runner prints what it said. It makes the katas look alike:
+
+- **A kata that keeps memory lives in a region.** `level`, which each harness
+  opens in `main` and hands to the scenario and the fuzz run, is where an arena
+  would be. Blocks 5 and 11 also use `frame`, a shorter region opened once per
+  game frame or fuzz step. `dojo/dojo.rin` declares both.
+- **A kata is made whole by its `_make` proc**,
+  `handles_make(r: region level) -> *handles in level`, and its vecs are fields
+  of the form `*vec<u32> in level`. A vec knows its region, so a proc that
+  pushes needs no region of its own.
+- **A proc that may find nothing returns `option<*T>`**, and the caller tests
+  it, `if (p)`, before using it.
+- **A pointer or slice that comes out of the kata's storage says where it
+  points**: `option<*u64 in level>`, `[]u64 in level`. Without that the
+  checker refuses the `return`: `the result names no region, and may point
+  into region 'level'`.
+- **A pointer into a vec is good until the vec may move.** Keep one across a
+  call that can change the vec, and the checker says
+  `'n' may be stale: 'l', which it was taken from, has been changed since; take
+  it again`. Blocks 8 and 10 are about why.
+- **What safe code can't do is in `unsafe { }`**, and only that: reading the
+  command line and comparing C strings in `dojo.rin`, three small blocks in
+  block 4's column, the one proc in block 13 that keeps a name and a proc
+  pointer, and a few helpers in the harnesses of 4, 11 and 13 and the
+  playgrounds of 4, 11 and 13. The top of each file names them.
+
+A block's README says where this changes how its kata is solved, most of all
+in 4 (you write three small `unsafe { }` blocks, and check what they rely on),
+7 (the arena hands out offsets), 11 (the walk goes through the harness's
+helpers) and 13 (a system is kept behind a pointer into the region).
 
 ## Watching a playground
 
@@ -127,12 +149,12 @@ Your log is a plain markdown table; commit it or don't.
         with a breakpoint on dojo_stop_here, which runs just before that operation
 
 Run that binary under a debugger with a breakpoint on `dojo_stop_here`. It
-stops just before the failing operation, with your structure in the state
-that leads to the failure. If the harness crashes instead, on a `vec` index
-past the end say, the runner runs it again with `--trace 1` and prints the
+stops just before the failing operation, with your structure in the state that
+leads to the failure. If the harness crashes instead, on a `vec` index past
+the end say, the runner runs it again with `--trace 1` and prints the
 operation that was running. `--seed N` reruns a different fuzz run, and
-`--sanitize` builds with AddressSanitizer and UBSan, which block 4's column
-of raw bytes is exactly what they're for.
+`--sanitize` builds with AddressSanitizer and UBSan, which block 4's `unsafe {
+}` blocks are exactly what they're for.
 
 ## How it's built
 
@@ -149,12 +171,12 @@ So any of them builds on its own, `rin compile dojo/3.slot_map/solution.rin`
 for instance, and `rin check` or your editor finds every name it uses. Only
 the harness doesn't build alone: it calls the procs the kata defines. A file
 imported twice is read once, so the kata and the harness both importing
-`dojo.rin` is fine. `dojo/dojo.rin` holds what every harness shares:
-`dojo_handle` and `dojo_status`, the run's settings, the random number
-generator, and the reporting. The runner builds `kata.rin` the way
-`tools/check.py` does, `rin compile` and then the C compiler, with the
-warnings for unused parameters and locals off, since a kata in progress is
-full of them.
+`dojo.rin` is fine. `dojo/dojo.rin` holds what every harness shares: the
+regions `level` and `frame`, `dojo_handle` and `dojo_status`, the run's
+settings, the random number generator, and the reporting. The runner builds
+`kata.rin` the way `tools/check.py` does, `rin compile` and then the C
+compiler, with the warnings for unused parameters and locals off, since a kata
+in progress is full of them.
 
 `python tools/check.py dojo` keeps the dojo honest: every solution must build
 on its own, pass its harness and print its `harness.expected`, level 1 must fail
@@ -162,10 +184,11 @@ on its own, pass its harness and print its `harness.expected`, level 1 must fail
 their `.expected`. The harnesses were also checked against broken solutions,
 the mistakes each block is about, and catch each one.
 
-The same dojo exists in Rust, in [rust-dod](https://github.com/IbrahimHindawi/rust-dod).
-The random number generator is the same, so a seed is the same run in both,
-and the playgrounds print the same thing, except where block 4's column gets
-its memory: an arena in rin, a Vec in Rust. The katas differ where the
-languages do: block 7's arena hands out offsets in Rust and addresses in rin,
-and in block 8 only rin can keep a pointer across a move, so only rin's switch
-does; each README says how.
+The same dojo exists in Rust, in
+[rust-dod](https://github.com/IbrahimHindawi/rust-dod). The random number
+generator is the same, so a seed is the same run in both, and the playgrounds
+print the same thing, except where block 4's column gets its memory: a
+region's arena in rin, a Vec in Rust. The katas differ where the languages do:
+rin's are made in a region; block 7's arena hands out offsets in both, for
+different reasons; and in block 8 only rin can keep a pointer across a move,
+so only rin's switch does. Each README says how.

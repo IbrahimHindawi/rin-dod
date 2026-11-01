@@ -15,7 +15,7 @@
 // Neither names a single component type. Add a component tomorrow and both
 // print it.
 //
-// In the safe subset the inspector walks the reflect record with
+// The inspector walks the reflect record with
 // `reflect_field_at`, which says when it is past the end, and cuts each
 // field's bytes out of the component's bytes as a slice, bounds-checked. The
 // one place that reads bytes as a value, `kayan_print_builtin`, is the
@@ -25,6 +25,7 @@ import "std/print.rin"
 import "std/memops.rin"
 import "std/vec.rin"
 import "std/hashmap.rin"
+import "std/slice.rin"
 
 level: region;
 
@@ -100,11 +101,12 @@ kayan_column_init: proc(c: *kayan_column, info: *const reflect) -> void = {
 
 kayan_column_grow: proc(r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = {
     unsafe {
-        bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
-        if (count > 0) {
-            memcpy(bytes, c*.data.data, c*.size * count);
-        }
-        c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
+        raw: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
+        bytes: []u8 in level = cast(raw[0..c*.size * capacity], []u8 in level);
+        // Slicing checks both ends: a count past either block stops the program.
+        kept: u64 = c*.size * count;
+        slice<u8>copy(bytes[0..kept], c*.data[0..kept]);
+        c*.data = bytes;
     }
 }
 
@@ -128,14 +130,30 @@ kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
     }
 }
 
+// The typed view: the column's first `count` rows as `[]T`. This is the one
+// place bytes become a type, so it takes nothing on trust. T must be the
+// column's size, and plain data: any bytes are then a valid T, so reading the
+// wrong type gives wrong numbers, never a bad pointer. The rows must fit, which
+// the slice knows and no field can lie about, and the bytes must be aligned for
+// T. The view is `[]T in level`: the bytes are in the region, so the view is
+// good memory for as long as the region is. After the column grows it is the
+// old block, still readable, no longer the column: take the view again.
 kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = {
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+        exit(1);
+    }
+    if (!reflect_is_plain(T<>&)) {
+        printfmt("kayan: a column holds plain data, and this {}-byte type is not\n", sizeof(T));
+        exit(1);
+    }
+    if (count > c*.data.length / sizeof(T)) {
+        printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / sizeof(T));
+        exit(1);
+    }
     unsafe {
-        if (c*.size != sizeof(T)) {
-            printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
-            exit(1);
-        }
-        if (count * c*.size > c*.data.length) {
-            printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / c*.size);
+        if (cast(c*.data.data, usize) % alignof(T) != 0) {
+            printfmt("kayan: a column's bytes are not aligned to {}\n", alignof(T));
             exit(1);
         }
         raw: ^T = cast(c*.data.data, ^T);
@@ -597,17 +615,23 @@ kayan_indent: proc(depth: u32) -> void = {
 // bytes are reinterpreted, which is why this is trusted; it checks there are
 // enough of them first.
 kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {
+    if (at.length < 4) {
+        printfmt("<{} bytes>", at.length);
+        return;
+    }
     unsafe {
-        if (at.length < 4) {
-            printfmt("<{} bytes>", at.length);
-            return;
-        }
         if (strcmp(type_name, "f32") == 0) {
-            printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
+            f: f32 = 0.0;
+            memcpy(f&, at.data, 4);
+            printfmt("{:.2}", cast(f, f64));
         } else if (strcmp(type_name, "u32") == 0) {
-            printfmt("{}", cast(at[0]&, *const u32)*);
+            u: u32 = 0;
+            memcpy(u&, at.data, 4);
+            printfmt("{}", u);
         } else if (strcmp(type_name, "i32") == 0) {
-            printfmt("{}", cast(at[0]&, *const i32)*);
+            i: i32 = 0;
+            memcpy(i&, at.data, 4);
+            printfmt("{}", i);
         } else {
             printfmt("<{}>", type_name);
         }

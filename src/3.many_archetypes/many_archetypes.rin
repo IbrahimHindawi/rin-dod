@@ -11,9 +11,9 @@
 //
 //   * A component is a member of the `component` enum, so its id is a small
 //     integer, and a set of components fits in a u64 mask, one bit each.
-//   * A table's columns are `[component<>.count]^u8`, indexed by component id
-//     and null where the table has no such column. Finding a column is an array
-//     index, not a string lookup.
+//   * A table's columns are `[component<>.count][]u8 in level`, indexed by
+//     component id and empty where the table has no such column. Finding a column
+//     is an array index, not a string lookup.
 //   * A column's element size comes from reflection: `component_info[id]` is the
 //     component type's reflect record, `position<>&` and so on.
 //   * A table's signature is computed from the components it is created with,
@@ -26,14 +26,16 @@
 // asks `component_of<T>()` which id T has, one line per component type, and
 // returns that column as a []T cut to the rows in use.
 //
-// Safe subset: a type-erased column is bytes with a size, and reading it as a
-// []T is the one thing the checker cannot vouch for. So the table has a small
-// trusted core, three procs: table_create (allocates columns with the right
-// alignment), table_add_row (zeroes a row's bytes) and column<T> (the cast).
-// Their signatures are the promise; everything above them is checked.
+// A type-erased column is bytes with a size, and reading it as a []T is the one
+// thing the checker cannot vouch for. So there is a small unsafe core, two procs:
+// table_create (allocates columns with the right alignment) and column<T> (the
+// cast), which checks what it is given rather than trust it. Everything above
+// them is checked.
 
 import "std/print.rin"
 import "std/memops.rin"
+import "std/slice.rin"
+import "std/reflect.rin"
 
 level: region;
 
@@ -80,7 +82,7 @@ table: struct = {
     signature: u64;
     count: u64;
     capacity: u64;
-    columns: [component<>.count]^u8;
+    columns: [component<>.count][]u8 in level;
 }
 
 query: struct = {
@@ -103,9 +105,9 @@ components_check: proc() -> void = {
     }
 }
 
-// Trusted: the columns are raw bytes with the component's alignment, which is
-// an arena push the checker cannot type. The table itself is made here too,
-// since a struct holding raw pointers is only ever made by a trusted proc.
+// Unsafe: the columns are bytes with the component's alignment, which is an arena
+// push the checker cannot type. The table itself is made here too, since a struct
+// holding a raw pointer, its name, is only ever made by a proc that vouches for it.
 table_create: proc(r: region level, name: ^const c8, components: []const component,
                             capacity: u64) -> *table in level = {
     unsafe {
@@ -116,7 +118,8 @@ table_create: proc(r: region level, name: ^const c8, components: []const compone
             c: component = components[i];
             info: *const reflect = component_info[c];
             t*.signature |= bit(c);
-            t*.columns[c] = cast(memops_arena_push_zero(r, info*.size * capacity, info*.align), ^u8);
+            raw: ^u8 = cast(memops_arena_push_zero(r, info*.size * capacity, info*.align), ^u8);
+            t*.columns[c] = cast(raw[0..info*.size * capacity], []u8 in level);
         }
         return t;
     }
@@ -130,40 +133,51 @@ table_matches: proc(t: *const table, q: query) -> b32 = {
     return (t*.signature & q.all) == q.all && (t*.signature & q.none) == 0;
 }
 
-// A new row with every component zeroed. The caller fills it in. Trusted: it
-// writes the table's count and memsets a row of raw bytes.
+// A new row with every component zeroed. The caller fills it in.
 table_add_row: proc(t: *table) -> u64 = {
-    unsafe {
-        if (t*.count == t*.capacity) {
-            printfmt("table {} is full\n", t*.name);
-            exit(1);
-        }
-        row: u64 = t*.count;
-        for (c: u64 = 0; c < component<>.count; c += 1) {
-            if (t*.columns[c] != null) {
-                size: u64 = component_info[c]*.size;
-                memset(t*.columns[c][row * size]&, 0, size);
-            }
-        }
-        t*.count += 1;
-        return row;
+    if (t*.count == t*.capacity) {
+        printfmt("table {} is full\n", t*.name);
+        exit(1);
     }
+    row: u64 = t*.count;
+    for (c: u64 = 0; c < component<>.count; c += 1) {
+        if ((t*.signature & (1'u64 shl c)) != 0) {
+            size: u64 = component_info[c]*.size;
+            slice<u8>zero(t*.columns[c][row * size..(row + 1) * size]);
+        }
+    }
+    t*.count += 1;
+    return row;
 }
 
 // The rows in use of T's column. Asking a table for a column it does not have
 // is a bug in the caller, so it stops the program rather than return nothing.
-// Trusted: this is the cast from bytes to T, and the promise is that the slice
-// returned has exactly count elements of T. The slice is a borrow of the
-// table: good until a row is added or removed.
-column: proc<T>(t: *const table) -> []T = {
+// This is the one place bytes become a type, so it takes nothing on trust: T must
+// be plain data, so reading the wrong type gives wrong numbers and never a bad
+// pointer, and the rows must fit in the bytes, on an address T may live at. The
+// slice is a borrow of the table: good until a row is added or removed.
+column: proc<T>(t: *const table) -> []T in level = {
+    c: component = component_of<T>();
+    if (!table_has(t, c)) {
+        printfmt("table {} has no {} column\n", t*.name, component_info[c]*.name);
+        exit(1);
+    }
+    if (!reflect_is_plain(T<>&)) {
+        printfmt("a column holds plain data, and {} is not\n", T<>.name);
+        exit(1);
+    }
+    bytes: []u8 in level = t*.columns[c];
+    if (t*.count > bytes.length / sizeof(T)) {
+        printfmt("table {} has {} rows and room for {}\n", t*.name, t*.count, bytes.length / sizeof(T));
+        exit(1);
+    }
     unsafe {
-        c: component = component_of<T>();
-        if (t*.columns[c] == null) {
-            printfmt("table {} has no {} column\n", t*.name, component_info[c]*.name);
+        if (cast(bytes.data, usize) % alignof(T) != 0) {
+            printfmt("table {}: a column that is not aligned for {}\n", t*.name, T<>.name);
             exit(1);
         }
-        raw: ^T = cast(t*.columns[c], ^T);
-        return raw[0..t*.count];
+        raw: ^T = cast(bytes.data, ^T);
+        return cast(raw[0..t*.count], []T in level);
     }
 }
 
@@ -234,7 +248,7 @@ main: proc() -> i32 = {
     bullet_components: [3]component = { component.position, component.velocity, component.damage };
     turret_components: [3]component = { component.position, component.health, component.damage };
 
-    // Four tables in the region, held by pointer: a table holds raw columns,
+    // Four tables in the region, held by pointer: a table holds a raw C string,
     // so safe code never holds one by value.
     tables: [4]*table in level = {
         table_create(level, "rock", rock_components, 16),

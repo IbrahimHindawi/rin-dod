@@ -1,6 +1,6 @@
 // 5. The inspector
 //
-// Type-erased columns are fast and opaque: to a debugger a column is `^u8`.
+// Type-erased columns are fast and opaque: to a debugger a column is `[]u8`.
 // But every component already has a reflect record, registered in lesson 4 so
 // the world knew its size. The same record lists the component's fields with
 // their names, offsets, sizes and types, and links each struct or enum field to
@@ -17,9 +17,9 @@
 // which is how a component keeps bookkeeping out of a tool without the tool
 // knowing that component exists.
 //
-// Safe subset: reading a field's bytes as an f32, a u32 or an i32, writing an
-// f32 into them, and copying a C string into a fixed array are the four
-// trusted procs of this lesson; each checks the length it is given. The walk
+// Reading a field's bytes as an f32, a u32 or an i32, writing an f32 into them,
+// printing them as text and copying a C string into a fixed array are the
+// unsafe procs of this lesson; each checks the length it is given. The walk
 // over the reflect records is checked: `reflect_field_at` and
 // `reflect_field_info` return `option<*const>`, since a record can run out of fields
 // and a builtin has no record of its own.
@@ -70,48 +70,47 @@ indent: proc(depth: u32) -> void = {
     }
 }
 
-// Trusted for the `*const` promise: a checked proc taking a pointer to a
-// record would be assumed able to change what it points at, and the caller's
-// other pointers into the same record would be dead after the call.
+// It takes `*const` because it only reads.
 is_type: proc(field: *const reflect_field, name: ^const char) -> b32 = {
-    unsafe {
-        return reflect_cstr_equal(field*.type, name);
-    }
+    return reflect_cstr_equal(field*.type, name);
 }
 
-// std's reflect_field_is_array is a checked proc, so the same applies to it;
-// this is its body, promised not to move anything.
+// std's reflect_field_is_array, with the same `*const` promise.
 is_array: proc(field: *const reflect_field) -> b32 = {
-    unsafe {
-        return field*.kind == reflect_field_kind_array || field*.array_count > 0;
-    }
+    return field*.kind == reflect_field_kind_array || field*.array_count > 0;
 }
 
-// The trusted core: bytes read as a builtin, or written as one. The C types
-// behind the names are fixed by rin, so reading through a pointer of the right
-// width is exact; each checks that the bytes are at least that wide.
+// Bytes read as a builtin, or written as one, through a local: the bytes may sit
+// at any address, and a local is aligned. Each checks that the bytes are at least
+// that wide.
 bytes_as_f32: proc(at: []const u8) -> f32 = {
     unsafe {
         if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
-        return cast(at[0]&, *const f32)*;
+        value: f32 = 0.0;
+        memcpy(value&, at.data, sizeof(f32));
+        return value;
     }
 }
 bytes_as_u32: proc(at: []const u8) -> u32 = {
     unsafe {
         if (at.length < sizeof(u32)) { printfmt("inspector: too few bytes for a u32\n"); exit(1); }
-        return cast(at[0]&, *const u32)*;
+        value: u32 = 0;
+        memcpy(value&, at.data, sizeof(u32));
+        return value;
     }
 }
 bytes_as_i32: proc(at: []const u8) -> i32 = {
     unsafe {
         if (at.length < sizeof(i32)) { printfmt("inspector: too few bytes for an i32\n"); exit(1); }
-        return cast(at[0]&, *const i32)*;
+        value: i32 = 0;
+        memcpy(value&, at.data, sizeof(i32));
+        return value;
     }
 }
 bytes_set_f32: proc(at: []u8, value: f32) -> void = {
     unsafe {
         if (at.length < sizeof(f32)) { printfmt("inspector: too few bytes for an f32\n"); exit(1); }
-        cast(at[0]&, *f32)* = value;
+        memcpy(at.data, value&, sizeof(f32));
     }
 }
 // Up to `at.length` bytes of text, printed as they are: a [N]c8 field.
@@ -199,7 +198,7 @@ print_layout: proc(w: *kayan_world) -> void = {
         kayan_print_signature(w, t*.signature);
         printfmt(", rows in use: {} of {}\n", cast(t*.count, i32), cast(t*.capacity, i32));
         for (id: u32 = 0; id < w*.component_count; id += 1) {
-            if (t*.columns[id] != null) {
+            if (kayan_table_has(t, id)) {
                 info: *const reflect in permanent = kayan_info(w, id);
                 printfmt("    {:-8} {:2} bytes, align {}, column {} of {} bytes\n", info*.name,
                     cast(info*.size, i32), cast(info*.align, i32),

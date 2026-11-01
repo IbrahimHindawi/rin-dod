@@ -3,8 +3,9 @@
 // Start it with: python tools/dojo.py start column 3
 //
 // The harness needs exactly this, and checks what each does. The region
-// `level`, memcpy and memset are given. The procs that touch the bytes are
-// unsafe { }; the two that only read a count are checked.
+// `level`, `slice<u8>copy`, `slice<u8>zero` and `reflect_is_plain(T<>&)` are given.
+// Only keeping the arena, taking an aligned block and viewing bytes as T need
+// unsafe { }; the rest is checked.
 //
 //   column: struct
 //   column_make: proc(r: region level, size: u64, align: u64) -> *column in level
@@ -15,15 +16,17 @@
 //                                                           number; a full column grows
 //                                                           by at least half
 //   column_swap_remove: proc(c: *column, row: u64) -> void
-//   column_row: proc(c: *const column, row: u64) -> []u8    stops past the rows in use
-//   column_slice: proc<T>(c: *const column) -> []T          stops unless T has the
-//                                                                    column's size and alignment
+//   column_row: proc(c: *column, row: u64) -> []u8 in level  stops past the rows in use
+//   column_slice: proc<T>(c: *const column) -> []T in level  stops unless T has the column's
+//                                                            size and alignment and is plain
 //
 // Rows of zero bytes, tags, are in the scenario too.
 
 import "std/cstd.rin"
 import "std/print.rin"
 import "std/memops.rin"
+import "std/slice.rin"
+import "std/reflect.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
 import "harness.rin"

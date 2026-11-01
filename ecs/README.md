@@ -3,7 +3,7 @@
 An archetype entity component system, built from nothing in fifteen steps,
 in [rin](https://github.com/IbrahimHindawi/rin). It starts with eight entities
 in fixed arrays and ends with a game: three lanes, turrets, waves of drones,
-fire. The game runs on about 650 lines of ECS, the same design
+fire. The game runs on about 790 lines of ECS, the same design
 [flecs](https://github.com/SanderMertens/flecs) is built on. The ECS is called
 kayan, after the C one it grew out of.
 
@@ -19,6 +19,12 @@ The order is the name: **E**, then **C**, then **S**.
 There is no renderer, no window and no library: only data, and the loops
 that stream it.
 
+It's all written in rin's memory-safe subset, the compiler's default on its
+`regions` branch. The world lives in a region, things that may be missing are
+`option`s that must be tested, and the only unsafe code in the ECS is a small core
+where bytes meet types. The shapes this leads to are part of what the course
+teaches, and [src/README.md](src/README.md) has the whole picture in one place.
+
 Every chapter is one program that compiles on its own. It holds everything
 built so far, with the chapter's new code near the end, so any chapter can be
 opened in a debugger and stepped through as a whole ECS. Beside it is the
@@ -29,6 +35,7 @@ part step by step, and every code sample in it is copied from the program.
 
     ecs/
       src/
+        README.md               how the course stays memory safe
         1.entities/
           1.1.ids/
             ids.rin             the program
@@ -55,10 +62,14 @@ needs rin's folder and its `std` on the include path:
     rin compile ecs/src/2.components/2.4.archetypes/archetypes.rin -o archetypes.c
     clang -std=c11 -g -I <rin> -I <rin>/std archetypes.c -o archetypes
 
-Two checks keep the course honest:
+`rin check file.rin` runs the safety rules without building anything, which is
+what you'll want for most of the exercises that break something on purpose.
 
-    python tools/check.py ecs           build, run and diff every chapter
-    python tools/check_snippets.py      every sample in a guide is in its program
+Three checks keep the course honest:
+
+    python tools/check.py ecs             build, run and diff every chapter
+    python tools/check.py ecs --sanitize  the same, under ASan and UBSan
+    python tools/check_snippets.py        every sample in a guide is in its program
 
 ## How to read it
 
@@ -84,16 +95,16 @@ neighbours shows exactly what a chapter changed:
 | 1.4 | [the entity index](docs/1.4_entity_index.md) | slots, packed rows, swap-remove, `kayan_verify` |
 | **2** | **components** | |
 | 2.1 | [components and signatures](docs/2.1_components.md) | component ids, a registry of reflect records, 64-bit signatures |
-| 2.2 | [columns](docs/2.2_columns.md) | one array of any component, as bytes, viewed as a typed slice |
+| 2.2 | [columns](docs/2.2_columns.md) | one array of any component, as bytes, viewed as a typed slice; regions, and the unsafe core |
 | 2.3 | [a table](docs/2.3_tables.md) | the entity index and the columns, joined |
-| 2.4 | [archetypes](docs/2.4_archetypes.md) | a table for every combination, found by signature |
+| 2.4 | [archetypes](docs/2.4_archetypes.md) | a table for every combination, found by signature; why a table never moves |
 | 2.5 | [typed access](docs/2.5_typed_access.md) | `kayan_get<T>`, `kayan_set<T>`; keep handles, borrow pointers |
 | 2.6 | [adding and removing](docs/2.6_add_remove.md) | moving between tables, and the archetype graph |
 | 2.7 | [inspecting](docs/2.7_inspecting.md) | any entity, field by field, from reflection |
 | **3** | **systems** | |
 | 3.1 | [queries](docs/3.1_queries.md) | the tables a system runs over, matched once and kept |
 | 3.2 | [systems](docs/3.2_systems.md) | kernels, systems, a schedule, a frame |
-| 3.3 | [commands](docs/3.3_commands.md) | why a system cannot change structure, and the buffer that can |
+| 3.3 | [commands](docs/3.3_commands.md) | why a system cannot change structure, and the buffer that can; the frame region |
 | 3.4 | [a game](docs/3.4_game.md) | turrets, waves, bullets and fire, on everything above |
 
 After the course, the [advanced lessons](../docs/README.md) go underneath it:

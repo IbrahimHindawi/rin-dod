@@ -13,7 +13,7 @@
 //   query_update: proc(q: *query, signatures: []const u64) -> void
 //                                                       finds the matching tables among the
 //                                                       ones it hasn't looked at
-//   query_tables: proc(q: *query) -> []u32              the matching tables, in increasing order
+//   query_tables: proc(q: *query) -> []u32 in level              the matching tables, in increasing order
 //   query_checked: proc(q: *query) -> u64               how many tables it has been updated over
 //   query_scanned: proc(q: *query) -> u64               how many query_update has looked at, in
 //                                                       all; each table once

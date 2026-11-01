@@ -17,7 +17,7 @@ Three details make it work:
 - **Skipping the dead.** Two systems may both despawn the same thing, or set a
   value on something an earlier command removed. Applied in order, the second
   finds a dead handle and is skipped. Generations make that one comparison.
-- **A frame arena.** After the buffer is applied its vecs are cleared, and
+- **Room that stays.** After the buffer is applied its vecs are cleared, and
   keep their room, so once a game has run a few frames, recording a command
   allocates nothing.
 
@@ -85,7 +85,8 @@ commands_set: proc(c: *commands, t: target, value: u32) -> void = {
 commands_apply: proc(c: *commands, w: *world) -> applied = {
 ```
 
-plus `commands_init`, `commands_spawn(c, value)`, which returns a `pending`,
+plus `commands_make(r)`, which makes the buffer and its two vecs in the region
+`level`, `commands_spawn(c, value)`, which returns a `pending`,
 `commands_despawn(c, t)`, and `commands_len`, the commands waiting. The world
 is given, in the harness: a generational store of numbers with `world_spawn`,
 `world_despawn` and `world_set`, where the last two return `dojo_status.dead`
@@ -108,8 +109,10 @@ random commands recorded against live handles, dead handles and the frame's
 own pending spawns, then applied. A model runs the same commands straight
 away on a copy of the world from before the frame, and the harness checks
 the two worlds match, the applied and skipped counts match, and the buffer is
-empty afterwards. The copies live in a frame arena of the harness's own,
-cleared after every frame. The seeds give the same runs as rust-dod's dojo.
+empty afterwards. Each frame of the run opens the region `frame` for its lists
+and its model, gone when the frame ends. The two copies of the world hold
+pointers typed `in level`, so they are made in `level` and stay until the run
+ends. The seeds give the same runs as rust-dod's dojo.
 
 **Level 4, variations.** The same harness, different insides:
 
@@ -119,10 +122,17 @@ cleared after every frame. The seeds give the same runs as rust-dod's dojo.
   through it. No `spawned` vec.
 - Record the whole buffer as **one `vec<u8>`**: a kind byte, then the
   command's fields as bytes. One allocation for any mix of commands, read back
-  in order.
-- Keep the buffer in **an arena of its own**, and clear the arena after
-  `commands_apply` instead of clearing the vecs, as
-  [lesson 6](../../docs/6_kayan.md) does. What must not live in that arena?
+  in order. Safe code can't see a struct as bytes, so a `u32` goes in a byte at
+  a time, with shifts and `cast(..., u8)`, and comes back the same way.
+- Keep the buffer in **the region `frame`**, opened once per game frame, as
+  [3.3](../../ecs/docs/3.3_commands.md) and [lesson 6](../../docs/6_kayan.md)
+  do: `commands_make(r: region frame) -> *commands in frame`, its vecs `in
+  frame`, and nothing to clear, since the end of the region lets them all go.
+  The harness makes one buffer in `level` for the whole run, so this one needs
+  a test of your own. What must not live in that region? Keep a pointer into
+  it in a world that lives in `level`, and the checker tells you: `this points
+  into region 'frame', which may end before the memory in region 'level' that
+  holds it`.
 
 ## When it fails
 

@@ -22,7 +22,7 @@
 // a global, read each time it's used, so a debugger can flip it mid-run too:
 // stop on slot_map_remove, set it to 0 in the watch window, and continue.
 //
-// Safe subset: a value is a texture, named by its place in `textures`, since
+// A value is a texture, named by its place in `textures`, since
 // a struct holding C strings is not a value safe code may write to.
 
 import "std/print.rin"

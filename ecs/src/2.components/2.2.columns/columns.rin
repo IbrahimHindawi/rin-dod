@@ -14,7 +14,7 @@
 // This chapter builds the column and exercises it on its own, with the count
 // and capacity kept beside it by hand. 2.3 puts columns in a table.
 //
-// In the safe subset the column's bytes are a slice into the `level` region,
+// The column's bytes are a slice into the `level` region,
 // `[]u8 in level`, with a real length, so copying and zeroing rows are plain
 // bounds-checked loops that the checker reads. Two things about a column are
 // unsafe by nature and are the chapter's two `unsafe { }` procs: growing it,
@@ -23,6 +23,7 @@
 
 import "std/print.rin"
 import "std/memops.rin"
+import "std/slice.rin"
 
 level: region;
 
@@ -73,11 +74,12 @@ kayan_column_row: proc(c: *kayan_column, row: u64) -> []u8 in level = {
 // has to be aligned for the component, which only the arena can promise.
 kayan_column_grow: proc(r: region level, c: *kayan_column, count: u64, capacity: u64) -> void = {
     unsafe {
-        bytes: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
-        if (count > 0) {
-            memcpy(bytes, c*.data.data, c*.size * count);
-        }
-        c*.data = cast(bytes[0..c*.size * capacity], []u8 in level);
+        raw: ^u8 = cast(memops_arena_push_zero(r, c*.size * capacity, c*.align), ^u8);
+        bytes: []u8 in level = cast(raw[0..c*.size * capacity], []u8 in level);
+        // Slicing checks both ends: a count past either block stops the program.
+        kept: u64 = c*.size * count;
+        slice<u8>copy(bytes[0..kept], c*.data[0..kept]);
+        c*.data = bytes;
     }
 }
 
@@ -93,21 +95,30 @@ kayan_column_zero_row: proc(c: *kayan_column, row: u64) -> void = {
     }
 }
 
-// The typed view: the column's first `count` rows as `[]T`. Reading a column
-// as the wrong type would reinterpret its bytes, so the size is checked: the
-// one mistake the byte level cannot catch is caught here, at the edge. Trusted,
-// since it is the reinterpretation itself. The view is `[]T in level`: the
-// bytes are in the region, so the view is good memory for as long as the
-// region is. After the column grows it is the old block, still readable, no
-// longer the column: so take the view again after a grow.
+// The typed view: the column's first `count` rows as `[]T`. This is the one
+// place bytes become a type, so it takes nothing on trust. T must be the
+// column's size, and plain data: any bytes are then a valid T, so reading the
+// wrong type gives wrong numbers, never a bad pointer. The rows must fit, which
+// the slice knows and no field can lie about, and the bytes must be aligned for
+// T. The view is `[]T in level`: the bytes are in the region, so the view is
+// good memory for as long as the region is. After the column grows it is the
+// old block, still readable, no longer the column: take the view again.
 kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = {
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+        exit(1);
+    }
+    if (!reflect_is_plain(T<>&)) {
+        printfmt("kayan: a column holds plain data, and this {}-byte type is not\n", sizeof(T));
+        exit(1);
+    }
+    if (count > c*.data.length / sizeof(T)) {
+        printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / sizeof(T));
+        exit(1);
+    }
     unsafe {
-        if (c*.size != sizeof(T)) {
-            printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
-            exit(1);
-        }
-        if (count * c*.size > c*.data.length) {
-            printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / c*.size);
+        if (cast(c*.data.data, usize) % alignof(T) != 0) {
+            printfmt("kayan: a column's bytes are not aligned to {}\n", alignof(T));
             exit(1);
         }
         raw: ^T = cast(c*.data.data, ^T);

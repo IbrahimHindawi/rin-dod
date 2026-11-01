@@ -3,7 +3,7 @@
 //
 // Start it with: python tools/dojo.py start dispatch 1
 //
-// Safe subset: a C string and a proc pointer are both pointers without a
+// A C string and a proc pointer are both pointers without a
 // region, so a struct holding them is a carrier: safe code reaches it only
 // through a pointer into a region, made by a trusted proc, and never writes
 // its fields. Neither changes after a system is added, so nothing is lost;

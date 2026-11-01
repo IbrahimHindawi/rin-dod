@@ -42,13 +42,17 @@ Step through it: break on `handles_alloc` and `handles_free`, and watch
 `generations` and `free` change. Then flip the switch at the top,
 `bump_on_free`, to `0` and run it again. The freed `b` is still alive, the
 reused index comes back with the old generation so `d` and `e` are the same
-handle, and freeing `d` again frees `e` and puts index 3 on the free list
-twice. That's the bug from [1.2](../../ecs/docs/1.2_despawn.md), in four lines
-of output.
+handle, and freeing `d` again frees `e` and puts index 3 back on the free list
+while `e` is still using it. That's the bug from
+[1.2](../../ecs/docs/1.2_despawn.md), in four lines of output.
 
 ## Do reps: the kata
 
-You write `handles`, an allocator of handles:
+You write `handles`, an allocator of handles, made in the region `level`:
+
+```rin
+handles_make: proc(r: region level) -> *handles in level = {
+```
 
 ```rin
 handles_alloc: proc(h: *handles) -> dojo_handle = {
@@ -62,10 +66,10 @@ handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status = {
 handles_alive: proc(h: *handles, e: dojo_handle) -> b32 = {
 ```
 
-plus `handles_init`, `handles_live` (how many are alive) and `handles_slots`
-(how many indices have been handed out). `dojo_handle` and `dojo_status` are
-given, in `dojo/dojo.rin`, and the arrays are `vec<u32>`s from the arena
-`handles_init` is given.
+plus `handles_live` (how many are alive) and `handles_slots` (how many indices
+have been handed out). `dojo_handle` and `dojo_status` are given, in
+`dojo/dojo.rin`. The arrays are `*vec<u32> in level`, made by `handles_make`;
+they grow in the region by themselves, so `handles_alloc` takes no region.
 
 | level | you write | target |
 |---|---|---|

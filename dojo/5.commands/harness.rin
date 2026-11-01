@@ -15,9 +15,9 @@
 // then applied. The model runs the same commands straight away, in order, on
 // a copy of the world from before the frame, and the two worlds must match.
 //
-// Safe subset: the world and the buffer live in the region `level`; each
+// The world and the buffer live in the region `level`; each
 // frame of the fuzz run opens the region `frame` for what lasts one frame,
-// where the original cleared an arena. The two copies of the world a frame
+// The two copies of the world a frame
 // makes hold pointers typed `in level`, so they are made in level and stay
 // there until the run ends: a few hundred kilobytes over a whole run.
 

@@ -28,10 +28,12 @@
 // they agree. With `--time` it also times them. Build Release before believing
 // the numbers: Debug checks every slice index.
 //
-// Safe subset: the arena is a region, `level`, that main opens; every array is
+// The arena is a region, `level`, that main opens; every array is
 // a slice that names it, `[]vec3 in level`, made by `new_slice`. The kernels
-// take plain slices, as before. One trusted proc remains, `has_flag`, which
-// reads argv, a C array of C strings, which safe code cannot index.
+// take plain slices and are `proc[unsafe]`, because `noalias` is a promise the
+// checker cannot check: each call says `unsafe`. One other proc has an unsafe
+// block, `has_flag`, which reads argv, a C array of C strings, which safe code
+// cannot index.
 
 cinclude "time.h"
 import "std/print.rin"
@@ -57,9 +59,8 @@ has_flag: proc(argc: i32, argv: ^^c8, flag: ^const c8) -> b32 = {
 particle_count: u64 = 262144;
 steps: u64 = 60;
 dt: f32 = 1.0 / 60.0;
-// static: only this file can reach gravity, and nothing takes its address, so
-// the compiler knows no write through a slice can change it. Without it gcc
-// puts a run-time check in front of move_split's vector loop.
+// const: rin writes the value into the loop, so no write through a slice can
+// change it, and gcc needs no run-time check in front of move_split's vector loop.
 gravity: static const f32 = -9.8;
 
 vec3: struct = {

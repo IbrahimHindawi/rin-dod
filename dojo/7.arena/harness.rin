@@ -14,11 +14,11 @@
 // let go of. Each push is filled with a pattern at the offset it gave, and
 // read back later, so a push that lands on another shows.
 //
-// Safe subset: the arena's bytes come from the region `level`, and a push
+// The arena's bytes come from the region `level`, and a push
 // hands out an offset into them, not an address, as rust-dod's kata does.
 // The harness writes and reads through bump_bytes(b)[offset], a slice the
 // checker bounds-checks, so a push past the end is caught as it happens.
-// What the original checked about addresses is checked about offsets.
+// What an arena promises about addresses is checked about offsets.
 
 import "../dojo.rin"
 

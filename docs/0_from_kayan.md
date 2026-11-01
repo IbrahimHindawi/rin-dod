@@ -27,6 +27,8 @@ struct's address, and runs the loop over the two columns.
 - **A signature is a u64 of component bits**, and a query is the test
   `(signature & all) == all`. Lesson 3 adds a `none` mask beside it.
 - **Arenas** for all of it. Nothing in these lessons is freed one at a time.
+  In safe rin an arena is a region: `level: region;` names it, `main` opens it,
+  and the whole of it ends at one closing brace.
 
 ## Changed
 
@@ -59,18 +61,25 @@ struct's address, and runs the loop over the two columns.
   component moves the entity to the matching table, copying the components
   both tables share.
 - **Structural changes wait for the end of the frame** (lesson 6), through a
-  command buffer in a frame arena. kayan never changes structure while a
+  command buffer in a frame region. kayan never changes structure while a
   query runs, but only because it never changes structure at all.
 - **Reflection replaces hand-written tables** (lessons 3 to 5). A component's
   size and alignment come from `T<>`, and so do the names a tool prints. The
   offset map goes away entirely.
+- **The compiler checks the memory.** kayan's query reads through `void *` and
+  adds byte offsets it trusts. Here the `void *` is gone: a pointer says which
+  region it points into, a lookup that can miss returns `option<*T>`, and a
+  slice is bounds checked. A type-erased column is still bytes, because that is
+  what lets one table type hold every archetype, but it is a `[]u8` that knows its
+  length. Reading it as a `[]T` is one small `unsafe { }` block that checks what it
+  is given (lesson 3), and everything above it is checked.
 
 ## Not carried over
 
 - **`vec4s` for positions.** kayan pads 3D vectors to 16 bytes, which suits
   SIMD loads. The lessons use `vec2` and `vec3` and plain loops, and leave
   vectorizing to the C compiler. `noalias` on the kernels' parameters, in
-  lessons 1, 2, 3 and 6, lets it do that without run-time overlap checks.
+  lessons 1, 2, 3, 6 and 7, lets it do that without run-time overlap checks.
   Lesson 1 adds a third layout, one `f32` array per coordinate, which is
   the one SIMD runs cleanly over, and its exercises come back to `vec4`.
   Lesson 7 weighs that layout against lookups, which it is bad at.

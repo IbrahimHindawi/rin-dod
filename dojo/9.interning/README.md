@@ -70,15 +70,17 @@ hash looks somewhere else. A table's hash can't change under it.
 
 ## Do reps: the kata
 
-You write `interner`, its table included. The idea is in `interner_intern`:
+You write `interner`, its table included, made in the region `level`, with
+`slots` and `keys` each a `*vec<...> in level`. The idea is in
+`interner_intern`:
 
 ```rin
 interner_intern: proc(t: *interner, key: u64) -> u32 = {
     at: u64 = interner_slot_of(t, key);
-    if (vec<u32>at(t*.slots&, at)* != 0) {
-        return vec<u32>at(t*.slots&, at)* - 1;
+    if (vec<u32>at(t*.slots, at)* != 0) {
+        return vec<u32>at(t*.slots, at)* - 1;
     }
-    if ((t*.keys.length + 1) * 4 > t*.slots.length * 3) {
+    if ((t*.keys*.length + 1) * 4 > t*.slots*.length * 3) {
         interner_grow(t);
         at = interner_slot_of(t, key);
     }
@@ -94,8 +96,11 @@ interner_find: proc(t: *interner, key: u64) -> option<u32> = {
 interner_key: proc(t: *interner, id: u32) -> u64 = {
 ```
 
-plus `interner_init` and `interner_len`. A slot holds `id + 1`, so that 0 can
-mean empty and key 0 is a key like any other.
+plus `interner_make(r)` and `interner_len`. A slot holds `id + 1`, so that 0 can
+mean empty and key 0 is a key like any other. `interner_make` has 8 empty slots
+to push, which level 2's version leaves to you. Growing doesn't need a new vec,
+or a region: `interner_grow` clears `slots`, pushes twice as many zeros, and
+puts every id back.
 
 | level | you write | target |
 |---|---|---|

@@ -5,8 +5,8 @@
 // obvious fix, and it is wrong: the system is walking the very table a
 // despawn swap-removes from, so the last row moves into a row the walk has
 // already passed, and is never looked at. Adding or removing a component is
-// worse: the entity moves to another table the query may visit later, and a
-// new table can move every table, the one being walked included.
+// worse: the entity moves to another table the query may visit later, so the
+// walk sees it twice.
 //
 // So a system does not change structure. It records the change, a command,
 // and the world applies every command after the frame's last system:
@@ -17,7 +17,7 @@
 // The second half of this file is a command buffer: the record, the procs
 // systems call to fill it, and the flush that empties it.
 //
-// In the safe subset the buffer lives in a region of its own, `frame`, opened
+// The buffer lives in a region of its own, `frame`, opened
 // around each frame and cleared at its end: the commands and the values they
 // carry are frame memory, the world is level memory, and the checker keeps
 // the two apart. A pointer into frame cannot be kept in the world, so no
@@ -26,6 +26,7 @@
 import "std/print.rin"
 import "std/vec.rin"
 import "std/hashmap.rin"
+import "std/slice.rin"
 
 level: region;
 frame: region in level;
@@ -128,7 +129,7 @@ kayan_heap_make: proc(r: region R) -> *kayan_heap in R = {
 // One component's values for every row of a table, as bytes: `size` of them
 // a row, `capacity` rows allocated (the table knows how many are in use).
 kayan_column: struct = {
-    data: ^u8;
+    data: []u8 in level;
     size: u64;
     align: u64;
 }
@@ -147,31 +148,48 @@ kayan_column_make: proc(h: *kayan_heap in level, info: *const reflect in permane
 // memory, and stale values.
 kayan_column_grow: proc(h: *kayan_heap, c: *kayan_column, count: u64, capacity: u64) -> void = {
     unsafe {
-        data: ^u8 = cast(memops_arena_push_zero(h*.arena[0]&, c*.size * capacity, c*.align), ^u8);
-        if (count > 0) {
-            memcpy(data, c*.data, c*.size * count);
-        }
-        c*.data = data;
+        raw: ^u8 = cast(memops_arena_push_zero(h*.arena[0]&, c*.size * capacity, c*.align), ^u8);
+        bytes: []u8 in level = cast(raw[0..c*.size * capacity], []u8 in level);
+        // Slicing checks both ends: a count past either block stops the program.
+        kept: u64 = c*.size * count;
+        slice<u8>copy(bytes[0..kept], c*.data[0..kept]);
+        c*.data = bytes;
     }
 }
 
-// One row's bytes. The caller keeps the row in range: the table's count.
-kayan_column_bytes: proc(c: *const kayan_column, row: u64) -> []u8 = {
-    unsafe {
-        return c*.data[row * c*.size..(row + 1) * c*.size];
-    }
+// One row's bytes, bounds-checked like any slice.
+kayan_column_bytes: proc(c: *kayan_column, row: u64) -> []u8 in level = {
+    return c*.data[row * c*.size..(row + 1) * c*.size];
 }
 
-// The column as T's rows, `count` of them. The size check is what makes the
-// typed view honest: T is the type the column was made for.
-kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T = {
+// The typed view: the column's first `count` rows as `[]T`. This is the one
+// place bytes become a type, so it takes nothing on trust. T must be the
+// column's size, and plain data: any bytes are then a valid T, so reading the
+// wrong type gives wrong numbers, never a bad pointer. The rows must fit, which
+// the slice knows and no field can lie about, and the bytes must be aligned for
+// T. The view is `[]T in level`: the bytes are in the region, so the view is
+// good memory for as long as the region is. After the column grows it is the
+// old block, still readable, no longer the column: take the view again.
+kayan_column_slice: proc<T>(c: *const kayan_column, count: u64) -> []T in level = {
+    if (c*.size != sizeof(T)) {
+        printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+        exit(1);
+    }
+    if (!reflect_is_plain(T<>&)) {
+        printfmt("kayan: a column holds plain data, and this {}-byte type is not\n", sizeof(T));
+        exit(1);
+    }
+    if (count > c*.data.length / sizeof(T)) {
+        printfmt("kayan: a view of {} rows on a column with room for {}\n", count, c*.data.length / sizeof(T));
+        exit(1);
+    }
     unsafe {
-        if (c*.size != sizeof(T)) {
-            printfmt("kayan: a column of {}-byte rows read as a {}-byte type\n", c*.size, sizeof(T));
+        if (cast(c*.data.data, usize) % alignof(T) != 0) {
+            printfmt("kayan: a column's bytes are not aligned to {}\n", alignof(T));
             exit(1);
         }
-        raw: ^T = cast(c*.data, ^T);
-        return raw[0..count];
+        raw: ^T = cast(c*.data.data, ^T);
+        return cast(raw[0..count], []T in level);
     }
 }
 
@@ -333,18 +351,10 @@ kayan_table_add_row: proc(w: *kayan_world, t: *kayan_table, e: kayan_entity) -> 
     return row;
 }
 
-// Who owns each of the table's rows.
-//
-// This and kayan_slice are marked trusted for their signatures, not their
-// bodies: a checked proc's `*const` is shallow, since its body could push
-// through a pointer found inside the table, so the checker assumes any call
-// on `*const kayan_table` may move the rows and drops every slice taken from
-// it. A trusted proc's `*const` is a promise, and these two keep it: they
-// read. With that, a system holds two or three columns of one table at once.
-kayan_entities: proc(t: *const kayan_table) -> []kayan_entity = {
-    unsafe {
-        return vec<kayan_entity>items(t*.entities);
-    }
+// Who owns each of the table's rows. It only reads, and the checker sees that,
+// so a system holds this and two or three columns of one table at once.
+kayan_entities: proc(t: *const kayan_table) -> []kayan_entity in level = {
+    return vec<kayan_entity>items(t*.entities);
 }
 
 // 1.4's swap-remove, for every column: the last row is copied over `row`, and
@@ -368,20 +378,16 @@ kayan_table_remove_row: proc(w: *kayan_world, t: *kayan_table, row: u64) -> void
 
 // The typed view of one of the table's columns: T's rows, all of them in use.
 // Asking for a component the table does not have is a bug, so it stops. The
-// slice is good until the table grows: the checker does not see through the
-// column, so that is kept by hand, and 3.3 makes it a rule.
-kayan_slice: proc<T>(t: *const kayan_table) -> []T = {
-    unsafe {
-        id: u32 = kayan_id_of<T>();
-        c: option<*kayan_column in level> = t*.columns[id];
-        if (!c) {
-            printfmt("kayan: the table has no column for component {}\n", id);
-            exit(1);
-            none: []T = {};
-            return none;
-        }
-        return kayan_column_slice<T>(c, t*.count);
+// slice is good memory for as long as the region, but when the table grows it is
+// the old block, no longer the column: take it again, and 3.3 makes that a rule.
+kayan_slice: proc<T>(t: *const kayan_table) -> []T in level = {
+    id: u32 = kayan_id_of<T>();
+    c: option<*kayan_column in level> = t*.columns[id];
+    if (!c) {
+        printfmt("kayan: the table has no column for component {}\n", id);
+        exit(1);
     }
+    return kayan_column_slice<T>(c, t*.count);
 }
 
 kayan_table_at: proc(w: *const kayan_world, index: u32) -> *kayan_table in level = {
@@ -724,15 +730,26 @@ kayan_indent: proc(depth: u32) -> void = {
 }
 
 // One value of a builtin type, read from its bytes by its type's name. The
-// read is a cast of the bytes, so this is the inspector's one trusted proc.
+// bytes may sit at any address, so the read is a copy into a local: this is the
+// inspector's one unsafe block.
 kayan_print_builtin: proc(type_name: ^const char, at: []const u8) -> void = {
+    if (at.length < 4) {
+        printfmt("<{} bytes>", at.length);
+        return;
+    }
     unsafe {
         if (reflect_cstr_equal(type_name, "f32")) {
-            printfmt("{:.2}", cast(cast(at[0]&, *const f32)*, f64));
+            f: f32 = 0.0;
+            memcpy(f&, at.data, 4);
+            printfmt("{:.2}", cast(f, f64));
         } else if (reflect_cstr_equal(type_name, "u32")) {
-            printfmt("{}", cast(at[0]&, *const u32)*);
+            u: u32 = 0;
+            memcpy(u&, at.data, 4);
+            printfmt("{}", u);
         } else if (reflect_cstr_equal(type_name, "i32")) {
-            printfmt("{}", cast(at[0]&, *const i32)*);
+            i: i32 = 0;
+            memcpy(i&, at.data, 4);
+            printfmt("{}", i);
         } else {
             printfmt("<{}>", type_name);
         }
@@ -1009,8 +1026,8 @@ kayan_system_proc: alias = *proc(it: *kayan_iter) -> void;
 // A system is code: a name, and the proc run on each table its query matches.
 // A C string and a proc pointer are both pointers without a region, so a
 // struct holding them is a carrier: safe code reaches it only through a
-// pointer into a region, made by a trusted proc, and never writes its fields.
-// Neither changes after it is made, so nothing is lost.
+// pointer into a region, made by a trusted proc. Neither changes after it is
+// made, so nothing is lost.
 kayan_system: struct = {
     name: ^const char;
     run: kayan_system_proc;

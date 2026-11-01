@@ -16,12 +16,12 @@
 // a seed, by path, each checked against the same fields reached directly, the
 // compiler doing the offsets.
 //
-// Safe subset: safe code cannot index a C string or read four bytes as an
+// Safe code cannot index a C string or read four bytes as an
 // f32, so the harness gives the kata five trusted procs for that, below:
 // walk_cstr_at, walk_cstr_append, walk_read_f32, walk_write_f32, and
 // lamp_bytes/room_bytes for its own test values. The kata's lists come back
 // in a region the caller names; the fuzz run opens the region `frame` once
-// per operation for them, where the original reset a scratch arena.
+// per operation for them.
 
 import "../dojo.rin"
 import "std/reflect.rin"
@@ -80,14 +80,16 @@ walk_cstr_append: proc(dst: []c8, at: u64, src: ^const char) -> u64 = {
 walk_read_f32: proc(bytes: []const u8, at: u64) -> f32 = {
     unsafe {
         field: []const u8 = bytes[at..at + 4];
-        return cast(field[0]&, *const f32)*;
+        value: f32 = 0.0;
+        memcpy(value&, field.data, 4);
+        return value;
     }
 }
 
 walk_write_f32: proc(bytes: []u8, at: u64, value: f32) -> void = {
     unsafe {
         field: []u8 = bytes[at..at + 4];
-        cast(field[0]&, *f32)* = value;
+        memcpy(field.data, value&, 4);
     }
 }
 
