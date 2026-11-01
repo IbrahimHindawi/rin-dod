@@ -5,7 +5,6 @@
 //
 // Start it with: python tools/dojo.py start index 2
 
-import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
 // The harness: it has main, and runs the procs below, so with it this file
@@ -26,28 +25,28 @@ list_node: struct = {
 }
 
 list: struct = {
-    arena: *memops_arena;
-    nodes: vec<list_node>;
+    nodes: *vec<list_node> in level;
     // Freed nodes, used again before the vec grows.
-    free: vec<u32>;
+    free: *vec<u32> in level;
     head: u32;
     tail: u32;
     length: u64;
 }
 
-// An empty list, its nodes from `arena`.
-list_init: proc(l: *list, arena: *memops_arena) -> void = {
-    l* = {};
+// An empty list in the region, its two vecs made there too, and both ends
+// list_none.
+list_make: proc(r: region level) -> *list in level = {
+    return new<list>(r, { .nodes = vec<list_node>make(r, 0), .free = vec<u32>make(r, 0) });
 }
 
-// Node `index`, alive or free. The pointer is good until the next node is
-// made, which can move them all.
-list_at: proc(l: *list, index: u32) -> *list_node = {
-    return null;
+// Node `index`, alive or free. The pointer is a borrow of the list, good
+// until the next call that may move the nodes.
+list_at: proc(l: *list, index: u32) -> *list_node in level = {
+    return vec<list_node>at(l*.nodes, cast(index, u64));
 }
 
 // Node `index` if it's in the list, or null.
-list_live: proc(l: *list, index: u32) -> *list_node = {
+list_live: proc(l: *list, index: u32) -> option<*list_node> = {
     return null;
 }
 
@@ -80,7 +79,7 @@ list_remove: proc(l: *list, node: u32) -> option<u64> = {
 }
 
 // The node's value, to read or to change, or null if it isn't in the list.
-list_get: proc(l: *list, node: u32) -> *u64 = {
+list_get: proc(l: *list, node: u32) -> option<*u64> = {
     return null;
 }
 

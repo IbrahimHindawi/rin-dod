@@ -1,6 +1,11 @@
 # 6. Bitsets
 
-`dojo/6.bitset/play_bitset.rin`
+`dojo/safe/6.bitset/play_bitset.rin`
+
+**This is the safe-subset port.** The kata is unchanged: bitsets are plain
+values. In the playground a kind is named by its place in `kind_names`, as a
+component is by its place in `names`, because a struct holding a C string is
+not a value safe code may write to.
 
 A set of small numbers, 0 to 63, fits in one `u64`: bit `id` is set when `id`
 is in the set. An ECS keeps what each kind of entity is made of this way, a

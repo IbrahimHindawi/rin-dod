@@ -1,6 +1,16 @@
 # 11. A reflection walk
 
-`dojo/11.reflect/play_reflect.rin`
+`dojo/safe/11.reflect/play_reflect.rin`
+
+**This is the safe-subset port.** Safe code cannot index a C string or read
+four bytes as an `f32`, so the harness gives the kata four trusted helpers,
+`walk_cstr_at`, `walk_cstr_append`, `walk_read_f32` and `walk_write_f32`,
+each a few lines, and the kata itself is checked: it asks the record for
+field `i` with std's `reflect_field_at`, which says when it is past the end,
+instead of indexing `reflect_fields(type)`. `walk_paths` and `walk_diff`
+make their list in a region the caller names, `r: region R`, and the fuzz
+run opens the region `frame` once per operation for it, where the original
+reset a scratch arena. The walk, the paths and the offsets are unchanged.
 
 A **reflect record** lists a struct's fields: each one's name, where its
 bytes start in the struct, how many there are, and its type, with the type's

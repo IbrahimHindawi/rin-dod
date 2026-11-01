@@ -5,7 +5,6 @@
 //
 // Start it with: python tools/dojo.py start interning 2
 
-import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
 // The harness: it has main, and runs the procs below, so with it this file
@@ -25,23 +24,20 @@ interner_hash: proc(key: u64) -> u64 = {
 }
 
 interner: struct = {
-    arena: *memops_arena;
     // The table: a power of two long, never more than 3/4 full. 0 is an
     // empty slot, and anything else is an id + 1.
-    slots: vec<u32>;
+    slots: *vec<u32> in level;
     // keys[id] is the key interned as id.
-    keys: vec<u64>;
+    keys: *vec<u64> in level;
 }
 
-// `count` empty slots.
-interner_empty: proc(arena: *memops_arena, count: u64) -> vec<u32> = {
-    slots: vec<u32> = {};
-    return slots;
+// `count` empty slots in `slots`, whatever it held: clear it and push zeros.
+interner_empty: proc(slots: *vec<u32>, count: u64) -> void = {
 }
 
-// An empty interner, with a table of 8 slots, from `arena`.
-interner_init: proc(t: *interner, arena: *memops_arena) -> void = {
-    t* = {};
+// An empty interner in the region, with a table of 8 slots.
+interner_make: proc(r: region level) -> *interner in level = {
+    return new<interner>(r, { .slots = vec<u32>make(r, 8), .keys = vec<u64>make(r, 0) });
 }
 
 // Where `key` is in the table, or the empty slot where it would go: start at

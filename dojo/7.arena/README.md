@@ -1,6 +1,20 @@
 # 7. An arena
 
-`dojo/7.arena/play_arena.rin`
+`dojo/safe/7.arena/play_arena.rin`
+
+**This is the safe-subset port, and it is the one block where the kata itself
+changed.** The original `bump` was an arena over bytes it was handed, and
+`bump_push` returned their address, a `^u8`, which safe code cannot hand out:
+the checker has no region for it. Here the region *is* the arena. `bump_make`
+takes `r: region level` and gets its bytes from it, `new_slice<u8>(r,
+capacity)`, and `bump_push` returns an `option<u64>`: the **offset** of the
+bytes, or none when they would end past the last byte. The caller writes and
+reads through `bump_bytes(b)[offset]`, a slice the checker bounds-checks, so a
+push that lands past the end is caught as it happens. That is exactly what
+rust-dod's kata does, and the rin notes below about addresses are what the
+original did; the rest of this page, the invariant, the levels and the
+failures, is unchanged. The playground keeps its 64 bytes inside the struct
+and hands out offsets the same way.
 
 Most of what a frame allocates dies with the frame: commands, scratch lists,
 text for the screen. An **arena** hands all of it out of one buffer and keeps

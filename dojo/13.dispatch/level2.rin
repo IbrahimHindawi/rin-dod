@@ -8,7 +8,6 @@
 import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
-import "std/cstd.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
 import "harness.rin"
@@ -16,37 +15,58 @@ import "harness.rin"
 // A system is a plain pointer to a proc.
 system_proc: alias = *proc(c: *ctx) -> void;
 
+// A system as it was given: its name and its proc. A C string and a proc
+// pointer are pointers without a region, so safe code holds this only through
+// a pointer into the region, made by the trusted proc below, and never writes
+// its fields.
 schedule_system: struct = {
     name: ^const char;
     run: system_proc;
+}
+
+schedule_system_make: proc(r: region level, name: ^const char, run: system_proc) -> *schedule_system in level = {
+    unsafe {
+        s: *schedule_system in level = cast(memops_arena_push_zero(r, sizeof(schedule_system), alignof(schedule_system)),
+            *schedule_system in level);
+        s*.name = name;
+        s*.run = run;
+        return s;
+    }
+}
+
+// A system in the schedule: which, whether it runs, and how many times
+// schedule_run has called it.
+schedule_entry: struct = {
+    system: *schedule_system in level;
     enabled: b32;
-    // How many times schedule_run has called it.
     calls: u32;
 }
 
 schedule: struct = {
-    arena: *memops_arena;
     // In the order they run.
-    systems: vec<schedule_system>;
+    systems: *vec<schedule_entry> in level;
 }
 
-schedule_init: proc(s: *schedule, arena: *memops_arena) -> void = {
-    // An empty schedule.
+// An empty schedule in the region, its vec made there too.
+schedule_make: proc(r: region level) -> *schedule in level = {
+    return new<schedule>(r, { .systems = vec<schedule_entry>make(r, 0) });
 }
 
-// Where the system called `name` is in the list, if it's there.
+// Where the system called `name` is in the list, if it's there. Names are C
+// strings: compare them with dojo_cstr_equal.
 schedule_find: proc(s: *schedule, name: ^const char) -> option<u64> = {
     return option<u64>none();
 }
 
 // At the end: it runs after every system already there.
-schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void = {
+schedule_add: proc(s: *schedule, r: region level, name: ^const char, run: system_proc) -> void = {
     // A new system, enabled, at the end.
 }
 
 // Just before `before`, so it runs first. 0, and nothing added, if there is
 // no `before`.
-schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char, run: system_proc) -> b32 = {
+schedule_insert_before: proc(s: *schedule, r: region level, before: ^const char, name: ^const char,
+                             run: system_proc) -> b32 = {
     // A new system, enabled, just before the one called `before`.
     return 0;
 }

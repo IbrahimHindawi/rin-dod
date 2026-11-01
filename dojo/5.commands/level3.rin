@@ -3,8 +3,8 @@
 // Start it with: python tools/dojo.py start commands 3
 //
 // The harness needs exactly this, and checks what each does. It provides the
-// world and the result, and dojo_handle, dojo_status, vec<T> and memops_arena
-// are given:
+// world and the result, and dojo_handle, dojo_status, vec<T> and the region
+// `level` are given:
 //
 //   world_spawn: proc(w: *world, value: u32) -> dojo_handle
 //   world_despawn: proc(w: *world, h: dojo_handle) -> dojo_status
@@ -18,7 +18,7 @@
 //   target_entity: proc(h: dojo_handle) -> target
 //   target_pending: proc(p: pending) -> target
 //   commands: struct
-//   commands_init: proc(c: *commands, arena: *memops_arena) -> void
+//   commands_make: proc(r: region level) -> *commands in level
 //   commands_spawn: proc(c: *commands, value: u32) -> pending
 //   commands_set: proc(c: *commands, t: target, value: u32) -> void
 //   commands_despawn: proc(c: *commands, t: target) -> void

@@ -70,15 +70,15 @@ sparse_set_get: proc(s: *sparse_set, id: u32) -> u64 = {
 draw: proc(s: *sparse_set) -> void = {
     printfmt("    row     ");
     for (r: u32 = 0; r < s*.count; r += 1) {
-        printf("%5u", r);
+        printfmt("{:5}", r);
     }
     printfmt("\n    ids     ");
     for (r: u32 = 0; r < s*.count; r += 1) {
-        printf("%5u", s*.ids[r]);
+        printfmt("{:5}", s*.ids[r]);
     }
     printfmt("\n    values  ");
     for (r: u32 = 0; r < s*.count; r += 1) {
-        printf("%5u", cast(s*.values[r], u32));
+        printfmt("{:5}", cast(s*.values[r], u32));
     }
     printfmt("\n    rows    ");
     first: b32 = 1;

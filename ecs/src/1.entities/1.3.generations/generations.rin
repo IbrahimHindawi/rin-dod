@@ -104,8 +104,11 @@ set_health: proc(w: *kayan_world, e: kayan_entity, points: f32) -> void = {
 }
 
 // Reading through a handle checks it first. A dead handle, or an entity
-// without a position, gives null instead of whatever is at the number.
-get_position: proc(w: *kayan_world, e: kayan_entity) -> *vec2 = {
+// without a position, gives null instead of whatever is at the number. The
+// result is `option<*vec2>`: it may be null, and the caller has to test it before
+// reading through it. The pointer names no region: it points into the world
+// the caller passed, and is good until the caller changes the world.
+get_position: proc(w: *kayan_world, e: kayan_entity) -> option<*vec2> = {
     if (!kayan_alive(w, e) || !w*.has_position[e.index]) {
         return null;
     }
@@ -127,39 +130,44 @@ movement_system: proc(w: *kayan_world, dt: f32) -> u32 = {
 print_world: proc(w: *kayan_world) -> void = {
     for (i: u32 = 0; i < w*.count; i += 1) {
         if (!w*.has_position[i] && !w*.has_velocity[i] && !w*.has_health[i]) {
-            printf("    entity %u  (free, next generation %u)\n", i, w*.generations[i]);
+            printfmt("    entity {}  (free, next generation {})\n", i, w*.generations[i]);
             continue;
         }
-        printf("    entity %u:%u", i, w*.generations[i]);
+        printfmt("    entity {}:{}", i, w*.generations[i]);
         if (w*.has_position[i]) {
-            printf("  position (%5.2f, %5.2f)", cast(w*.positions[i].x, f64), cast(w*.positions[i].y, f64));
+            printfmt("  position ({:5.2}, {:5.2})", cast(w*.positions[i].x, f64), cast(w*.positions[i].y, f64));
         } else {
-            printf("  position -              ");
+            printfmt("  position -              ");
         }
         if (w*.has_velocity[i]) {
-            printf("  velocity (%5.2f, %5.2f)", cast(w*.velocities[i].x, f64), cast(w*.velocities[i].y, f64));
+            printfmt("  velocity ({:5.2}, {:5.2})", cast(w*.velocities[i].x, f64), cast(w*.velocities[i].y, f64));
         } else {
-            printf("  velocity -              ");
+            printfmt("  velocity -              ");
         }
         if (w*.has_health[i]) {
-            printf("  health %.0f", cast(w*.healths[i], f64));
+            printfmt("  health {:.0}", cast(w*.healths[i], f64));
         } else {
-            printf("  health -");
+            printfmt("  health -");
         }
-        printf("\n");
+        printfmt("\n");
     }
 }
 
 // The turret's aim: the target's position, or a new target if it is gone.
 aim: proc(w: *kayan_world, target: *kayan_entity, fallback: kayan_entity) -> void = {
-    p: *vec2 = get_position(w, target*);
-    if (p == null) {
+    p: option<*vec2> = get_position(w, target*);
+    if (!p) {
         printfmt("the turret's target {}:{} is dead; it picks {}:{} instead\n",
             target*.index, target*.generation, fallback.index, fallback.generation);
         target* = fallback;
         p = get_position(w, target*);
     }
-    printf("the turret aims at %u:%u, at (%.2f, %.2f)\n", target*.index, target*.generation,
+    // The fallback could be dead too; the checker insists this is said.
+    if (!p) {
+        printfmt("the turret has nothing to aim at\n");
+        return;
+    }
+    printfmt("the turret aims at {}:{}, at ({:.2}, {:.2})\n", target*.index, target*.generation,
         cast(p*.x, f64), cast(p*.y, f64));
 }
 

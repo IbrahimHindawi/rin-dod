@@ -21,10 +21,17 @@
 // still finds a slot, and reads whatever value is in that slot's row now. It's
 // a global, read each time it's used, so a debugger can flip it mid-run too:
 // stop on slot_map_remove, set it to 0 in the watch window, and continue.
+//
+// Safe subset: a value is a texture, named by its place in `textures`, since
+// a struct holding C strings is not a value safe code may write to.
 
 import "std/print.rin"
+import "std/option.rin"
 
 check_generation: b32 = 1;
+
+// The values: a texture is its place here.
+textures: [4]^const char = { "grass", "stone", "water", "lava" };
 
 handle: struct = {
     index: u32;
@@ -41,12 +48,12 @@ slot_map: struct = {
     slot_count: u32;
     free: [8]u32;
     free_count: u32;
-    values: [8]^const char;
+    values: [8]u32;
     handles: [8]handle;
     count: u32;
 }
 
-slot_map_insert: proc(m: *slot_map, value: ^const char) -> handle = {
+slot_map_insert: proc(m: *slot_map, value: u32) -> handle = {
     index: u32 = 0;
     if (m*.free_count > 0) {
         m*.free_count -= 1;
@@ -71,13 +78,13 @@ slot_map_contains: proc(m: *slot_map, h: handle) -> b32 = {
     return !check_generation || m*.slots[h.index].generation == h.generation;
 }
 
-// The value through the handle's slot, or null. A row past the end reads
+// The value through the handle's slot, or none. A row past the end reads
 // nothing.
-slot_map_get: proc(m: *slot_map, h: handle) -> ^const char = {
+slot_map_get: proc(m: *slot_map, h: handle) -> option<u32> = {
     if (!slot_map_contains(m, h) || m*.slots[h.index].row >= m*.count) {
-        return null;
+        return option<u32>none();
     }
-    return m*.values[m*.slots[h.index].row];
+    return option<u32>some(m*.values[m*.slots[h.index].row]);
 }
 
 slot_map_remove: proc(m: *slot_map, h: handle) -> void = {
@@ -123,25 +130,26 @@ draw: proc(m: *slot_map) -> void = {
         if (r > 0) {
             printfmt(" | ");
         }
-        printfmt("{}:{} {}", m*.handles[r].index, m*.handles[r].generation, m*.values[r]);
+        printfmt("{}:{} {}", m*.handles[r].index, m*.handles[r].generation, textures[m*.values[r]]);
     }
     printfmt("\n");
 }
 
 read: proc(m: *slot_map, name: ^const char, h: handle) -> void = {
-    value: ^const char = slot_map_get(m, h);
-    if (value == null) {
-        value = "nothing: it is gone";
+    value: option<u32> = slot_map_get(m, h);
+    if (value.has_value) {
+        printfmt("{} {}:{}: {}", name, h.index, h.generation, textures[value.value]);
+    } else {
+        printfmt("{} {}:{}: nothing: it is gone", name, h.index, h.generation);
     }
-    printfmt("{} {}:{}: {}", name, h.index, h.generation, value);
 }
 
 main: proc() -> i32 = {
     m: slot_map = {};
     printfmt("insert three textures\n");
-    grass: handle = slot_map_insert(m&, "grass");
-    stone: handle = slot_map_insert(m&, "stone");
-    water: handle = slot_map_insert(m&, "water");
+    grass: handle = slot_map_insert(m&, 0);
+    stone: handle = slot_map_insert(m&, 1);
+    water: handle = slot_map_insert(m&, 2);
     printfmt("    grass {}:{}  stone {}:{}  water {}:{}\n", grass.index, grass.generation,
         stone.index, stone.generation, water.index, water.generation);
     draw(m&);
@@ -156,7 +164,7 @@ main: proc() -> i32 = {
     printfmt("\n");
 
     printfmt("insert lava: index 1 again, generation 2, in a new row at the end\n");
-    lava: handle = slot_map_insert(m&, "lava");
+    lava: handle = slot_map_insert(m&, 3);
     printfmt("    lava {}:{}\n", lava.index, lava.generation);
     draw(m&);
     printfmt("    ");

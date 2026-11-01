@@ -3,6 +3,11 @@
 // how a failure is reported. It also holds the two types the katas take as
 // given: a handle, and a status.
 //
+// This is the safe-subset dojo: every kata and harness here checks with rin's
+// safety rules on. The one difference from dojo/dojo.rin is the handful of
+// procs marked unsafe { } below: they read the command line and compare C
+// strings, which is C's business and not the checker's.
+//
 // The harnesses import it, and so does every kata file that uses a handle or
 // a status:
 //
@@ -12,6 +17,19 @@ import "std/print.rin"
 import "std/memops.rin"
 import "std/vec.rin"
 import "std/fmt.rin"
+
+// The one region every kata lives in: the harness opens it in main and hands
+// it to the scenario and the fuzz run, which make their kata in it. The arena
+// the originals passed around is this region.
+//
+// `frame` is one step shorter: a region a harness opens and closes many times
+// over a run, once per game frame or fuzz step, where the originals cleared a
+// scratch arena. Blocks 5 and 11 use it. It is declared here, not in the
+// harness that uses it, because a nested region must be declared right after
+// its enclosing one, and an imported file's declarations come after the
+// importer's own.
+level: region;
+frame: region in level;
 
 // A generational handle: an index, and which life of that index it was made
 // for. Generations start at 1, so a zeroed handle, `{}`, is never alive and can
@@ -60,53 +78,72 @@ dojo_run: struct = {
     trace: u64;
 }
 
+// Trusted: it walks a C string to its terminator.
 dojo_parse_u64: proc(text: ^const c8, out: *u64) -> b32 = {
-    value: u64 = 0;
-    i: u64 = 0;
-    while (text[i] >= '0' && text[i] <= '9') {
-        value = value * 10 + cast(text[i] - '0', u64);
-        i += 1;
+    unsafe {
+        value: u64 = 0;
+        i: u64 = 0;
+        while (text[i] >= '0' && text[i] <= '9') {
+            value = value * 10 + cast(text[i] - '0', u64);
+            i += 1;
+        }
+        out* = value;
+        return i > 0 && text[i] == 0;
     }
-    out* = value;
-    return i > 0 && text[i] == 0;
 }
 
-dojo_run_init: proc(argc: i32, argv: ^^c8, block: ^const char, title: ^const char) -> dojo_run = {
-    run: dojo_run = {};
-    run.block = block;
-    run.seed = 1;
-    run.ops = 20000;
-    for (i: i32 = 1; i < argc; i += 2) {
-        value: u64 = 0;
-        if (i + 1 >= argc || !dojo_parse_u64(argv[i + 1], value&)) {
-            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
-            exit(2);
+// Trusted: argv is C's array of C strings. The run lives in the region the
+// harness opened, since it holds the block's name, a C string, and a struct
+// with one of those is kept through a pointer in safe code.
+dojo_run_init: proc(r: region R, argc: i32, argv: ^^c8, block: ^const char, title: ^const char) -> *dojo_run in R = {
+    unsafe {
+        run: *dojo_run in R = new<dojo_run>(r);
+        run*.block = block;
+        run*.seed = 1;
+        run*.ops = 20000;
+        for (i: i32 = 1; i < argc; i += 2) {
+            value: u64 = 0;
+            if (i + 1 >= argc || !dojo_parse_u64(argv[i + 1], value&)) {
+                printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+                exit(2);
+            }
+            if (strcmp(argv[i], "--seed") == 0) {
+                run*.seed = value;
+            } else if (strcmp(argv[i], "--ops") == 0) {
+                run*.ops = value;
+            } else if (strcmp(argv[i], "--stop") == 0) {
+                run*.stop = value;
+            } else if (strcmp(argv[i], "--trace") == 0) {
+                run*.trace = value;
+            } else {
+                printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
+                exit(2);
+            }
         }
-        if (strcmp(argv[i], "--seed") == 0) {
-            run.seed = value;
-        } else if (strcmp(argv[i], "--ops") == 0) {
-            run.ops = value;
-        } else if (strcmp(argv[i], "--stop") == 0) {
-            run.stop = value;
-        } else if (strcmp(argv[i], "--trace") == 0) {
-            run.trace = value;
-        } else {
-            printfmt("usage: harness [--seed N] [--ops N] [--stop N] [--trace 1]\n");
-            exit(2);
-        }
+        printfmt("dojo: {}\n", title);
+        return run;
     }
-    printfmt("dojo: {}\n", title);
-    return run;
+}
+
+// Are two C strings the same text? Safe code cannot call strcmp, which is
+// C's; this is the one place that does, for the katas that keep names.
+dojo_cstr_equal: proc(a: ^const char, b: ^const char) -> b32 = {
+    unsafe {
+        return strcmp(a, b) == 0;
+    }
 }
 
 // A step of the scenario: what was done, what came back, and what should have.
-// Printed when it matches; the end of the run when it does not.
+// Printed when it matches; the end of the run when it does not. Trusted: it
+// compares two C strings.
 dojo_same: proc(what: ^const char, got: ^const char, want: ^const char) -> void = {
-    if (strcmp(got, want) != 0) {
-        printfmt("FAIL in the scenario: {} gave {}, it should give {}\n", what, got, want);
-        exit(1);
+    unsafe {
+        if (strcmp(got, want) != 0) {
+            printfmt("FAIL in the scenario: {} gave {}, it should give {}\n", what, got, want);
+            exit(1);
+        }
+        printfmt("    {}: {}\n", what, got);
     }
-    printfmt("    {}: {}\n", what, got);
 }
 
 dojo_fuzz: proc(run: *dojo_run) -> void = {
@@ -116,8 +153,8 @@ dojo_fuzz: proc(run: *dojo_run) -> void = {
 // Set a breakpoint here, and run with --stop N.
 dojo_stopped_at: u64 = 0;
 
-dojo_stop_here: proc(op: u64) -> void = {
-    dojo_stopped_at = op;
+dojo_stop_here: proc(opcode: u64) -> void = {
+    dojo_stopped_at = opcode;
 }
 
 // Call before operation `op`. It returns 1 when the operation should be
@@ -125,14 +162,14 @@ dojo_stop_here: proc(op: u64) -> void = {
 // --trace, every operation is, so a crash shows the last one that started;
 // with --stop at this operation, it is, after dojo_stop_here has run, so a
 // breakpoint there lands just before it.
-dojo_before: proc(run: *dojo_run, op: u64) -> b32 = {
-    if (run*.stop == op) {
-        dojo_stop_here(op);
-        printfmt("stopped before operation {}: ", op);
+dojo_before: proc(run: *dojo_run, opcode: u64) -> b32 = {
+    if (run*.stop == opcode) {
+        dojo_stop_here(opcode);
+        printfmt("stopped before operation {}: ", opcode);
         return 1;
     }
     if (run*.trace != 0) {
-        printfmt("operation {}: ", op);
+        printfmt("operation {}: ", opcode);
         return 1;
     }
     return 0;
@@ -141,12 +178,12 @@ dojo_before: proc(run: *dojo_run, op: u64) -> b32 = {
 // A failure in the fuzz run, in three parts: dojo_fail starts the line, the
 // caller prints what went wrong and a newline, and dojo_failed says how to get
 // back here in the debugger and ends the run.
-dojo_fail: proc(run: *dojo_run, op: u64) -> void = {
-    printfmt("FAIL at operation {} (seed {}): ", op, run*.seed);
+dojo_fail: proc(run: *dojo_run, opcode: u64) -> void = {
+    printfmt("FAIL at operation {} (seed {}): ", opcode, run*.seed);
 }
 
-dojo_failed: proc(run: *dojo_run, op: u64) -> void = {
-    printfmt("    debug it: build/dojo/{}/harness --seed {} --stop {}\n", run*.block, run*.seed, op);
+dojo_failed: proc(run: *dojo_run, opcode: u64) -> void = {
+    printfmt("    debug it: build/dojo/{}/harness --seed {} --stop {}\n", run*.block, run*.seed, opcode);
     printfmt("    with a breakpoint on dojo_stop_here, which runs just before that operation\n");
     exit(1);
 }

@@ -10,6 +10,9 @@
 // thousands of times from a seed, against a model that keeps a b32 per id and
 // answers every question one id at a time. Ids go up to 63, so a shift done
 // in 32 bits shows.
+//
+// Safe subset: the scenario and the fuzz run get the region `level` and make
+// one fmt buffer each in it, where the original formatted into local arrays.
 
 import "../dojo.rin"
 
@@ -45,10 +48,18 @@ fmt_set: proc(f: *fmt, set: u64) -> void = {
 }
 
 print_set: proc(set: u64) -> void = {
-    text: [256]c8 = {};
-    f: fmt = fmt_to(text);
-    fmt_set(f&, set);
-    printfmt("{}", f.data);
+    printfmt("{");
+    first: b32 = 1;
+    for (i: u64 = 0; i < 64; i += 1) {
+        if (((set shr i) & 1) == 1) {
+            if (!first) {
+                printfmt(" ");
+            }
+            printfmt("{}", i);
+            first = 0;
+        }
+    }
+    printfmt("}");
 }
 
 fmt_ids: proc(f: *fmt, ids: []u32, n: u32) -> void = {
@@ -68,24 +79,23 @@ of: proc(ids: []u32) -> u64 = {
     return set;
 }
 
-same_u64: proc(what: ^const char, got: u64, want: ^const char) -> void = {
-    text: [32]c8 = {};
-    f: fmt = fmt_to(text);
-    fmt_u64(f&, got);
-    dojo_same(what, f.data, want);
+same_u64: proc(f: *fmt, what: ^const char, got: u64, want: ^const char) -> void = {
+    fmt_reset(f);
+    fmt_u64(f, got);
+    dojo_same(what, fmt_text(f), want);
 }
 
-same_ids: proc(what: ^const char, set: u64, want: ^const char) -> void = {
+same_ids: proc(f: *fmt, what: ^const char, set: u64, want: ^const char) -> void = {
     ids: [64]u32 = {};
     n: u32 = bitset_ids(set, ids[0..64]);
-    text: [256]c8 = {};
-    f: fmt = fmt_to(text);
-    fmt_ids(f&, ids[0..64], n);
-    dojo_same(what, f.data, want);
+    fmt_reset(f);
+    fmt_ids(f, ids[0..64], n);
+    dojo_same(what, fmt_text(f), want);
 }
 
-scenario: proc() -> void = {
+scenario: proc(r: region level) -> void = {
     printfmt("scenario\n");
+    f: *fmt in level = fmt_make(r, 256);
     position: u32 = 0;
     velocity: u32 = 1;
     health: u32 = 2;
@@ -95,13 +105,13 @@ scenario: proc() -> void = {
     frozen: u32 = 6;
     hero_ids: [5]u32 = { position, velocity, health, sprite, player };
     hero: u64 = of(hero_ids[0..5]);
-    same_u64("with 0, 1, 2, 3 and 4, from 0: the player", hero, "31");
-    same_u64("bit(3)", bitset_bit(3), "8");
+    same_u64(f, "with 0, 1, 2, 3 and 4, from 0: the player", hero, "31");
+    same_u64(f, "bit(3)", bitset_bit(3), "8");
     dojo_same("has(player, sprite)", dojo_bool_name(bitset_has(hero, sprite)), "true");
     dojo_same("has(player, turret)", dojo_bool_name(bitset_has(hero, turret)), "false");
     gun_ids: [4]u32 = { position, health, sprite, turret };
     gun: u64 = of(gun_ids[0..4]);
-    same_u64("the turret", gun, "45");
+    same_u64(f, "the turret", gun, "45");
     moving: u64 = bitset_with(bitset_bit(position), velocity);
     dojo_same("contains_all(player, {position velocity})",
         dojo_bool_name(bitset_contains_all(hero, moving)), "true");
@@ -116,7 +126,7 @@ scenario: proc() -> void = {
     dojo_same("matches(ghost, move): it is frozen",
         dojo_bool_name(bitset_matches(ghost, moving, bitset_bit(frozen))), "false");
     thawed: u64 = bitset_without(ghost, frozen);
-    same_u64("without(ghost, frozen)", thawed, "11");
+    same_u64(f, "without(ghost, frozen)", thawed, "11");
     dojo_same("matches(that, move)", dojo_bool_name(bitset_matches(thawed, moving, bitset_bit(frozen))), "true");
     thinking: u64 = bitset_with(bitset_bit(velocity), health);
     dojo_same("matches(player, think): it is the player",
@@ -125,12 +135,12 @@ scenario: proc() -> void = {
         dojo_bool_name(bitset_matches(gun, thinking, bitset_bit(player))), "false");
     rock: u64 = bitset_with(bitset_bit(position), sprite);
     dojo_same("matches(rock, all {}, none {}): no conditions", dojo_bool_name(bitset_matches(rock, 0, 0)), "true");
-    same_u64("count(player)", cast(bitset_count(hero), u64), "5");
-    same_ids("ids(player)", hero, "0 1 2 3 4");
-    same_u64("with(0, 63)", bitset_with(0, 63), "9223372036854775808");
+    same_u64(f, "count(player)", cast(bitset_count(hero), u64), "5");
+    same_ids(f, "ids(player)", hero, "0 1 2 3 4");
+    same_u64(f, "with(0, 63)", bitset_with(0, 63), "9223372036854775808");
     edges: [4]u32 = { 0, 31, 32, 63 };
-    same_ids("ids of {0 31 32 63}", of(edges[0..4]), "0 31 32 63");
-    same_u64("count(every bit)", cast(bitset_count(~0'u64), u64), "64");
+    same_ids(f, "ids of {0 31 32 63}", of(edges[0..4]), "0 31 32 63");
+    same_u64(f, "count(every bit)", cast(bitset_count(~0'u64), u64), "64");
 }
 
 // A random set: sparse, about half, dense, or empty or full.
@@ -204,8 +214,9 @@ any_of: proc(set: *bools, b: *bools) -> b32 = {
     return 0;
 }
 
-fuzz: proc(run: *dojo_run) -> void = {
+fuzz: proc(run: *dojo_run, r: region level) -> void = {
     dojo_fuzz(run);
+    f: *fmt in level = fmt_make(r, 512);
     rng: dojo_rng = { .state = run*.seed };
     model: bools = {};
     for (op: u64 = 1; op <= run*.ops; op += 1) {
@@ -369,15 +380,14 @@ fuzz: proc(run: *dojo_run) -> void = {
                 same = got_ids[k] == want_ids[k];
             }
             if (!same) {
-                text: [512]c8 = {};
-                f: fmt = fmt_to(text);
-                fmt_ids(f&, got_ids[0..64], got_n <= 64 ? got_n : 64);
-                fmt_cstr(f&, ", it should give ");
-                fmt_ids(f&, want_ids[0..64], want_n);
+                fmt_reset(f);
+                fmt_ids(f, got_ids[0..64], got_n <= 64 ? got_n : 64);
+                fmt_cstr(f, ", it should give ");
+                fmt_ids(f, want_ids[0..64], want_n);
                 dojo_fail(run, op);
                 printfmt("ids(");
                 print_set(set);
-                printfmt(") gave {}\n", f.data);
+                printfmt(") gave {}\n", fmt_text(f));
                 dojo_failed(run, op);
             }
         }
@@ -386,8 +396,10 @@ fuzz: proc(run: *dojo_run) -> void = {
 }
 
 main: proc(argc: i32, argv: ^^c8) -> i32 = {
-    run: dojo_run = dojo_run_init(argc, argv, "bitset", "6. bitsets");
-    scenario();
-    fuzz(run&);
+    level: region = {
+        run: *dojo_run in level = dojo_run_init(level, argc, argv, "bitset", "6. bitsets");
+        scenario(level);
+        fuzz(run, level);
+    }
     return 0;
 }

@@ -21,17 +21,15 @@ slot_map_slot: struct = {
 }
 
 slot_map: struct = {
-    arena: *memops_arena;
-    slots: vec<slot_map_slot>;
-    free: vec<u32>;
+    slots: *vec<slot_map_slot> in level;
+    free: *vec<u32> in level;
     // Packed: values[row] belongs to handles[row].
-    values: vec<u64>;
-    handles: vec<dojo_handle>;
+    values: *vec<u64> in level;
+    handles: *vec<dojo_handle> in level;
 }
 
-slot_map_init: proc(m: *slot_map, arena: *memops_arena) -> void = {
-    m* = {};
-    m*.arena = arena;
+slot_map_make: proc(r: region level) -> *slot_map in level = {
+    return new<slot_map>(r, { .slots = vec<slot_map_slot>make(r, 0), .free = vec<u32>make(r, 0), .values = vec<u64>make(r, 0), .handles = vec<dojo_handle>make(r, 0) });
 }
 
 // The value goes in a new row at the end; its handle reuses a freed index
@@ -48,7 +46,7 @@ slot_map_contains: proc(m: *slot_map, h: dojo_handle) -> b32 = {
 
 // Handle, slot, row, value: the value to read or to change, or null if h is
 // dead.
-slot_map_get: proc(m: *slot_map, h: dojo_handle) -> *u64 = {
+slot_map_get: proc(m: *slot_map, h: dojo_handle) -> option<*u64> = {
     return null;
 }
 
@@ -64,11 +62,11 @@ slot_map_len: proc(m: *slot_map) -> u64 = {
 }
 
 // The values, packed, in row order.
-slot_map_values: proc(m: *slot_map) -> []u64 = {
-    return vec<u64>items(m*.values&);
+slot_map_values: proc(m: *slot_map) -> []u64 in level = {
+    return vec<u64>items(m*.values);
 }
 
 // handles[row] is the handle that owns values[row].
-slot_map_handles: proc(m: *slot_map) -> []dojo_handle = {
-    return vec<dojo_handle>items(m*.handles&);
+slot_map_handles: proc(m: *slot_map) -> []dojo_handle in level = {
+    return vec<dojo_handle>items(m*.handles);
 }

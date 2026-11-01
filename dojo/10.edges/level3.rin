@@ -2,11 +2,11 @@
 //
 // Start it with: python tools/dojo.py start edges 3
 //
-// The harness needs exactly this, and checks what each does. vec<T> and
-// memops_arena are given.
+// The harness needs exactly this, and checks what each does. vec<T> and the
+// region `level` are given.
 //
 //   graph: struct
-//   graph_init: proc(g: *graph, arena: *memops_arena) -> void      node 0 is the empty signature
+//   graph_make: proc(r: region level) -> *graph in level           node 0 is the empty signature
 //   graph_signature: proc(g: *graph, node: u32) -> u64
 //   graph_with: proc(g: *graph, node: u32, id: u32) -> u32         the node with id added
 //   graph_without: proc(g: *graph, node: u32, id: u32) -> u32      the node with id removed
@@ -19,7 +19,6 @@
 // searches (a lookup) and writes the edge and the edge back. A move that
 // changes nothing counts as neither. Ids go up to 63.
 
-import "std/memops.rin"
 import "std/vec.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.

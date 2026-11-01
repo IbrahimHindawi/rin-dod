@@ -50,16 +50,15 @@ command: struct = {
 }
 
 commands: struct = {
-    arena: *memops_arena;
-    list: vec<command>;
+    list: *vec<command> in level;
     spawns: u32;
     // While the buffer is applied: the handle each spawn made, in order.
-    spawned: vec<dojo_handle>;
+    spawned: *vec<dojo_handle> in level;
 }
 
-commands_init: proc(c: *commands, arena: *memops_arena) -> void = {
-    c* = {};
-    c*.arena = arena;
+// An empty buffer in the region, its two vecs made there too.
+commands_make: proc(r: region level) -> *commands in level = {
+    return new<commands>(r, { .list = vec<command>make(r, 0), .spawned = vec<dojo_handle>make(r, 0) });
 }
 
 // Record a spawn; it happens in commands_apply. Returns its pending number.

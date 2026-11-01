@@ -1,3 +1,19 @@
+# The dojo, in the safe subset
+
+This directory is the dojo ported to rin's safe subset: the same thirteen
+blocks, harnesses, levels and playgrounds as [`dojo/`](../README.md), with
+the arena every harness passed around replaced by the region `level`, which
+each harness opens in `main` and hands to the scenario and the fuzz run.
+Blocks 5 and 11 also use the region `frame`, opened once per game frame or
+fuzz step. A kata is made in the region by its `_make` proc,
+`handles_make(r: region level) -> *handles in level`, where the original
+had an `_init`; a proc that may find nothing returns a nullable `option<*T>`,
+narrowed with `if (p)`. Each block's README says what else changed, where
+anything did: 7 (the arena hands out offsets), 12 (the region is the arena),
+13 (a system is kept behind a pointer into the region) and 6 (the playground
+only). The expected outputs are the originals, unchanged. The few procs
+marked `unsafe { }` are named at the top of the file that holds them.
+
 # The dojo
 
 An ECS is mostly a few small building blocks put together. None of them is

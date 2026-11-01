@@ -1,4 +1,8 @@
 // The reference: a free list, and a generation per index.
+//
+// Safe subset: the handles live in the region `level` and so do their two
+// vecs; handles_make builds them there, where the original's handles_init took
+// an arena.
 
 import "std/memops.rin"
 import "std/vec.rin"
@@ -8,30 +12,28 @@ import "../dojo.rin"
 import "harness.rin"
 
 handles: struct = {
-    arena: *memops_arena;
     // The life each index is in now, or will be in next if it is free.
-    generations: vec<u32>;
+    generations: *vec<u32> in level;
     // Freed indices, waiting to be reused. A stack: the last one freed is the
     // first one reused.
-    free: vec<u32>;
+    free: *vec<u32> in level;
 }
 
-handles_init: proc(h: *handles, arena: *memops_arena) -> void = {
-    h* = {};
-    h*.arena = arena;
+handles_make: proc(r: region level) -> *handles in level = {
+    return new<handles>(r, { .generations = vec<u32>make(r, 0), .free = vec<u32>make(r, 0) });
 }
 
 // A handle no one has had before: a freed index in its next life, or a new
 // index in its first.
 handles_alloc: proc(h: *handles) -> dojo_handle = {
     index: u32 = 0;
-    if (!vec<u32>is_empty(h*.free&)) {
-        index = vec<u32>pop(h*.free&);
+    if (!vec<u32>is_empty(h*.free)) {
+        index = vec<u32>pop(h*.free);
     } else {
-        index = cast(h*.generations.length, u32);
-        _ = vec<u32>append(h*.arena, h*.generations&, 1);
+        index = cast(h*.generations*.length, u32);
+        _ = vec<u32>push(h*.generations, 1);
     }
-    return { .index = index, .generation = vec<u32>at(h*.generations&, cast(index, u64))* };
+    return { .index = index, .generation = vec<u32>at(h*.generations, cast(index, u64))* };
 }
 
 // The generation goes up now, not at the next alloc, so a free index already
@@ -40,22 +42,22 @@ handles_free: proc(h: *handles, e: dojo_handle) -> dojo_status = {
     if (!handles_alive(h, e)) {
         return dojo_status.dead;
     }
-    vec<u32>at(h*.generations&, cast(e.index, u64))* += 1;
-    _ = vec<u32>append(h*.arena, h*.free&, e.index);
+    vec<u32>at(h*.generations, cast(e.index, u64))* += 1;
+    _ = vec<u32>push(h*.free, e.index);
     return dojo_status.ok;
 }
 
 handles_alive: proc(h: *handles, e: dojo_handle) -> b32 = {
-    if (cast(e.index, u64) >= h*.generations.length) {
+    if (cast(e.index, u64) >= h*.generations*.length) {
         return 0;
     }
-    return vec<u32>at(h*.generations&, cast(e.index, u64))* == e.generation;
+    return vec<u32>at(h*.generations, cast(e.index, u64))* == e.generation;
 }
 
 handles_live: proc(h: *handles) -> u64 = {
-    return h*.generations.length - h*.free.length;
+    return h*.generations*.length - h*.free*.length;
 }
 
 handles_slots: proc(h: *handles) -> u64 = {
-    return h*.generations.length;
+    return h*.generations*.length;
 }

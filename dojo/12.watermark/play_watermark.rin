@@ -23,6 +23,11 @@
 // every table, from 0, so a query lists its tables again each time. It's a
 // global, read on every update, so a debugger can flip it mid-run too: stop
 // on `query_update`, set it to 0 in the watch window, and continue.
+//
+// Safe subset: a query is named by its place in `query_names`, since a struct
+// holding a C string is not a value safe code may write to, and the two
+// queries are shown one after the other instead of through an array of
+// pointers.
 
 import "std/print.rin"
 
@@ -33,6 +38,9 @@ position: u64 = 1;
 velocity: u64 = 2;
 health: u64 = 4;
 burning: u64 = 8;
+
+// The two queries' names; a query holds its place here.
+query_names: [2]^const char = { "movers", "healthy" };
 
 // The world's tables, as far as a query cares: a signature each, added at the
 // end and never removed.
@@ -47,7 +55,7 @@ tables_make: proc(t: *tables, signature: u64) -> void = {
 }
 
 query: struct = {
-    name: ^const char;
+    name: u32;
     all: u64;
     none: u64;
     // The matching tables, by index.
@@ -63,7 +71,7 @@ matches: proc(signature: u64, all: u64, none: u64) -> b32 = {
     return (signature & all) == all && (signature & none) == 0;
 }
 
-query_make: proc(name: ^const char, all: u64, none: u64) -> query = {
+query_make: proc(name: u32, all: u64, none: u64) -> query = {
     q: query = {};
     q.name = name;
     q.all = all;
@@ -87,7 +95,7 @@ query_update: proc(q: *query, t: *tables) -> void = {
 }
 
 query_found: proc(q: *query) -> []u32 = {
-    return { .data = q*.found[0]&, .length = q*.found_count };
+    return q*.found[0..q*.found_count];
 }
 
 print_list: proc(items: []u32) -> void = {
@@ -118,30 +126,31 @@ verify: proc(t: *tables, q: *query) -> void = {
         same = want[i] == q*.found[i];
     }
     if (!same) {
-        printfmt("    verify: {} lists tables ", q*.name);
+        printfmt("    verify: {} lists tables ", query_names[q*.name]);
         print_list(query_found(q));
         printfmt("; it should list ");
-        print_list({ .data = want[0]&, .length = want_count });
+        print_list(want[0..want_count]);
         printfmt("\n");
     }
     if (q*.scanned != q*.checked) {
         printfmt("    verify: {} has looked at {} tables to check {}; each should be looked at once\n",
-            q*.name, q*.scanned, q*.checked);
+            query_names[q*.name], q*.scanned, q*.checked);
     }
 }
 
 // The components in a signature, a letter each, padded to `width` columns.
-print_letters: proc(signature: u64, width: i32) -> void = {
-    names: ^const char = "PVHB";
-    letters: [5]c8 = {};
+print_letters: proc(signature: u64, width: u64) -> void = {
+    names: [4]c8 = { 'P', 'V', 'H', 'B' };
     n: u64 = 0;
     for (i: u64 = 0; i < 4; i += 1) {
         if (((signature shr i) & 1) == 1) {
-            letters[n] = names[i];
+            printfmt("{}", names[i]);
             n += 1;
         }
     }
-    printf("%-*s", width, letters[0]&);
+    for (k: u64 = n; k < width; k += 1) {
+        printfmt(" ");
+    }
 }
 
 has_found: proc(q: *query, table: u64) -> b32 = {
@@ -155,43 +164,49 @@ has_found: proc(q: *query, table: u64) -> b32 = {
 
 // The tables, then a row per query: yes or - for each table it has looked at,
 // and a | at its watermark.
-show: proc(t: *tables, a: *query, b: *query) -> void = {
-    printf("    table");
-    for (ti: u64 = 0; ti < t*.count; ti += 1) {
-        printf(ti == 0 ? "     %u" : "    %u", cast(ti, u32));
+// A query's row: yes or - for each table it has looked at, and a | at its
+// watermark.
+show_query: proc(t: *tables, q: *query) -> void = {
+    printfmt("    {:-10}", query_names[q*.name]);
+    for (ti: u64 = 0; ti < q*.checked; ti += 1) {
+        printfmt("{}", has_found(q, ti) ? "yes  " : "-    ");
     }
-    printf("\n    has       ");
+    printfmt("|    ");
+    for (ti: u64 = q*.checked; ti < t*.count; ti += 1) {
+        printfmt("     ");
+    }
+    printfmt("checked {}, scanned {}, tables ", q*.checked, q*.scanned);
+    print_list(query_found(q));
+    printfmt("\n");
+}
+
+// The tables, then a row per query.
+show: proc(t: *tables, a: *query, b: *query) -> void = {
+    printfmt("    table");
+    for (ti: u64 = 0; ti < t*.count; ti += 1) {
+        if (ti == 0) {
+            printfmt("     {}", ti);
+        } else {
+            printfmt("    {}", ti);
+        }
+    }
+    printfmt("\n    has       ");
     for (ti: u64 = 0; ti < t*.count; ti += 1) {
         print_letters(t*.signatures[ti], ti + 1 < t*.count ? 5 : 0);
     }
-    printf("\n");
-    queries: [2]*query = {};
-    queries[0] = a;
-    queries[1] = b;
-    for (k: u64 = 0; k < 2; k += 1) {
-        q: *query = queries[k];
-        printf("    %-10s", q*.name);
-        for (ti: u64 = 0; ti < q*.checked; ti += 1) {
-            printf(has_found(q, ti) ? "yes  " : "-    ");
-        }
-        printf("|    ");
-        for (ti: u64 = q*.checked; ti < t*.count; ti += 1) {
-            printf("     ");
-        }
-        printfmt("checked {}, scanned {}, tables ", q*.checked, q*.scanned);
-        print_list(query_found(q));
-        printfmt("\n");
-    }
+    printfmt("\n");
+    show_query(t, a);
+    show_query(t, b);
     verify(t, a);
     verify(t, b);
 }
 
 main: proc() -> i32 = {
     t: tables = {};
-    movers: query = query_make("movers", position | velocity, 0);
-    healthy: query = query_make("healthy", health, burning);
-    printf("components: P position, V velocity, H health, B burning\n");
-    printf("movers: all {P V}, none {}; healthy: all {H}, none {B}\n");
+    movers: query = query_make(0, position | velocity, 0);
+    healthy: query = query_make(1, health, burning);
+    printfmt("components: P position, V velocity, H health, B burning\n");
+    printfmt("movers: all {}, none {}; healthy: all {}, none {}\n", "{P V}", "{}", "{H}", "{B}");
 
     printfmt("make tables 0 to 2\n");
     tables_make(t&, position);

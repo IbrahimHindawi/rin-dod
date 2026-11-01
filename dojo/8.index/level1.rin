@@ -1,8 +1,10 @@
 // Level 1: one proc. Everything here works except list_remove. Write its body.
 //
 // Start it with: python tools/dojo.py start index 1
+//
+// Safe subset: the list lives in the region `level`; a pointer into its nodes
+// is a borrow, which the checker ends at the next call that may move them.
 
-import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
 // The harness: it has main, and runs the procs below, so with it this file
@@ -23,31 +25,28 @@ list_node: struct = {
 }
 
 list: struct = {
-    arena: *memops_arena;
-    nodes: vec<list_node>;
+    nodes: *vec<list_node> in level;
     // Freed nodes, used again before the vec grows.
-    free: vec<u32>;
+    free: *vec<u32> in level;
     head: u32;
     tail: u32;
     length: u64;
 }
 
-list_init: proc(l: *list, arena: *memops_arena) -> void = {
-    l* = {};
-    l*.arena = arena;
-    l*.head = list_none;
-    l*.tail = list_none;
+list_make: proc(r: region level) -> *list in level = {
+    return new<list>(r, { .nodes = vec<list_node>make(r, 0), .free = vec<u32>make(r, 0),
+        .head = list_none, .tail = list_none });
 }
 
 // Node `index`, alive or free. The pointer is good until the next node is
 // made, which can move them all.
-list_at: proc(l: *list, index: u32) -> *list_node = {
-    return vec<list_node>at(l*.nodes&, cast(index, u64));
+list_at: proc(l: *list, index: u32) -> *list_node in level = {
+    return vec<list_node>at(l*.nodes, cast(index, u64));
 }
 
 // Node `index` if it's in the list, or null.
-list_live: proc(l: *list, index: u32) -> *list_node = {
-    if (cast(index, u64) >= l*.nodes.length || !list_at(l, index)*.alive) {
+list_live: proc(l: *list, index: u32) -> option<*list_node in level> = {
+    if (cast(index, u64) >= l*.nodes*.length || !list_at(l, index)*.alive) {
         return null;
     }
     return list_at(l, index);
@@ -58,13 +57,13 @@ list_live: proc(l: *list, index: u32) -> *list_node = {
 list_take: proc(l: *list, value: u64) -> u32 = {
     fresh: list_node = { .value = value, .prev = list_none, .next = list_none, .alive = 1 };
     l*.length += 1;
-    if (!vec<u32>is_empty(l*.free&)) {
-        index: u32 = vec<u32>pop(l*.free&);
+    if (!vec<u32>is_empty(l*.free)) {
+        index: u32 = vec<u32>pop(l*.free);
         list_at(l, index)* = fresh;
         return index;
     }
-    _ = vec<list_node>append(l*.arena, l*.nodes&, fresh);
-    return cast(l*.nodes.length - 1, u32);
+    _ = vec<list_node>push(l*.nodes, fresh);
+    return cast(l*.nodes*.length - 1, u32);
 }
 
 list_push_back: proc(l: *list, value: u64) -> u32 = {
@@ -95,7 +94,7 @@ list_push_front: proc(l: *list, value: u64) -> u32 = {
 // in the list. Every pointer into the nodes is taken after list_take, which
 // can move them.
 list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
-    if (list_live(l, node) == null) {
+    if (!list_live(l, node)) {
         return list_none;
     }
     index: u32 = list_take(l, value);
@@ -113,7 +112,8 @@ list_insert_after: proc(l: *list, node: u32, value: u64) -> u32 = {
 }
 
 // Its neighbours link to each other, past it, and its index goes on the free
-// list.
+// list. A pointer to a node is a borrow of the list, and a call that may touch
+// the nodes ends it: read what you need from the node first.
 list_remove: proc(l: *list, node: u32) -> option<u64> = {
     // Level 1: link its neighbours past it, and put it on the free list. A
     // node not in the list gives none and changes nothing.
@@ -121,9 +121,9 @@ list_remove: proc(l: *list, node: u32) -> option<u64> = {
 }
 
 // The node's value, to read or to change, or null if it isn't in the list.
-list_get: proc(l: *list, node: u32) -> *u64 = {
-    n: *list_node = list_live(l, node);
-    if (n == null) {
+list_get: proc(l: *list, node: u32) -> option<*u64 in level> = {
+    n: option<*list_node in level> = list_live(l, node);
+    if (!n) {
         return null;
     }
     return n*.value&;
@@ -140,16 +140,16 @@ list_tail: proc(l: *list) -> u32 = {
 }
 
 list_next: proc(l: *list, node: u32) -> u32 = {
-    n: *list_node = list_live(l, node);
-    if (n == null) {
+    n: option<*list_node> = list_live(l, node);
+    if (!n) {
         return list_none;
     }
     return n*.next;
 }
 
 list_prev: proc(l: *list, node: u32) -> u32 = {
-    n: *list_node = list_live(l, node);
-    if (n == null) {
+    n: option<*list_node> = list_live(l, node);
+    if (!n) {
         return list_none;
     }
     return n*.prev;

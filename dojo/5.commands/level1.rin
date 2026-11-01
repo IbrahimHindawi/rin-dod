@@ -52,43 +52,41 @@ command: struct = {
 // The frame's commands. Cleared after apply, keeping their room, so once the
 // game has run a few frames, recording allocates nothing.
 commands: struct = {
-    arena: *memops_arena;
-    list: vec<command>;
+    list: *vec<command> in level;
     spawns: u32;
     // While the buffer is applied: the handle each spawn made, in order.
-    spawned: vec<dojo_handle>;
+    spawned: *vec<dojo_handle> in level;
 }
 
-commands_init: proc(c: *commands, arena: *memops_arena) -> void = {
-    c* = {};
-    c*.arena = arena;
+commands_make: proc(r: region level) -> *commands in level = {
+    return new<commands>(r, { .list = vec<command>make(r, 0), .spawned = vec<dojo_handle>make(r, 0) });
 }
 
 // Record a spawn; it happens in commands_apply. Returns its pending number.
 commands_spawn: proc(c: *commands, value: u32) -> pending = {
-    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.spawn, .value = value });
+    _ = vec<command>push(c*.list, { .kind = command_kind.spawn, .value = value });
     c*.spawns += 1;
     return { .index = c*.spawns - 1 };
 }
 
 commands_set: proc(c: *commands, t: target, value: u32) -> void = {
-    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.set, .target = t, .value = value });
+    _ = vec<command>push(c*.list, { .kind = command_kind.set, .target = t, .value = value });
 }
 
 commands_despawn: proc(c: *commands, t: target) -> void = {
-    _ = vec<command>append(c*.arena, c*.list&, { .kind = command_kind.despawn, .target = t });
+    _ = vec<command>push(c*.list, { .kind = command_kind.despawn, .target = t });
 }
 
 // Commands recorded and not yet applied.
 commands_len: proc(c: *commands) -> u64 = {
-    return c*.list.length;
+    return c*.list*.length;
 }
 
 // The handle a target names: its own, or the one its spawn made, which was
 // applied before any command that names it.
 commands_resolve: proc(c: *commands, t: target) -> dojo_handle = {
     if (t.is_pending) {
-        return vec<dojo_handle>at(c*.spawned&, cast(t.spawn.index, u64))*;
+        return vec<dojo_handle>at(c*.spawned, cast(t.spawn.index, u64))*;
     }
     return t.handle;
 }

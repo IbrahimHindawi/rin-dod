@@ -4,13 +4,13 @@
 //
 // The harness needs exactly this, and checks what each does. A table is its
 // signature, a u64 with a bit per component, and the world's tables are a
-// slice of them that only ever grows at the end. vec<T> and memops_arena are
-// given.
+// slice of them that only ever grows at the end. vec<T> and the region
+// `level` are given.
 //
 //   query: struct
-//   query_init: proc(q: *query, arena: *memops_arena, all: u64, none: u64) -> void
+//   query_make: proc(r: region level, all: u64, none: u64) -> *query in level
 //                                                       has looked at nothing yet
-//   query_update: proc(q: *query, signatures: []u64) -> void
+//   query_update: proc(q: *query, signatures: []const u64) -> void
 //                                                       finds the matching tables among the
 //                                                       ones it hasn't looked at
 //   query_tables: proc(q: *query) -> []u32              the matching tables, in increasing order
@@ -21,7 +21,6 @@
 // A table matches when its signature has every bit of `all` and no bit of
 // `none`.
 
-import "std/memops.rin"
 import "std/vec.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.

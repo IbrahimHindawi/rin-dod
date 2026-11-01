@@ -1,6 +1,19 @@
 # 13. A dispatch table
 
-`dojo/13.dispatch/play_dispatch.rin`
+`dojo/safe/13.dispatch/play_dispatch.rin`
+
+**This is the safe-subset port.** A C string and a proc pointer are both
+pointers without a region, so a struct holding them, the original's
+`schedule_system`, is one safe code cannot write, hold by value or make with
+`new`. The kata keeps the name and the proc it is given behind a pointer into
+the region `level`, made by its one trusted proc, `schedule_system_make`, and
+keeps what changes, `enabled` and `calls`, beside that pointer in the entry
+the vec holds. So `schedule_make` takes the region, and so do `schedule_add`
+and `schedule_insert_before`, which make a system each; names are compared
+with `dojo_cstr_equal`, since `strcmp` is C's. The harness's log holds each
+system's number in its pool instead of its name, and its pool is two tables,
+the names and the procs. The schedule, the dispatch and the lesson about
+order are unchanged.
 
 A frame is a list of systems run in order, and the list is **data**: a name
 and a pointer to a proc for each, in an array the program changes as it runs.

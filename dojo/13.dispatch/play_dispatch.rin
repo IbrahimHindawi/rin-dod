@@ -26,9 +26,18 @@
 // frame late. It's a global, read when damage is added, so a debugger can
 // flip it too: stop on the first line of main, set it to 0 in the watch
 // window, and continue.
+//
+// Safe subset: a name and a proc pointer are both pointers without a region,
+// so safe code cannot keep them in a struct by value. Each system is made in
+// the region `level` by system_make, trusted, and the schedule's array holds
+// pointers to them, with the enabled flag beside each. name_is, also trusted,
+// is strcmp, which safe code may not call itself.
 
 import "std/print.rin"
+import "std/memops.rin"
 import "std/cstd.rin"
+
+level: region;
 
 in_order: b32 = 1;
 
@@ -73,9 +82,32 @@ die_system: proc(w: *world) -> void = {
 // A system is a plain pointer to a proc.
 system_proc: alias = *proc(w: *world) -> void;
 
-schedule_entry: struct = {
+// A system: its name and its proc, kept in the region. (Not called `system`:
+// C has a proc of that name.)
+sys: struct = {
     name: ^const char;
     run: system_proc;
+}
+
+system_make: proc(r: region level, name: ^const char, run: system_proc) -> *sys in level = {
+    unsafe {
+        s: *sys in level = cast(memops_arena_push_zero(r, sizeof(sys), alignof(sys)), *sys in level);
+        s*.name = name;
+        s*.run = run;
+        return s;
+    }
+}
+
+// Are two names the same text? strcmp is C's, so safe code calls it through
+// this.
+name_is: proc(a: ^const char, b: ^const char) -> b32 = {
+    unsafe {
+        return strcmp(a, b) == 0;
+    }
+}
+
+schedule_entry: struct = {
+    system: option<*sys in level>;
     enabled: b32;
 }
 
@@ -87,19 +119,21 @@ schedule: struct = {
 // Where the system called `name` is, or count if it isn't there.
 schedule_find: proc(s: *schedule, name: ^const char) -> u64 = {
     for (i: u64 = 0; i < s*.count; i += 1) {
-        if (strcmp(s*.entries[i].name, name) == 0) {
+        sys_entry: option<*sys in level> = s*.entries[i].system;
+        if (sys_entry && name_is(sys_entry*.name, name)) {
             return i;
         }
     }
     return s*.count;
 }
 
-schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void = {
-    s*.entries[s*.count] = { .name = name, .run = run, .enabled = 1 };
+schedule_add: proc(s: *schedule, r: region level, name: ^const char, run: system_proc) -> void = {
+    s*.entries[s*.count] = { .system = system_make(r, name, run), .enabled = 1 };
     s*.count += 1;
 }
 
-schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char, run: system_proc) -> b32 = {
+schedule_insert_before: proc(s: *schedule, r: region level, before: ^const char, name: ^const char,
+                             run: system_proc) -> b32 = {
     at: u64 = schedule_find(s, before);
     if (at == s*.count) {
         return 0;
@@ -107,7 +141,7 @@ schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const cha
     for (i: u64 = s*.count; i > at; i -= 1) {
         s*.entries[i] = s*.entries[i - 1];
     }
-    s*.entries[at] = { .name = name, .run = run, .enabled = 1 };
+    s*.entries[at] = { .system = system_make(r, name, run), .enabled = 1 };
     s*.count += 1;
     return 1;
 }
@@ -138,9 +172,10 @@ schedule_set_enabled: proc(s: *schedule, name: ^const char, on: b32) -> b32 = {
 schedule_run: proc(s: *schedule, w: *world) -> void = {
     printfmt("    ran      ");
     for (i: u64 = 0; i < s*.count; i += 1) {
-        if (s*.entries[i].enabled) {
-            s*.entries[i].run(w);
-            printfmt(" {}", s*.entries[i].name);
+        sys_entry: option<*sys in level> = s*.entries[i].system;
+        if (sys_entry && s*.entries[i].enabled) {
+            sys_entry*.run(w);
+            printfmt(" {}", sys_entry*.name);
         }
     }
     printfmt("\n");
@@ -149,10 +184,14 @@ schedule_run: proc(s: *schedule, w: *world) -> void = {
 schedule_show: proc(s: *schedule) -> void = {
     printfmt("    schedule ");
     for (i: u64 = 0; i < s*.count; i += 1) {
+        sys_entry: option<*sys in level> = s*.entries[i].system;
+        if (!sys_entry) {
+            continue;
+        }
         if (s*.entries[i].enabled) {
-            printfmt(" {}", s*.entries[i].name);
+            printfmt(" {}", sys_entry*.name);
         } else {
-            printfmt(" ({} off)", s*.entries[i].name);
+            printfmt(" ({} off)", sys_entry*.name);
         }
     }
     printfmt("\n");
@@ -187,51 +226,53 @@ frame: proc(s: *schedule, w: *world, n: u32) -> void = {
 }
 
 main: proc() -> i32 = {
-    s: schedule = {};
-    w: world = { .distance = 8, .health = 100, .alive = 1 };
-    printfmt("a drone 8 from a turret, with health 100: it flies 2 closer a frame,\n");
-    printfmt("and the turret hits it for 40 a frame once it's within 4\n");
-    show(w&);
+    level: region = {
+        s: schedule = {};
+        w: world = { .distance = 8, .health = 100, .alive = 1 };
+        printfmt("a drone 8 from a turret, with health 100: it flies 2 closer a frame,\n");
+        printfmt("and the turret hits it for 40 a frame once it's within 4\n");
+        show(w&);
 
-    printfmt("add move, shoot and die\n");
-    schedule_add(s&, "move", move_system);
-    schedule_add(s&, "shoot", shoot_system);
-    schedule_add(s&, "die", die_system);
-    schedule_show(s&);
-    verify(w&);
+        printfmt("add move, shoot and die\n");
+        schedule_add(s&, level, "move", move_system);
+        schedule_add(s&, level, "shoot", shoot_system);
+        schedule_add(s&, level, "die", die_system);
+        schedule_show(s&);
+        verify(w&);
 
-    if (in_order) {
-        printfmt("insert damage before die: die reads the health that damage writes\n");
-        _ = schedule_insert_before(s&, "die", "damage", damage_system);
-    } else {
-        printfmt("add damage at the end, after die\n");
-        schedule_add(s&, "damage", damage_system);
+        if (in_order) {
+            printfmt("insert damage before die: die reads the health that damage writes\n");
+            _ = schedule_insert_before(s&, level, "die", "damage", damage_system);
+        } else {
+            printfmt("add damage at the end, after die\n");
+            schedule_add(s&, level, "damage", damage_system);
+        }
+        schedule_show(s&);
+        verify(w&);
+
+        frame(s&, w&, 1);
+        frame(s&, w&, 2);
+
+        printfmt("switch shoot off: the turret is reloading\n");
+        _ = schedule_set_enabled(s&, "shoot", 0);
+        schedule_show(s&);
+        verify(w&);
+
+        frame(s&, w&, 3);
+
+        printfmt("switch shoot back on\n");
+        _ = schedule_set_enabled(s&, "shoot", 1);
+        schedule_show(s&);
+        verify(w&);
+
+        frame(s&, w&, 4);
+        frame(s&, w&, 5);
+        frame(s&, w&, 6);
+
+        printfmt("remove shoot: the turret is gone\n");
+        _ = schedule_remove(s&, "shoot");
+        schedule_show(s&);
+        verify(w&);
     }
-    schedule_show(s&);
-    verify(w&);
-
-    frame(s&, w&, 1);
-    frame(s&, w&, 2);
-
-    printfmt("switch shoot off: the turret is reloading\n");
-    _ = schedule_set_enabled(s&, "shoot", 0);
-    schedule_show(s&);
-    verify(w&);
-
-    frame(s&, w&, 3);
-
-    printfmt("switch shoot back on\n");
-    _ = schedule_set_enabled(s&, "shoot", 1);
-    schedule_show(s&);
-    verify(w&);
-
-    frame(s&, w&, 4);
-    frame(s&, w&, 5);
-    frame(s&, w&, 6);
-
-    printfmt("remove shoot: the turret is gone\n");
-    _ = schedule_remove(s&, "shoot");
-    schedule_show(s&);
-    verify(w&);
     return 0;
 }

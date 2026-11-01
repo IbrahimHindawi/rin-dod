@@ -1,6 +1,16 @@
 # 4. A type-erased column
 
-`dojo/4.column/play_column.rin`
+`dojo/safe/4.column/play_column.rin`
+
+**This is the safe-subset port.** A type-erased column is type erasure
+itself: it hands out rows as bytes and reads them back as `T`, which is what
+the checker exists to refuse. So the column's core is marked `unsafe { }` in
+the kata, `column_make`, `column_push_zeroed`, `column_swap_remove`,
+`column_row` and `column_slice`, with `column_len` and `column_capacity`
+checked, and `column_make` takes the region `level` and keeps it as the
+arena its bytes grow in. The harness has two trusted helpers of its own,
+`bytes_of` and `slice_address`, to look at a value's bytes and a slice's
+address. The rows, the alignment and the swap-remove are unchanged.
 
 A column is one component's rows, kept as bytes. It doesn't know the type it
 holds, only how many bytes make a row and how they must be aligned. That is

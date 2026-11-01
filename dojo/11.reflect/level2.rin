@@ -4,12 +4,14 @@
 // you what is missing.
 //
 // Start it with: python tools/dojo.py start reflect 2
+//
+// Safe code cannot index a C string or read four bytes as an f32; the harness
+// gives you walk_cstr_at(s, i), walk_cstr_append(dst, at, src),
+// walk_read_f32(bytes, at) and walk_write_f32(bytes, at, value) for that, and
+// std gives reflect_field_at(type, i), a field or null past the end.
 
-import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
-import "std/fmt.rin"
-import "std/cstd.rin"
 import "std/reflect.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
@@ -30,27 +32,26 @@ walk_leaf: struct = {
 
 // Every field a tool shows, depth first in the record's order, onto `out`. A
 // struct field is walked into rather than listed; a hidden one is left out,
-// with everything inside it.
-walk_leaves: proc(arena: *memops_arena, type: *const reflect, prefix: ^const char, base: u64,
-                  out: *vec<walk_leaf>) -> void = {
+// with everything inside it. `prefix` is the path so far, "light.at." for
+// the fields of a room's light's at.
+walk_leaves: proc(type: *const reflect, prefix: []const c8, base: u64, out: *vec<walk_leaf>) -> void = {
 }
 
-// The paths of the fields a tool shows: "at.x", "at.y".
-walk_paths: proc(arena: *memops_arena, type: *const reflect) -> vec<walk_path> = {
-    out: vec<walk_path> = {};
-    return out;
+// The paths of the fields a tool shows: "at.x", "at.y". The list is made in
+// the caller's region r, vec<walk_path>make(r, 0).
+walk_paths: proc(r: region R, type: *const reflect) -> *vec<walk_path> in R = {
+    return vec<walk_path>make(r, 0);
 }
 
 // The paths, of those, whose bytes differ between two values of the type.
-walk_diff: proc(arena: *memops_arena, type: *const reflect, a: []const u8, b: []const u8) -> vec<walk_path> = {
-    out: vec<walk_path> = {};
-    return out;
+walk_diff: proc(r: region R, type: *const reflect, a: []const u8, b: []const u8) -> *vec<walk_path> in R = {
+    return vec<walk_path>make(r, 0);
 }
 
 // The field a path names, hidden or not, and where its bytes start in the
 // outermost value: look each name up in the record of the field before it,
 // adding offsets. Null if no field has that path.
-walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> *const reflect_field = {
+walk_find: proc(type: *const reflect, path: ^const char, offset: *u64) -> option<*const reflect_field> = {
     return null;
 }
 

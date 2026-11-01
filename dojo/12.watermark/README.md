@@ -1,6 +1,16 @@
 # 12. A watermark
 
-`dojo/12.watermark/play_watermark.rin`
+`dojo/safe/12.watermark/play_watermark.rin`
+
+**This is the safe-subset port.** The arena the original passed to
+`query_init` is the region `level` here: `query_make(r: region level, all,
+none)` makes the query and its list of tables in the region, and the
+harness's own list of tables and its models live there too. A query the fuzz
+run replaces is a new one made in the region, where the original
+re-initialized it in place; the old one stays in `level` until the run ends,
+which is what an arena does. `query_update` takes `[]const u64`, since it
+only reads the signatures. The watermark itself, the kata's one idea, is
+unchanged.
 
 A query keeps the list of tables it matches, so a system doesn't search for
 them every frame. Tables are only ever **added, at the end**, and never

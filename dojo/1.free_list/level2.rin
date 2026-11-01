@@ -13,16 +13,14 @@ import "../dojo.rin"
 import "harness.rin"
 
 handles: struct = {
-    arena: *memops_arena;
     // The life each index is in now, or will be in next if it is free.
-    generations: vec<u32>;
+    generations: *vec<u32> in level;
     // Freed indices, waiting to be reused.
-    free: vec<u32>;
+    free: *vec<u32> in level;
 }
 
-handles_init: proc(h: *handles, arena: *memops_arena) -> void = {
-    h* = {};
-    h*.arena = arena;
+handles_make: proc(r: region level) -> *handles in level = {
+    return new<handles>(r, { .generations = vec<u32>make(r, 0), .free = vec<u32>make(r, 0) });
 }
 
 // A handle no one has had before. A freed index is reused before a new one is

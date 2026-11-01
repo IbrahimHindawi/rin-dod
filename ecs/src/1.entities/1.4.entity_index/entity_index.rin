@@ -110,8 +110,9 @@ kayan_despawn: proc(w: *kayan_world, e: kayan_entity) -> kayan_status = {
     return kayan_status.ok;
 }
 
-// Handle, then slot, then row: the data is wherever the row is now.
-get_position: proc(w: *kayan_world, e: kayan_entity) -> *vec2 = {
+// Handle, then slot, then row: the data is wherever the row is now. `option<*vec2>`:
+// null for a dead handle, and the caller tests it before reading.
+get_position: proc(w: *kayan_world, e: kayan_entity) -> option<*vec2> = {
     if (!kayan_alive(w, e)) {
         return null;
     }
@@ -154,22 +155,22 @@ kayan_verify: proc(w: *kayan_world) -> u32 = {
 print_rows: proc(w: *kayan_world) -> void = {
     for (row: u32 = 0; row < w*.count; row += 1) {
         e: kayan_entity = w*.entities[row];
-        printf("    row %u  %u:%u  position (%5.2f, %5.2f)\n", row, e.index, e.generation,
+        printfmt("    row {}  {}:{}  position ({:5.2}, {:5.2})\n", row, e.index, e.generation,
             cast(w*.positions[row].x, f64), cast(w*.positions[row].y, f64));
     }
     // A slot is in use when the row it points at is owned by its number, in its
     // current generation. A free slot still holds the row it last had.
-    printf("    slots:");
+    printfmt("    slots:");
     for (i: u32 = 0; i < w*.slot_count; i += 1) {
         s: kayan_slot = w*.slots[i];
         owner: kayan_entity = w*.entities[s.row];
         if (s.row < w*.count && owner.index == i && owner.generation == s.generation) {
-            printf("  %u -> row %u", i, s.row);
+            printfmt("  {} -> row {}", i, s.row);
         } else {
-            printf("  %u free", i);
+            printfmt("  {} free", i);
         }
     }
-    printf("\n");
+    printfmt("\n");
 }
 
 main: proc() -> i32 = {
@@ -199,9 +200,11 @@ main: proc() -> i32 = {
     printfmt("two steps of movement, a straight loop over {} rows\n", w.count);
     print_rows(w&);
 
-    at: *vec2 = get_position(w&, p[2]);
-    printf("%u:%u is at (%.2f, %.2f), wherever its row is\n", p[2].index, p[2].generation,
-        cast(at*.x, f64), cast(at*.y, f64));
+    at: option<*vec2> = get_position(w&, p[2]);
+    if (at) {
+        printfmt("{}:{} is at ({:.2}, {:.2}), wherever its row is\n", p[2].index, p[2].generation,
+            cast(at*.x, f64), cast(at*.y, f64));
+    }
     printfmt("{}:{} has a position: {}\n", p[4].index, p[4].generation,
         get_position(w&, p[4]) != null ? "yes" : "no, it is dead");
     printfmt("kayan_verify: {} problems\n", kayan_verify(w&));

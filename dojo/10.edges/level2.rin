@@ -5,7 +5,6 @@
 //
 // Start it with: python tools/dojo.py start edges 2
 
-import "std/memops.rin"
 import "std/vec.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
@@ -26,21 +25,21 @@ graph_node: struct = {
 }
 
 graph: struct = {
-    arena: *memops_arena;
-    nodes: vec<graph_node>;
+    nodes: *vec<graph_node> in level;
     lookups: u64;
     hits: u64;
 }
 
 // A new node, with no edges known; its number.
-graph_make: proc(g: *graph, signature: u64) -> u32 = {
+graph_add_node: proc(g: *graph, signature: u64) -> u32 = {
     return 0;
 }
 
-// Node 0 is the empty signature, where every entity starts.
-graph_init: proc(g: *graph, arena: *memops_arena) -> void = {
-    g* = {};
-    g*.arena = arena;
+// A graph in the region whose node 0 is the empty signature, where every
+// entity starts.
+graph_make: proc(r: region level) -> *graph in level = {
+    g: *graph in level = new<graph>(r, { .nodes = vec<graph_node>make(r, 0) });
+    return g;
 }
 
 // The slow path, a lookup: the node with this signature, made if there is

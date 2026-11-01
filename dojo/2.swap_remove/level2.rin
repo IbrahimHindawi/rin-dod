@@ -13,22 +13,20 @@ import "std/option.rin"
 import "harness.rin"
 
 sparse_set: struct = {
-    arena: *memops_arena;
     // Packed: values[row] belongs to ids[row]. No holes, in no order.
-    values: vec<u64>;
-    ids: vec<u32>;
+    values: *vec<u64> in level;
+    ids: *vec<u32> in level;
     // Sparse: rows[id] is one more than the row id's value is in, so 0, what
     // a new entry starts as, means id has no value.
-    rows: vec<u32>;
+    rows: *vec<u32> in level;
 }
 
-sparse_set_init: proc(s: *sparse_set, arena: *memops_arena) -> void = {
-    s* = {};
-    s*.arena = arena;
+sparse_set_make: proc(r: region level) -> *sparse_set in level = {
+    return new<sparse_set>(r, { .values = vec<u64>make(r, 0), .ids = vec<u32>make(r, 0), .rows = vec<u32>make(r, 0) });
 }
 
 // id's value, to read or to change, or null if it has none.
-sparse_set_get: proc(s: *sparse_set, id: u32) -> *u64 = {
+sparse_set_get: proc(s: *sparse_set, id: u32) -> option<*u64> = {
     return null;
 }
 
@@ -49,11 +47,11 @@ sparse_set_len: proc(s: *sparse_set) -> u64 = {
 }
 
 // The values, packed, in row order.
-sparse_set_values: proc(s: *sparse_set) -> []u64 = {
-    return vec<u64>items(s*.values&);
+sparse_set_values: proc(s: *sparse_set) -> []u64 in level = {
+    return vec<u64>items(s*.values);
 }
 
 // ids[row] is the id that owns values[row].
-sparse_set_ids: proc(s: *sparse_set) -> []u32 = {
-    return vec<u32>items(s*.ids&);
+sparse_set_ids: proc(s: *sparse_set) -> []u32 in level = {
+    return vec<u32>items(s*.ids);
 }

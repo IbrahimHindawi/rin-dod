@@ -3,16 +3,16 @@
 // Start it with: python tools/dojo.py start dispatch 3
 //
 // The harness needs exactly this, and checks what each does. It provides ctx,
-// what a system is given when it runs, and vec<T>, option<T> and
-// memops_arena are given:
+// what a system is given when it runs, and vec<T>, option<T> and the region
+// `level` are given:
 //
 //   system_proc: alias = *proc(c: *ctx) -> void           a system: a proc pointer
 //   schedule: struct
-//   schedule_init: proc(s: *schedule, arena: *memops_arena) -> void
-//   schedule_add: proc(s: *schedule, name: ^const char, run: system_proc) -> void
+//   schedule_make: proc(r: region level) -> *schedule in level
+//   schedule_add: proc(s: *schedule, r: region level, name: ^const char, run: system_proc) -> void
 //                                              at the end, enabled
-//   schedule_insert_before: proc(s: *schedule, before: ^const char, name: ^const char,
-//                                run: system_proc) -> b32
+//   schedule_insert_before: proc(s: *schedule, r: region level, before: ^const char,
+//                                name: ^const char, run: system_proc) -> b32
 //                                              just before `before`, enabled; 0, and
 //                                              nothing added, if it isn't there
 //   schedule_remove: proc(s: *schedule, name: ^const char) -> b32
@@ -28,12 +28,16 @@
 //                                              times schedule_run has called it since
 //                                              it was added; 0 if it isn't there
 //
-// Names are C strings: compare them with strcmp.
+// Names are C strings: compare them with dojo_cstr_equal. A C string and a
+// proc pointer are pointers without a region, so a struct holding them is a
+// carrier: safe code holds it only through a pointer into the region, made
+// by a proc marked unsafe { }, with memops_arena_push_zero(r, sizeof(T),
+// alignof(T)) cast to '*T in level', and never writes its fields. Keep what
+// changes, enabled and the count, beside that pointer.
 
 import "std/memops.rin"
 import "std/vec.rin"
 import "std/option.rin"
-import "std/cstd.rin"
 // The harness: it has main, and runs the procs below, so with it this file
 // is a whole program.
 import "harness.rin"

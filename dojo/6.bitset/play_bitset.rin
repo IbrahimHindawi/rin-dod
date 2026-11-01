@@ -19,12 +19,17 @@
 // which can't move, matches the movement query. It's a global, read each time
 // it's used, so a debugger can flip it mid-run too: stop on the first `query`
 // in main, set it to 0 in the watch window, and continue.
+//
+// Safe subset: a kind is named by its place in `kind_names`, as a component
+// is by its place in `names`, because a struct holding a C string is not a
+// value safe code may write to.
 
 import "std/print.rin"
 
 all_not_any: b32 = 1;
 
 names: [8]^const char = { "position", "velocity", "health", "sprite", "player", "turret", "frozen", "loot" };
+kind_names: [8]^const char = { "player", "drone", "turret", "rock", "ghost", "", "", "" };
 position: u32 = 0;
 velocity: u32 = 1;
 health: u32 = 2;
@@ -64,31 +69,30 @@ matches: proc(set: u64, all: u64, none: u64) -> b32 = {
 print_bits: proc(set: u64) -> void = {
     for (id: u32 = 8; id > 0; id -= 1) {
         if (has(set, id - 1)) {
-            printf("1");
+            printfmt("1");
         } else {
-            printf("0");
+            printfmt("0");
         }
     }
 }
 
 print_names: proc(set: u64) -> void = {
-    printf("{");
+    printfmt("{");
     first: b32 = 1;
     for (id: u32 = 0; id < 8; id += 1) {
         if (has(set, id)) {
             if (!first) {
-                printf(" ");
+                printfmt(" ");
             }
-            printf("%s", names[id]);
+            printfmt("{}", names[id]);
             first = 0;
         }
     }
-    printf("}");
+    printfmt("}");
 }
 
 // A kind of thing: its signature and, the slow way, a b32 per id.
 kind: struct = {
-    name: ^const char;
     signature: u64;
     parts: [8]b32;
 }
@@ -105,9 +109,8 @@ query: struct = {
     none: u64;
 }
 
-add_kind: proc(k: *kinds, name: ^const char, ids: []u32) -> u32 = {
+add_kind: proc(k: *kinds, ids: []u32) -> u32 = {
     at: u32 = k*.count;
-    k*.all[at].name = name;
     for (i: u64 = 0; i < ids.length; i += 1) {
         k*.all[at].signature = with(k*.all[at].signature, ids[i]);
         k*.all[at].parts[ids[i]] = 1;
@@ -116,12 +119,12 @@ add_kind: proc(k: *kinds, name: ^const char, ids: []u32) -> u32 = {
     return at;
 }
 
-draw_kind: proc(it: *kind) -> void = {
-    printf("    %-8s", it*.name);
+draw_kind: proc(it: *kind, name: ^const char) -> void = {
+    printfmt("    {:-8}", name);
     print_bits(it*.signature);
-    printf("  ");
+    printfmt("  ");
     print_names(it*.signature);
-    printf("\n");
+    printfmt("\n");
 }
 
 set_part: proc(k: *kinds, at: u32, id: u32, on: b32) -> void = {
@@ -131,22 +134,22 @@ set_part: proc(k: *kinds, at: u32, id: u32, on: b32) -> void = {
         k*.all[at].signature = without(k*.all[at].signature, id);
     }
     k*.all[at].parts[id] = on;
-    draw_kind(k*.all[at]&);
+    draw_kind(k*.all[at]&, kind_names[at]);
 }
 
 run_query: proc(k: *kinds, q: query) -> void = {
-    printf("    all     ");
+    printfmt("    all     ");
     print_bits(q.all);
-    printf("\n    none    ");
+    printfmt("\n    none    ");
     print_bits(q.none);
-    printf("\n");
+    printfmt("\n");
     for (i: u32 = 0; i < k*.count; i += 1) {
-        printf("    %-8s", k*.all[i].name);
+        printfmt("    {:-8}", kind_names[i]);
         print_bits(k*.all[i].signature);
         if (matches(k*.all[i].signature, q.all, q.none)) {
-            printf("  matches\n");
+            printfmt("  matches\n");
         } else {
-            printf("  no\n");
+            printfmt("  no\n");
         }
     }
 }
@@ -154,15 +157,15 @@ run_query: proc(k: *kinds, q: query) -> void = {
 // The fast way against the slow way, for every kind: the signature's bits
 // against its b32s, and the query's answer, if there is one, against one id
 // at a time.
-verify: proc(k: *kinds, q: *query) -> void = {
+verify: proc(k: *kinds, q: option<*query>) -> void = {
     for (i: u32 = 0; i < k*.count; i += 1) {
         it: *kind = k*.all[i]&;
         for (id: u32 = 0; id < 8; id += 1) {
             if (has(it*.signature, id) != it*.parts[id]) {
-                printf("    verify: %s's signature and its parts disagree about %s\n", it*.name, names[id]);
+                printfmt("    verify: {}'s signature and its parts disagree about {}\n", kind_names[i], names[id]);
             }
         }
-        if (q == null) {
+        if (!q) {
             continue;
         }
         missing: i32 = -1;
@@ -178,11 +181,11 @@ verify: proc(k: *kinds, q: *query) -> void = {
         slow: b32 = missing < 0 && barred < 0;
         if (matches(it*.signature, q*.all, q*.none) != slow) {
             if (missing >= 0) {
-                printf("    verify: %s matches, but it has no %s\n", it*.name, names[missing]);
+                printfmt("    verify: {} matches, but it has no {}\n", kind_names[i], names[missing]);
             } else if (barred >= 0) {
-                printf("    verify: %s matches, but it has %s\n", it*.name, names[barred]);
+                printfmt("    verify: {} matches, but it has {}\n", kind_names[i], names[barred]);
             } else {
-                printf("    verify: %s should match, and doesn't\n", it*.name);
+                printfmt("    verify: {} should match, and doesn't\n", kind_names[i]);
             }
         }
     }
@@ -199,38 +202,38 @@ main: proc() -> i32 = {
     rock_ids: [2]u32 = { position, sprite };
     ghost_ids: [4]u32 = { position, velocity, sprite, frozen };
 
-    printf("five kinds of thing, one bit per component, highest id first\n");
-    add_kind(k&, "player", player_ids[0..5]);
-    drone: u32 = add_kind(k&, "drone", drone_ids[0..4]);
-    add_kind(k&, "turret", turret_ids[0..4]);
-    add_kind(k&, "rock", rock_ids[0..2]);
-    ghost: u32 = add_kind(k&, "ghost", ghost_ids[0..4]);
+    printfmt("five kinds of thing, one bit per component, highest id first\n");
+    add_kind(k&, player_ids[0..5]);
+    drone: u32 = add_kind(k&, drone_ids[0..4]);
+    add_kind(k&, turret_ids[0..4]);
+    add_kind(k&, rock_ids[0..2]);
+    ghost: u32 = add_kind(k&, ghost_ids[0..4]);
     for (i: u32 = 0; i < k.count; i += 1) {
-        draw_kind(k.all[i]&);
+        draw_kind(k.all[i]&, kind_names[i]);
     }
     verify(k&, null);
 
-    printf("query move: all {position velocity}, none {frozen}\n");
+    printfmt("query move: all {position velocity}, none {frozen}\n");
     run_query(k&, move_query);
     verify(k&, move_query&);
 
-    printf("query draw: all {position sprite}, none {}\n");
+    printfmt("query draw: all {position sprite}, none {}\n", "{}");
     run_query(k&, draw_query);
     verify(k&, draw_query&);
 
-    printf("query think: all {velocity health}, none {player}\n");
+    printfmt("query think: all {velocity health}, none {player}\n");
     run_query(k&, think_query);
     verify(k&, think_query&);
 
-    printf("the drone is frozen: with(drone, frozen)\n");
+    printfmt("the drone is frozen: with(drone, frozen)\n");
     set_part(k&, drone, frozen, 1);
     verify(k&, null);
 
-    printf("the ghost thaws: without(ghost, frozen)\n");
+    printfmt("the ghost thaws: without(ghost, frozen)\n");
     set_part(k&, ghost, frozen, 0);
     verify(k&, null);
 
-    printf("query move again: the drone stops, the ghost starts\n");
+    printfmt("query move again: the drone stops, the ghost starts\n");
     run_query(k&, move_query);
     verify(k&, move_query&);
 
