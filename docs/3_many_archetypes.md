@@ -162,6 +162,21 @@ two of its columns (see [0_from_kayan.md](0_from_kayan.md)).
    from `component_info` sizes and `slice<u8>copy`. It needs no `unsafe`, since
    both ends of each copy are slices.
 5. Give `damage` a field that holds a pointer, `owner: option<*position in level>`,
-   and read what `column<damage>` says. Then take out that check, and the check of
-   `count` against the bytes, and work out what a stray write to `count` could now
-   reach.
+   and read what `column<damage>` says. Now see what `column<T>`'s checks are for.
+   The rest of this exercise misuses memory on purpose, so run it in a VM, not on
+   your machine.
+
+   Take out the plain-data check. The program prints what it always did, because
+   nothing reads `owner`. So read one: declare
+   `lookalike: struct = { owner: option<*position in level>; }`, make its
+   `component_of` return `component.position`, and read `owner` from the second
+   ship's row. rin accepts it, and the ship's position, `(0.0, 10.0)`, faults as an
+   address. That is the bad pointer plain data rules out.
+
+   Put that check back and take out the check of `count` against the bytes. Set a
+   ship table's `count` to 1000, call `table_set<position>` at row 16, and set
+   `count` back to 2. Under AddressSanitizer it stops at that write. Without the
+   sanitizers nothing reports it: row 16 is the first ship's velocity, and that ship
+   ends frame 1 at `(0.5, 0.5)` instead of `(1.0, 0.0)`. Keep writing to row 199
+   and you pass the health column and reach the bullet table's own fields at row 48,
+   its name pointer among them, and the program dies with no message.

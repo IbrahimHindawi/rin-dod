@@ -166,8 +166,16 @@ a field than as a component. A burning flag in `health`, say, instead of a
 
 ## Try
 
-1. Despawn `b` and keep using its handle. Which calls notice, and which would
-   not if `kayan_alive` did not check the generation?
+1. Right after the first three spawns, despawn `b`, spawn an `x`, which reuses
+   `b`'s index, and keep using `b`'s handle. Every call notices: `kayan_alive` says
+   no, `kayan_get` returns null, `kayan_set` refuses, `kayan_signature` is 0,
+   `kayan_get_bytes` is empty, and `kayan_add`, `kayan_remove` and `kayan_despawn`
+   return `dead`. `x` is untouched. Now make `kayan_alive` stop checking the
+   generation. None of them notices, and they all land on `x`: `kayan_set`
+   overwrites it, `kayan_add` and `kayan_remove` move it, and `kayan_despawn` kills
+   it. `kayan_verify` still says 0 problems, because the world is consistent. It is
+   only the wrong entity, a wrong answer and not a memory error. Further on, the
+   lesson's own print of dead `a` stops on a bounds check, since its row is gone.
 2. Remove the line in `kayan_table_remove_row` that updates the moved entity's
    slot. The program stops at the first `kayan_get` through a stale row, with
    `index 2 out of bounds (length 2)`, in Debug and in Release. Print

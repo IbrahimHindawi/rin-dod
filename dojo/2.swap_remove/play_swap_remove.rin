@@ -94,7 +94,7 @@ draw: proc(s: *sparse_set) -> void = {
     printfmt("  (id -> row)\n");
 }
 
-read: proc(s: *sparse_set, id: u32) -> void = {
+read_value: proc(s: *sparse_set, id: u32) -> void = {
     value: u64 = sparse_set_get(s, id);
     if (value == 0) {
         printfmt("nothing");
@@ -116,29 +116,29 @@ main: proc() -> i32 = {
     sparse_set_remove(s&, 7);
     draw(s&);
     printfmt("    get 5: ");
-    read(s&, 5);
+    read_value(s&, 5);
     printfmt("\n    get 7: ");
-    read(s&, 7);
+    read_value(s&, 7);
     printfmt("\n");
 
     printfmt("insert 9: a new row at the end\n");
     sparse_set_insert(s&, 9, 90);
     draw(s&);
     printfmt("    get 5: ");
-    read(s&, 5);
+    read_value(s&, 5);
     printfmt("\n    get 9: ");
-    read(s&, 9);
+    read_value(s&, 9);
     printfmt("\n");
 
     printfmt("remove 3, in row 0: the last row, 9's, moves into it\n");
     sparse_set_remove(s&, 3);
     draw(s&);
     printfmt("    get 9: ");
-    read(s&, 9);
+    read_value(s&, 9);
     printfmt("  get 5: ");
-    read(s&, 5);
+    read_value(s&, 5);
     printfmt("  get 1: ");
-    read(s&, 1);
+    read_value(s&, 1);
     printfmt("\n");
     return 0;
 }

@@ -145,7 +145,9 @@ dojo's READMEs is in its program:
     python tools/check.py kayan --sanitize
     python tools/check_snippets.py
 
-The checker also works on Linux, with `CC=gcc` or clang and a rin built there.
+rin itself builds on Windows: its arena runtime, in `extern/haikal`, calls
+`VirtualAlloc`. The generated C is portable, and the whole course has passed on
+Linux, gcc and clang, with a test build of rin over a stand-in for those calls.
 
 ## Reading it in a browser
 

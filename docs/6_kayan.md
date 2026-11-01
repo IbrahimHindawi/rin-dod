@@ -187,7 +187,8 @@ counts three.
    -fopt-info-vec`, and find the loop it now versions for aliasing. It needs no
    `unsafe` now: without `noalias`, the checker can vouch for all of it.
 6. Hold a column across a `kayan_spawn` that grows its table, and read the
-   message. Then let it through with `RIN_UNSAFE=1 python tools/check.py kayan
-   --sanitize`, which turns the rules off. AddressSanitizer says nothing, because
-   the old memory is still valid memory in the region. That is why this is a rule
-   in the checker: no sanitizer would have found it.
+   message. Then translate it with `RIN_UNSAFE=1`, which turns the rules off, and
+   build it with AddressSanitizer, in a VM, since it misuses memory. AddressSanitizer
+   says nothing, because the old memory is still valid memory in the region: a write
+   through the held column lands there, and the table never sees it. That is why this
+   is a rule in the checker: no sanitizer would have found it.

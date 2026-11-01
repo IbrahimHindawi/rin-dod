@@ -82,8 +82,8 @@ its systems never read.
 1. Add a `bool`-like `b32` field to `weapon` and teach `print_builtin` to print
    it as `yes` or `no`. It needs a reader beside `bytes_as_u32`, through a local
    in the same way.
-2. Give `position` a `@ "readonly"` tag and make `set_f32_by_name` refuse
-   fields that carry it.
+2. Give `position`'s `heading` field a `@ "readonly"` tag, the way `health` tags
+   `regen_timer`, and make `set_f32_by_name` refuse fields that carry it.
 3. Write `set_by_name` for `u32` and `i32` as well, picking the write from
    `f*.type`. Each new write is another small unsafe proc, like `bytes_set_f32`.
 4. Print a whole table as rows and columns: one line per entity, one column

@@ -135,7 +135,7 @@ draw: proc(m: *slot_map) -> void = {
     printfmt("\n");
 }
 
-read: proc(m: *slot_map, name: ^const char, h: handle) -> void = {
+read_value: proc(m: *slot_map, name: ^const char, h: handle) -> void = {
     value: option<u32> = slot_map_get(m, h);
     if (value.has_value) {
         printfmt("{} {}:{}: {}", name, h.index, h.generation, textures[value.value]);
@@ -158,9 +158,9 @@ main: proc() -> i32 = {
     slot_map_remove(m&, stone);
     draw(m&);
     printfmt("    ");
-    read(m&, "water", water);
+    read_value(m&, "water", water);
     printfmt("\n    ");
-    read(m&, "stone", stone);
+    read_value(m&, "stone", stone);
     printfmt("\n");
 
     printfmt("insert lava: index 1 again, generation 2, in a new row at the end\n");
@@ -168,20 +168,20 @@ main: proc() -> i32 = {
     printfmt("    lava {}:{}\n", lava.index, lava.generation);
     draw(m&);
     printfmt("    ");
-    read(m&, "stone", stone);
+    read_value(m&, "stone", stone);
     printfmt("\n    ");
-    read(m&, "lava", lava);
+    read_value(m&, "lava", lava);
     printfmt("\n");
 
     printfmt("remove grass: lava, in the last row, moves into row 0\n");
     slot_map_remove(m&, grass);
     draw(m&);
     printfmt("    ");
-    read(m&, "lava", lava);
+    read_value(m&, "lava", lava);
     printfmt("  ");
-    read(m&, "water", water);
+    read_value(m&, "water", water);
     printfmt("  ");
-    read(m&, "grass", grass);
+    read_value(m&, "grass", grass);
     printfmt("\n");
     return 0;
 }
