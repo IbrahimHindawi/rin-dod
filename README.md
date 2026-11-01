@@ -147,7 +147,9 @@ dojo's READMEs is in its program:
 
 rin itself builds on Windows: its arena runtime, in `extern/haikal`, calls
 `VirtualAlloc`. The generated C is portable, and the whole course has passed on
-Linux, gcc and clang, with a test build of rin over a stand-in for those calls.
+Linux, gcc and clang, with a test build of rin over a stand-in for those calls,
+and `-Wno-sign-compare` added to `tools/check.py`'s flags: an enum compared with
+its member warns there, harmlessly.
 
 ## Reading it in a browser
 

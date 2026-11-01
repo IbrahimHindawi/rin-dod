@@ -391,7 +391,7 @@ clang -std=c11 -g -I &lt;rin&gt; -I &lt;rin&gt;/std archetypes.c -o archetypes</
 <pre class="snip"><code>python tools/check.py ecs
 python tools/check.py kayan --sanitize
 python tools/check_snippets.py</code></pre>
-<p>rin itself builds on Windows: its arena runtime, in <code>extern/haikal</code>, calls <code>VirtualAlloc</code>. The generated C is portable, and the whole course has passed on Linux, gcc and clang, with a test build of rin over a stand-in for those calls.</p>
+<p>rin itself builds on Windows: its arena runtime, in <code>extern/haikal</code>, calls <code>VirtualAlloc</code>. The generated C is portable, and the whole course has passed on Linux, gcc and clang, with a test build of rin over a stand-in for those calls, and <code>-Wno-sign-compare</code> added to <code>tools/check.py</code>'s flags: an enum compared with its member warns there, harmlessly.</p>
 <h3>Reading it in a browser</h3>
 <p>Open <code>website/index.html</code>. It has every chapter's and lesson's guide, its source with line numbers, and the output it must print, with an index on the left. It is generated from the files in this repository, so after changing a program or a guide run <code>python tools/site.py</code> to bring it up to date.</p>
 <h3>Layout</h3>
